@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review inbox</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F6F7F9}
+a{color:#3451D1}a:hover{color:#22389E}
+</style>
+</helmet>
+<div style="font-family: Inter, system-ui, sans-serif; color: #16181D; background: #F6F7F9; min-height: 100vh; display: flex; flex-direction: column">
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 14px 24px; background: #FFFFFF; border-bottom: 1px solid #E3E6EB">
+    <a href="Home.dc.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #16181D">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3451D1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path><path d="M8 11l2 2 4-4"></path></svg>
+      <span style="font-weight: 700; font-size: 16px">Reviewer</span>
+    </a>
+    <label for="search" style="position: absolute; width: 1px; height: 1px; overflow: hidden">Search reviews</label>
+    <input id="search" placeholder="Search branches, prompts, files" style="flex: 1 1 280px; max-width: 480px; height: 38px; padding: 0 12px; border: 1px solid #D0D5DD; border-radius: 8px; font-family: inherit; font-size: 14px">
+    <span style="flex: 1"></span>
+    <span style="font-size: 13px; color: #5B6270">Watching 3 projects</span>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px; padding: 20px 24px">
+    <nav aria-label="Projects" style="flex: 1 1 240px; max-width: 280px; display: flex; flex-direction: column; gap: 6px">
+      <h2 style="margin: 0 0 6px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #5B6270">Projects</h2>
+      <a href="Home.dc.html" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; background: #FFFFFF; border: 1px solid #E3E6EB; text-decoration: none; color: #16181D; font-size: 14px; font-weight: 600">All projects<span style="font-size: 12px; padding: 1px 8px; border-radius: 999px; background: #3451D1; color: #FFFFFF">3</span></a>
+      <sc-for list="{{projects}}" as="p" hint-placeholder-count="3">
+        <a href="Home.dc.html" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; text-decoration: none; color: #16181D; font-size: 14px">
+          <span style="display: flex; flex-direction: column; gap: 2px"><span style="font-weight: 500">{{p.name}}</span><span style="font-size: 12px; color: #5B6270">{{p.sources}}</span></span>
+          <span style="{{p.countStyle}}">{{p.count}}</span>
+        </a>
+      </sc-for>
+      <a href="Connect.dc.html" style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 14px; font-weight: 500; text-decoration: none">+ Add project</a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+      <section style="display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap">
+          <h1 style="margin: 0; font-size: 22px; letter-spacing: -0.01em">Waiting for you</h1>
+          <span style="font-size: 13px; color: #5B6270">Newest first</span>
+        </div>
+        <sc-for list="{{waiting}}" as="w" hint-placeholder-count="3">
+          <article style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 12px; padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center">
+            <div style="flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+                <span style="font-size: 12px; font-weight: 600; color: #5B6270">{{w.project}}</span>
+                <span style="{{w.tagStyle}}">{{w.tag}}</span>
+              </div>
+              <h2 style="margin: 0; font-size: 17px; line-height: 1.35">{{w.title}}</h2>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: #5B6270">
+                <span style="font-family: 'JetBrains Mono', monospace">{{w.branch}}</span>
+                <span>{{w.agent}}</span>
+                <span>{{w.size}}</span>
+                <span>{{w.when}}</span>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; min-width: 150px">
+              <span style="font-size: 12px; color: #5B6270">{{w.steps}}</span>
+              <span style="font-size: 13px; font-weight: 600; color: #93370D">{{w.flags}}</span>
+            </div>
+            <a href="StartReview.dc.html" style="display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 8px; background: #3451D1; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">{{w.cta}}</a>
+          </article>
+        </sc-for>
+      </section>
+
+      <section style="display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 15px">Agent still working</h2>
+        <div style="background: #FFFFFF; border: 1px dashed #D0D5DD; border-radius: 12px; padding: 14px 18px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 14px">
+          <span style="width: 8px; height: 8px; border-radius: 999px; background: #3451D1"></span>
+          <span style="font-weight: 600">Migrate invoices to the new tax table</span>
+          <span style="color: #5B6270">worklog-web · Claude Code · running 12 min</span>
+          <span style="flex: 1"></span>
+          <span style="font-size: 13px; color: #5B6270">You'll get a notification when it's done</span>
+        </div>
+      </section>
+
+      <section style="display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 15px">Reviewed this week</h2>
+        <div style="background: #FFFFFF; border: 1px solid #E3E6EB; border-radius: 12px; overflow: hidden">
+          <sc-for list="{{done}}" as="d" hint-placeholder-count="3">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 12px 18px; border-bottom: 1px solid #EEF0F3; font-size: 14px">
+              <span style="font-weight: 500; flex: 1 1 260px">{{d.title}}</span>
+              <span style="color: #5B6270; font-size: 13px">{{d.project}}</span>
+              <span style="{{d.style}}">{{d.result}}</span>
+              <span style="color: #5B6270; font-size: 13px; width: 80px; text-align: right">{{d.when}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pill = 'font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; ';
+    return {
+      projects: [
+        { name: 'acme-api', sources: 'Claude Code, Copilot', count: '2', countStyle: pill + 'background: #EEF2FF; color: #3451D1' },
+        { name: 'worklog-web', sources: 'Claude Code', count: '1', countStyle: pill + 'background: #EEF2FF; color: #3451D1' },
+        { name: 'demo-time', sources: 'Copilot', count: '0', countStyle: pill + 'background: #F2F4F7; color: #5B6270' }
+      ],
+      waiting: [
+        { project: 'acme-api', tag: 'New', tagStyle: pill + 'background: #EEF2FF; color: #3451D1', title: 'Add per-client rate limiting to the public API', branch: 'feat/rate-limit', agent: 'Claude Code', size: '6 files · +142 −31', when: '4 min ago', steps: '6 steps · about 12 min', flags: '1 change outside the task', cta: 'Start review' },
+        { project: 'acme-api', tag: 'Second look', tagStyle: pill + 'background: #ECFDF3; color: #067647', title: 'Paginate the /orders endpoint', branch: 'copilot/orders-pagination', agent: 'Copilot · PR #212', size: '3 files · +40 −12', when: '1 h ago', steps: 'Only 2 steps changed since your review', flags: 'Your 3 comments addressed', cta: 'Review changes' },
+        { project: 'worklog-web', tag: 'New', tagStyle: pill + 'background: #EEF2FF; color: #3451D1', title: 'Export monthly hours to CSV', branch: 'claude/csv-export', agent: 'Claude Code', size: '4 files · +96 −8', when: 'Yesterday', steps: '4 steps · about 8 min', flags: '1 new dependency', cta: 'Start review' }
+      ],
+      done: [
+        { title: 'Fix timezone bug in daily totals', project: 'worklog-web', result: 'Merged', style: pill + 'background: #ECFDF3; color: #067647', when: 'Mon' },
+        { title: 'Add slide transitions schema', project: 'demo-time', result: 'Sent back', style: pill + 'background: #FFFAEB; color: #93370D', when: 'Mon' },
+        { title: 'Upgrade to Express 5', project: 'acme-api', result: 'Discarded', style: pill + 'background: #F2F4F7; color: #5B6270', when: 'Sun' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

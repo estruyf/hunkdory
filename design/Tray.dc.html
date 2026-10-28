@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Menu bar after closing</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3451D1}a:hover{color:#22389E}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; position: relative; overflow: hidden; font-family: Inter, system-ui, sans-serif; color: #16181D; background: #3B4252">
+  <div style="height: 30px; background: rgba(20,22,28,0.55); display: flex; justify-content: flex-end; align-items: center; gap: 18px; padding: 0 18px; color: #FFFFFF; font-size: 13px">
+    <span style="display: flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.22)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path><path d="M8 11l2 2 4-4"></path></svg>
+      <span style="font-weight: 600">1</span>
+    </span>
+    <span>Wed 14:32</span>
+  </div>
+
+  <section aria-label="Reviewer menu" style="position: absolute; top: 40px; right: 70px; width: 380px; background: #FFFFFF; border-radius: 14px; box-shadow: 0 16px 40px rgba(0,0,0,0.28); overflow: hidden">
+    <div style="padding: 14px 16px; border-bottom: 1px solid #EEF0F3; display: flex; justify-content: space-between; align-items: center">
+      <span style="font-weight: 700; font-size: 15px">Reviewer</span>
+      <span style="font-size: 12.5px; color: #5B6270">Watching 3 projects</span>
+    </div>
+    <div style="padding: 8px">
+      <a href="StartReview.dc.html" style="display: flex; flex-direction: column; gap: 3px; padding: 10px 10px; border-radius: 8px; background: #F5F7FF; text-decoration: none; color: #16181D">
+        <span style="font-size: 12px; font-weight: 600; color: #3451D1">Ready for a second look</span>
+        <span style="font-size: 14px; font-weight: 600">Add per-client rate limiting</span>
+        <span style="font-size: 12.5px; color: #5B6270">acme-api · 2 comments addressed · step 6 dropped</span>
+      </a>
+      <a href="StartReview.dc.html" style="display: flex; flex-direction: column; gap: 3px; padding: 10px 10px; border-radius: 8px; text-decoration: none; color: #16181D">
+        <span style="font-size: 12px; font-weight: 600; color: #5B6270">Waiting</span>
+        <span style="font-size: 14px; font-weight: 600">Export monthly hours to CSV</span>
+        <span style="font-size: 12.5px; color: #5B6270">worklog-web · 4 steps</span>
+      </a>
+      <div style="display: flex; flex-direction: column; gap: 3px; padding: 10px 10px">
+        <span style="font-size: 12px; font-weight: 600; color: #5B6270">Agent working</span>
+        <span style="font-size: 14px; font-weight: 600">Migrate invoices to the new tax table</span>
+        <span style="font-size: 12.5px; color: #5B6270">worklog-web · running 26 min</span>
+      </div>
+    </div>
+    <div style="padding: 8px 16px 12px; border-top: 1px solid #EEF0F3; display: flex; justify-content: space-between; align-items: center">
+      <a href="Home.dc.html" style="font-size: 14px; font-weight: 600; text-decoration: none">Open Reviewer</a>
+      <span style="display: flex; gap: 16px; font-size: 13.5px"><a href="Connect.dc.html" style="color: #5B6270; text-decoration: none">Settings</a><a href="Welcome.dc.html" style="color: #5B6270; text-decoration: none">Quit</a></span>
+    </div>
+  </section>
+
+  <div role="status" style="position: absolute; top: 40px; left: 960px; display: none"></div>
+
+  <div style="position: absolute; left: 80px; bottom: 80px; max-width: 560px; color: #FFFFFF; display: flex; flex-direction: column; gap: 10px">
+    <span style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.8">After you close the window</span>
+    <span style="font-size: 30px; font-weight: 700; line-height: 1.25">Reviewer keeps watching from the menu bar.</span>
+    <span style="font-size: 16px; line-height: 1.55; opacity: 0.85">The badge counts changes waiting for you. A notification lands when an agent finishes. Quit stops watching until the next launch.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
