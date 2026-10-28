@@ -13,8 +13,9 @@ import { integrationBranches, matchesPattern, matchSessions, withCheckoutFallbac
 import { attention, buildSteps, estimateMinutes } from './steps.ts';
 import type { Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
+import type { Summaries, Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
-import type { BranchChoice, BranchInfo, FoundFolder, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BranchChoice, BranchInfo, CodeSearchResult, FoundFolder, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -64,13 +65,16 @@ export class Projects {
   // Two workers: opening a branch never waits behind an inbox refresh.
   private wtv = new WtvRunner();
   private wtvNow = new WtvRunner();
-  private cache = new Map<string, { key: string; data: ReviewData }>();
+  // `full` is false for data made for the inbox, without the rows of each hunk.
+  private cache = new Map<string, { key: string; data: ReviewData; full: boolean }>();
   private store: Store;
   private generated: GeneratedWalkthroughs;
+  private summaries: Summaries;
 
-  constructor(store: Store, generated: GeneratedWalkthroughs) {
+  constructor(store: Store, generated: GeneratedWalkthroughs, summaries: Summaries) {
     this.store = store;
     this.generated = generated;
+    this.summaries = summaries;
   }
 
   async checkFolder(path: string): Promise<RepoCheck> {
@@ -400,7 +404,7 @@ export class Projects {
 
   async review(projectId: string, branch: string, refresh = false): Promise<ReviewData> {
     const { project, d } = await this.find(projectId, branch);
-    return this.reviewFor(project, d, refresh, this.wtvNow);
+    return this.reviewFor(project, d, { refresh, runner: this.wtvNow });
   }
 
   /** Where a branch's changes are: its checkout (with uncommitted work) or, when it has none, its ref in the repo. */
@@ -457,6 +461,38 @@ export class Projects {
     return { lines: all.slice(Math.max(0, from - 1), Math.max(0, to)), total: all.length };
   }
 
+  /**
+   * Every place some text appears in the branch as Reviewer shows it: the whole repo, not only the diff.
+   * Plain text, not a pattern. All lower case matches any case.
+   */
+  async searchCode(projectId: string, branch: string, query: string): Promise<CodeSearchResult> {
+    const q = query.trim();
+    if (q.length < 2) return { matches: [], truncated: false };
+    const { project, d } = await this.find(projectId, branch);
+    const at = await this.locate(project, d);
+    const args = ['grep', '-n', '-z', '-I', '--fixed-strings', '--max-count=20', ...(q === q.toLowerCase() ? ['-i'] : [])];
+    // A checkout includes uncommitted and new files; otherwise the branch's commit.
+    if (at.inTree) args.push('--untracked', '-e', q, '--');
+    else args.push('-e', q, at.headRef, '--');
+    args.push('.', ':(exclude).review');
+    // Exit code 1 means no matches.
+    const out = (await g.tryGit(args, at.cwd)) ?? '';
+    const prefix = at.inTree ? '' : `${at.headRef}:`;
+    const matches: CodeSearchResult['matches'] = [];
+    let truncated = false;
+    for (const row of out.split('\n')) {
+      const [file, line, ...rest] = row.split('\0');
+      if (!file || !line) continue;
+      if (matches.length >= 300) {
+        truncated = true;
+        break;
+      }
+      const text = rest.join('\0');
+      matches.push({ path: file.startsWith(prefix) ? file.slice(prefix.length) : file, line: Number(line), text: text.length > 400 ? `${text.slice(0, 400)}…` : text });
+    }
+    return { matches, truncated };
+  }
+
   /** The open PR for a branch, when GitHub is linked: for posting a review or sharing a walkthrough. */
   async pullRequest(projectId: string, branch: string): Promise<{ project: Project; d: Discovered; pr: PullRequest; repo: string }> {
     const { project, d } = await this.find(projectId, branch);
@@ -473,15 +509,27 @@ export class Projects {
     return out.result;
   }
 
-  private async reviewFor(project: Project, d: Discovered, refresh = false, runner = this.wtv): Promise<ReviewData> {
-    const { root, baseSha, inTree, cwd } = await this.locate(project, d);
-    const wt = await this.readWalkthrough(d, root, baseSha);
-    const cacheId = `${project.id}::${d.branch.name}`;
-    const key = await this.fingerprint(d, baseSha, wt.text);
-    const hit = this.cache.get(cacheId);
-    if (!refresh && hit?.key === key) return hit.data;
+  /** Where the branch's changes are, its walkthrough, and a fingerprint of both. */
+  private async prepare(project: Project, d: Discovered) {
+    const at = await this.locate(project, d);
+    const wt = await this.readWalkthrough(d, at.root, at.baseSha);
+    return { at, wt, key: await this.fingerprint(d, at.baseSha, wt.text) };
+  }
 
-    const out = await runner.run({ cwd, baseSha, head: inTree ? null : d.branch.headRef, walkthrough: wt.value });
+  /** `lines: false` leaves out the rows of each hunk, which is most of the work and only the review screen shows. */
+  private async reviewFor(
+    project: Project,
+    d: Discovered,
+    opts: { refresh?: boolean; runner?: WtvRunner; lines?: boolean; prepared?: Awaited<ReturnType<Projects['prepare']>> } = {}
+  ): Promise<ReviewData> {
+    const { refresh = false, runner = this.wtv, lines = true } = opts;
+    const { at, wt, key } = opts.prepared ?? (await this.prepare(project, d));
+    const { root, baseSha, inTree, cwd } = at;
+    const cacheId = `${project.id}::${d.branch.name}`;
+    const hit = this.cache.get(cacheId);
+    if (!refresh && hit?.key === key && (hit.full || !lines)) return hit.data;
+
+    const out = await runner.run({ cwd, baseSha, head: inTree ? null : d.branch.headRef, walkthrough: wt.value, lines });
     const r = out.result;
     const source: WalkthroughSource = out.source === 'skeleton' ? 'skeleton' : wt.source;
     const steps = buildSteps(r, source);
@@ -505,8 +553,8 @@ export class Projects {
         risks: h.risks,
         added: h.added.length,
         removed: h.removed.length,
-        rangeLabel: out.ranges[h.id],
-        lines: out.lines[h.id],
+        rangeLabel: out.ranges[h.id] ?? '',
+        lines: out.lines[h.id] ?? [],
         note: notes.get(h.id)?.join(' ') ?? null,
       };
     }
@@ -558,13 +606,14 @@ export class Projects {
       ok: r.ok,
       minutes: estimateMinutes(steps, r.hunks),
     };
-    this.cache.set(cacheId, { key, data });
+    this.cache.set(cacheId, { key, data, full: lines });
     return data;
   }
 
   async inbox(refresh = false): Promise<{ items: InboxItem[]; scans: ProjectScan[] }> {
     const items: InboxItem[] = [];
     const scans: ProjectScan[] = [];
+    const listed = new Set<string>();
     for (const project of this.store.projects()) {
       let found: Discovered[];
       try {
@@ -605,14 +654,23 @@ export class Projects {
           review: state ? { status: state.status, reviewedSteps: Object.keys(state.reviewed).length } : null,
         };
         try {
-          const data = await this.reviewFor(project, d, refresh);
-          const sum = summarize(data);
-          items.push({ ...base, ...sum, title: base.title === d.branch.name ? sum.title! : base.title, agent: data.author && !d.match && !pr ? `by ${data.author}` : base.agent });
+          const id = `${project.id}::${d.branch.name}`;
+          listed.add(id);
+          const prepared = await this.prepare(project, d);
+          // The title can come from the PR or the session, which change without a commit.
+          const key = `${prepared.key}:${createHash('sha1').update(JSON.stringify([pr?.title, d.match?.origin.title, d.match?.origin.firstPrompt])).digest('hex')}`;
+          let sum = refresh ? null : this.summaries.get(id, key);
+          if (!sum) {
+            sum = summarize(await this.reviewFor(project, d, { refresh, lines: false, prepared }));
+            this.summaries.set(id, key, sum);
+          }
+          items.push({ ...base, ...sum, title: base.title === d.branch.name ? sum.title : base.title, agent: sum.author && !d.match && !pr ? `by ${sum.author}` : base.agent });
         } catch (e) {
           items.push({ ...base, error: (e as Error).message });
         }
       }
     }
+    this.summaries.keepOnly(listed);
     items.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     return { items, scans };
   }
@@ -623,7 +681,7 @@ async function firstRef(root: string, refs: string[]): Promise<string | null> {
   return null;
 }
 
-function summarize(data: ReviewData): Partial<InboxItem> {
+function summarize(data: ReviewData): Summary {
   const outside = data.steps.filter((s) => s.outsideTask).length;
   const deps = new Set(Object.values(data.hunks).filter((h) => h.risks.some((r) => r.code === 'deps')).map((h) => h.path)).size;
   const high = data.steps.filter((s) => s.risk === 'high').length;
@@ -640,5 +698,6 @@ function summarize(data: ReviewData): Partial<InboxItem> {
     minutes: data.minutes,
     flags,
     walkthrough: data.walkthrough,
+    author: data.author,
   };
 }

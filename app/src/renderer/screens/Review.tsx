@@ -5,16 +5,15 @@ import type { ReviewData, ReviewState, Step } from '../../shared/types.ts';
 import { Markdown } from '../components/markdown.tsx';
 import { Walkthrough } from './Walkthrough.tsx';
 
-export function Review({ go, projectId, branch, initialStep, preloaded }: { go: Go; projectId: string; branch: string; initialStep?: string; preloaded?: { data: ReviewData; state: ReviewState } }) {
-  if (preloaded) return <Walkthrough go={go} data={preloaded.data} initialState={preloaded.state} initialStep={initialStep} />;
-  return <LoadReview go={go} projectId={projectId} branch={branch} initialStep={initialStep} />;
-}
+type At = { stepKey?: string; decision?: string };
 
-function LoadReview({ go, projectId, branch, initialStep }: { go: Go; projectId: string; branch: string; initialStep?: string }) {
-  const loaded = useAsync(() => window.api.loadReview(projectId, branch), [projectId, branch]);
+export function Review({ go, projectId, branch, stepKey, decision, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } } & At) {
+  // Read once per branch. Moving between steps changes the route, not the review.
+  const loaded = useAsync(() => (preloaded ? Promise.resolve(preloaded) : window.api.loadReview(projectId, branch)), [projectId, branch]);
+  const value = loaded.value ?? preloaded;
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
-  if (!loaded.value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
-  return <Walkthrough go={go} data={loaded.value.data} initialState={loaded.value.state} initialStep={initialStep} />;
+  if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
+  return <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} />;
 }
 
 export function ReviewError({ go, message }: { go: Go; message: string }) {

@@ -16,6 +16,8 @@ export interface WtvJob {
   head: string | null;
   /** Parsed walkthrough, or null to use wtv's skeleton. */
   walkthrough: unknown | null;
+  /** false skips the rows of every hunk: the inbox only needs counts, and reading each file costs a git call. */
+  lines?: boolean;
 }
 
 export interface WtvOutput {
@@ -30,6 +32,7 @@ function run(job: WtvJob): WtvOutput {
   const source = job.walkthrough ? 'agent' : 'skeleton';
   const wt = normalizeWalkthrough(job.walkthrough ?? skeleton({ cwd, base: baseSha, head }));
   const { byId: _byId, ...result } = verify({ cwd, walkthrough: wt, base: baseSha, head });
+  if (job.lines === false) return { result, source, lines: {}, ranges: {} };
 
   const show = (rev: string, path: string) => {
     try {

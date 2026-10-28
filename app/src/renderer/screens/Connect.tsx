@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Go, Route } from '../App.tsx';
-import { Later, cleanError, plural } from '../components/ui.tsx';
+import { Brand, Crumbs, Later, cleanError, plural } from '../components/ui.tsx';
 import type { Project, RepoCheck, Watch } from '../../shared/types.ts';
 
 /** Connect a new project, or change one you connected before (`projectId`). */
@@ -99,12 +99,14 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
 
   return (
     <div className="page">
-      <header className="topbar split">
-        <button type="button" className="link" style={{ fontSize: 14, fontWeight: 500 }} onClick={() => go(back)}>
-          ← Back
-        </button>
-        <span style={{ fontWeight: 600, fontSize: 15 }}>{existing ? `${existing.name} settings` : 'Connect a project'}</span>
-        <span style={{ width: 60 }} />
+      <header className="topbar">
+        <Brand onClick={() => go(back)} />
+        <Crumbs
+          items={[
+            { label: back.name === 'home' ? 'Inbox' : 'Welcome', onClick: () => go(back) },
+            ...(existing ? [{ label: existing.name, onClick: () => go({ name: 'home', projectId: existing.id }) }, { label: 'Settings' }] : [{ label: 'Connect a project' }]),
+          ]}
+        />
       </header>
 
       <div style={{ width: '100%', maxWidth: 860, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>

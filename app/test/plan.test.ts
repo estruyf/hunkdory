@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDecisions, buildPlan, defaultDrops, planProgress, skimGroups } from '../src/shared/plan.ts';
+import { buildDecisions, buildPlan, defaultDrops, planProgress, resumePoint, skimGroups } from '../src/shared/plan.ts';
 import { prDescription } from '../src/main/actions.ts';
 import type { AttentionFlag, Step } from '../src/shared/types.ts';
 
@@ -62,4 +62,21 @@ test('the PR description has the goal and your comments', () => {
   const body = prDescription({ steps: [step(0)], intent: 'Add CSV export', prompt: null }, { comments: [{ id: 'c', stepKey: 'k0', hunkId: 'h0', line: 3, path: 'a.ts', body: 'Rename this', createdAt: '' }] }, '');
   assert.match(body, /^Add CSV export/);
   assert.match(body, /Step 1: Step 0\*\* \(`a.ts:3`\): Rename this/);
+});
+
+test('continuing a review starts at the first open decision, then the first unreviewed step', () => {
+  const steps = [step(0, { risk: 'high' }), step(1, { risk: 'high' }), step(2)];
+  const attention: AttentionFlag[] = [
+    { severity: 'high', title: 'Dependency change', detail: 'package.json in step 2.', stepKey: 'k1' },
+    { severity: 'medium', title: 'Error swallowed', detail: 'a.ts in step 3.', stepKey: 'k2' },
+  ];
+  const plan = buildPlan({ steps, attention, pr: null, prompt: 'Do it' }, { order: 'story' });
+  const [dep, swallowed] = plan.decisions;
+  // Step 1 is reviewed and the first decision was put off: back to that decision, not on to step 2.
+  const r1 = resumePoint(plan, { reviewed: { k0: ['h0'] }, settled: { [swallowed.id]: 'fine' } });
+  assert.deepEqual(r1 && { d: r1.decision?.id, s: r1.stepKey }, { d: dep.id, s: 'k1' });
+  // Every decision made: the first step not reviewed yet, even if a later one is.
+  const r2 = resumePoint(plan, { reviewed: { k0: ['h0'], k2: ['h2'] }, settled: { [dep.id]: 'fine', [swallowed.id]: 'fix' } });
+  assert.deepEqual(r2 && { d: r2.decision, s: r2.stepKey }, { d: null, s: 'k1' });
+  assert.equal(resumePoint(plan, { reviewed: { k0: ['h0'], k1: ['h1'], k2: ['h2'] }, settled: { [dep.id]: 'fine', [swallowed.id]: 'fine' } }), null);
 });

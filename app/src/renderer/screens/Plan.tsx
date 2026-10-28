@@ -1,11 +1,11 @@
 // The review plan: decide, look carefully, skim. Sorts a big change so you know where to start.
 import { useEffect, useMemo, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, LoadingPage, RiskPill, cleanError, plural, sizeText, useAsync } from '../components/ui.tsx';
+import { Brand, Crumbs, LoadingPage, RiskPill, cleanError, plural, reviewCrumbs, sizeText, useAsync } from '../components/ui.tsx';
 import { StackBar } from '../components/github.tsx';
 import { ReviewError } from './Review.tsx';
 import { isReviewed } from '../../shared/order.ts';
-import { buildPlan, planProgress, type PlanDecision } from '../../shared/plan.ts';
+import { buildPlan, decisionLabels, planProgress, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
 import type { ReviewData, ReviewState, Step } from '../../shared/types.ts';
 
 export function PlanScreen({ go, projectId, branch, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }) {
@@ -48,14 +48,16 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
   const open = (step: Step | undefined) => step && go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: step.key, preloaded: { data, state } });
   const firstOpen = (steps: Step[]) => steps.find((s) => !isReviewed(s, state.reviewed)) ?? steps[0];
   const next = plan.sequence.find((s) => !isReviewed(s, state.reviewed));
-  const started = Object.keys(state.reviewed).length > 0;
+  const started = Object.keys(state.reviewed).length > 0 || progress.decided > 0;
   const allDone = !next && progress.decided === progress.decisions;
+  // Continue where nothing is done yet, decisions first, so nothing you put off gets skipped.
+  const resume = resumePoint(plan, state);
+  const goResume = () =>
+    resume && go({ name: 'review', projectId: data.projectId, branch: data.branch, decision: resume.decision?.id, stepKey: resume.stepKey, preloaded: { data, state } });
 
   const settle = async (d: PlanDecision, value: 'fine' | 'fix' | null) => {
-    const step = d.stepKeys[0];
-    const comment = value === 'fix' && d.kind === 'flag' && step ? { stepKey: step, body: `Needs a fix: ${d.title}. ${d.detail}` } : undefined;
     try {
-      setState(await window.api.updateReview(data.projectId, data.branch, { type: 'settle', id: d.id, value, comment }));
+      setState(await window.api.updateReview(data.projectId, data.branch, { type: 'settle', id: d.id, value, comment: settleComment(d, value, d.stepKeys[0]) }));
       setError(null);
     } catch (e) {
       setError(cleanError(e));
@@ -69,16 +71,16 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
       <header className="topbar" style={{ gap: '12px 20px', padding: '12px 24px' }}>
         <Brand onClick={() => go({ name: 'home' })} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '1 1 320px', minWidth: 0 }}>
-          <span style={{ fontWeight: 600, fontSize: 15, overflowWrap: 'anywhere' }}>{data.title}</span>
+          <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, shrink: true }]} />
           <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
             <span className="mono">{data.branch}</span> → <span className="mono">{data.baseRef}</span>
             {data.pr ? ` · PR #${data.pr.number}` : ''}
             {data.stack ? ` · part ${data.stack.prs.findIndex((p) => p.current) + 1} of ${data.stack.prs.length} in a stack` : ''} · {sizeText(data.files, data.added, data.removed)}
           </span>
         </div>
-        {next && (
-          <button type="button" className="btn" onClick={() => open(next)}>
-            {started ? 'Continue' : 'Start at step 1'}
+        {resume && (
+          <button type="button" className="btn" onClick={goResume}>
+            {started ? 'Continue' : resume.decision ? 'Start with the decisions' : 'Start at step 1'}
           </button>
         )}
         <button type="button" className={`btn ${allDone ? 'primary' : ''}`} style={allDone ? undefined : { borderColor: 'var(--accent)', color: 'var(--accent)' }} onClick={() => go({ name: 'finish', projectId: data.projectId, branch: data.branch })}>
@@ -110,7 +112,7 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
               {plan.decisions.map((d) => (
-                <DecisionCard key={d.id} d={d} steps={data.steps} value={state.settled?.[d.id]} onSettle={(v) => settle(d, v)} onShow={(key) => open(data.steps.find((s) => s.key === key))} onCi={() => {
+                <DecisionCard key={d.id} d={d} steps={data.steps} value={state.settled?.[d.id]} onSettle={(v) => settle(d, v)} onShow={(key) => go({ name: 'review', projectId: data.projectId, branch: data.branch, decision: d.id, stepKey: key, preloaded: { data, state } })} onCi={() => {
                   const failing = data.pr?.checks.find((c) => c.state === 'fail' && c.url);
                   window.api.openExternal(failing?.url ?? data.pr!.url);
                 }} />
@@ -189,8 +191,11 @@ const TAG: Record<PlanDecision['kind'], string> = { outside: 'Outside your reque
 
 function DecisionCard({ d, steps, value, onSettle, onShow, onCi }: { d: PlanDecision; steps: Step[]; value?: 'fine' | 'fix'; onSettle: (v: 'fine' | 'fix' | null) => void; onShow: (stepKey: string) => void; onCi: () => void }) {
   const [details, setDetails] = useState(false);
-  const labels = d.kind === 'outside' ? { fine: 'Keep them', fix: 'Drop them', fineDone: 'Keeping them', fixDone: 'Dropping them when you finish' } : { fine: 'It’s fine', fix: 'Needs a fix', fineDone: 'You said it’s fine', fixDone: d.kind === 'flag' ? 'Added to your comments' : 'Needs a fix' };
+  const labels = decisionLabels(d);
   const stepOf = (key: string) => steps.find((s) => s.key === key);
+  // You can only judge what you've seen: with steps to look at, the decision is made there, next to the code.
+  const first = d.stepKeys.map(stepOf).find(Boolean);
+  const single = d.stepKeys.length === 1 && first;
   return (
     <article className="card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10, opacity: value ? 0.75 : 1 }}>
       <span className={`pill ${d.severity === 'high' ? 'high' : 'medium'}`} style={{ alignSelf: 'flex-start' }}>
@@ -198,9 +203,15 @@ function DecisionCard({ d, steps, value, onSettle, onShow, onCi }: { d: PlanDeci
       </span>
       <h3 style={{ margin: 0, fontSize: 16, lineHeight: 1.35, overflowWrap: 'anywhere' }}>{d.title}</h3>
       <p style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--muted)', overflowWrap: 'anywhere' }}>{d.detail}</p>
-      {(d.stepKeys.length > 0 || d.places.length > 1) && (
+      {/* Without a walkthrough the step is named after its file, which the detail already says. */}
+      {single && !d.detail.includes(single.title) && (
+        <span style={{ fontSize: 13.5, color: 'var(--muted)', overflowWrap: 'anywhere' }}>
+          Step {single.index + 1}: {single.title}
+        </span>
+      )}
+      {(d.stepKeys.length > 1 || d.places.length > 1 || d.files.length > 0) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {d.stepKeys.slice(0, details ? undefined : 2).map((k) => {
+          {!single && d.stepKeys.slice(0, details ? undefined : 2).map((k) => {
             const s = stepOf(k);
             return s ? (
               <button key={k} type="button" className="link" style={{ fontSize: 13.5, textAlign: 'left', overflowWrap: 'anywhere' }} onClick={() => onShow(k)}>
@@ -236,6 +247,18 @@ function DecisionCard({ d, steps, value, onSettle, onShow, onCi }: { d: PlanDeci
           <button type="button" className="link" style={{ fontSize: 13 }} onClick={() => onSettle(null)}>
             Change
           </button>
+          {first && (
+            <button type="button" className="link" style={{ fontSize: 13 }} onClick={() => onShow(first.key)}>
+              Look again
+            </button>
+          )}
+        </div>
+      ) : first ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+          <button type="button" className="btn primary" style={{ height: 36, fontSize: 13.5 }} onClick={() => onShow(first.key)}>
+            {single ? 'Look at the change →' : `Start at step ${first.index + 1} →`}
+          </button>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>You decide there, next to the code.</span>
         </div>
       ) : (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>

@@ -97,6 +97,18 @@ export function buildDecisions(steps: Step[], flags: AttentionFlag[], checks: Ch
   return out.sort((a, b) => rank(a) - rank(b));
 }
 
+/** Button and result text for a decision. */
+export function decisionLabels(d: Pick<PlanDecision, 'kind'>) {
+  return d.kind === 'outside'
+    ? { fine: 'Keep them', fix: 'Drop them', fineDone: 'Keeping them', fixDone: 'Dropping them when you finish' }
+    : { fine: 'It’s fine', fix: 'Needs a fix', fineDone: 'You said it’s fine', fixDone: d.kind === 'flag' ? 'Added to your comments' : 'Needs a fix' };
+}
+
+/** A flag that needs a fix becomes a comment on the step you decided it on. */
+export function settleComment(d: Pick<PlanDecision, 'kind' | 'title' | 'detail'>, value: 'fine' | 'fix' | null, stepKey: string | undefined) {
+  return value === 'fix' && d.kind === 'flag' && stepKey ? { stepKey, body: `Needs a fix: ${d.title}. ${d.detail}` } : undefined;
+}
+
 /** Where a step lives, in two folder names: "events/registrations". */
 export function areaOf(step: Step): string {
   const dirs = (step.files[0] ?? '').split('/').slice(0, -1);
@@ -150,6 +162,18 @@ export function planProgress(plan: Plan, state: Pick<ReviewState, 'reviewed' | '
     skim: plan.skim.length,
     skimDone: done(plan.skim),
   };
+}
+
+/**
+ * Where to pick up a review: the first thing not done yet, in the order the review goes.
+ * Decisions come first, so one you put off isn't forgotten once you're reading steps.
+ * Null when everything is decided and reviewed.
+ */
+export function resumePoint(plan: Plan, state: Pick<ReviewState, 'reviewed' | 'settled'>): { decision: PlanDecision; stepKey: string | undefined } | { decision: null; stepKey: string } | null {
+  const decision = plan.decisions.find((d) => !state.settled?.[d.id]);
+  if (decision) return { decision, stepKey: decision.stepKeys[0] };
+  const step = plan.sequence.find((s) => !isReviewed(s, state.reviewed));
+  return step ? { decision: null, stepKey: step.key } : null;
 }
 
 /** Steps to drop when you finish: those outside the task, unless you decided to keep them. */

@@ -1,15 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
 import { Brand, Loading, plural, sizeText, useAsync } from '../components/ui.tsx';
 import { checksText, checksTone } from '../components/github.tsx';
 import { timeAgo } from '../../shared/order.ts';
 import type { InboxItem, Project, ProjectScan, ReviewState } from '../../shared/types.ts';
 
-export function Home({ go }: { go: Go }) {
+export function Home({ go, initialProject }: { go: Go; initialProject?: string }) {
   const projects = useAsync(() => window.api.listProjects(), []);
   const inbox = useAsync(() => window.api.inbox(), []);
-  const [filter, setFilter] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string | null>(initialProject ?? null);
   const [query, setQuery] = useState('');
+  // The project list stays in view under the header while the inbox scrolls; it needs the header's height for that.
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(68);
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setHeaderHeight(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Agents keep working while you look at the inbox: refresh when the window comes back,
   // at most every 30 seconds.
@@ -42,7 +52,7 @@ export function Home({ go }: { go: Go }) {
 
   return (
     <div className="page">
-      <header className="topbar">
+      <header className="topbar" ref={headerRef}>
         <Brand onClick={() => inbox.reload()} />
         <label htmlFor="search" className="sr-only">
           Search reviews
@@ -56,7 +66,7 @@ export function Home({ go }: { go: Go }) {
       </header>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 20, padding: '20px 24px' }}>
-        <nav aria-label="Projects" style={{ flex: '1 1 240px', maxWidth: 280, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <nav aria-label="Projects" style={{ flex: '1 1 240px', maxWidth: 280, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: headerHeight + 20, maxHeight: `calc(100vh - ${headerHeight + 40}px)`, overflowY: 'auto' }}>
           <h2 className="label" style={{ marginBottom: 6 }}>
             Projects
           </h2>

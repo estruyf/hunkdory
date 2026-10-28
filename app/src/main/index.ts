@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray } from 'electron
 import { join, resolve } from 'node:path';
 import { Store } from './store.ts';
 import { Projects } from './projects.ts';
+import { Summaries } from './summaries.ts';
 import { Actions } from './actions.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
@@ -18,7 +19,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 
 const store = new Store(join(app.getPath('userData'), 'store.json'));
 const generated = new GeneratedWalkthroughs(join(app.getPath('userData'), 'walkthroughs'));
-const projects = new Projects(store, generated);
+const projects = new Projects(store, generated, new Summaries(join(app.getPath('userData'), 'inbox-summaries.json')));
 const logDir = join(app.getPath('userData'), 'agent-runs');
 const writer = new Writer({
   projects,
@@ -160,7 +161,10 @@ const api: ReviewerApi = {
   },
   updateReview: async (projectId, branch, patch) => {
     if (patch.type === 'start') store.reopenReview(projectId, branch);
-    return store.updateReview(projectId, branch, (r) => applyPatch(r, patch));
+    const next = store.updateReview(projectId, branch, (r) => applyPatch(r, patch));
+    // Screens you go back to read the newest state from this.
+    win?.webContents.send('review-state-changed', next);
+    return next;
   },
   finish: (req) => actions.finish(req),
   openSessionFile: async (file) => {
@@ -171,6 +175,7 @@ const api: ReviewerApi = {
   cancelWalkthrough: async (projectId, branch) => writer.cancel(projectId, branch),
   ask: (projectId, branch, stepKey, kind, text) => conversations.ask(projectId, branch, stepKey, kind, text),
   fileLines: (projectId, branch, path, side, from, to) => projects.fileLines(projectId, branch, path, side, from, to),
+  searchCode: (projectId, branch, query) => projects.searchCode(projectId, branch, query),
   shareWalkthrough: (projectId, branch) => writer.share(projectId, branch),
   cancelExchange: async (projectId, branch, id) => conversations.cancel(projectId, branch, id),
 };
@@ -198,6 +203,13 @@ function createWindow() {
     },
   });
   win.once('ready-to-show', () => win?.show());
+  // Back and forward like a browser: mouse buttons arrive as app commands on Windows and Linux, swipes on a Mac trackpad.
+  win.on('app-command', (_e, cmd) => {
+    if (cmd === 'browser-backward' || cmd === 'browser-forward') win?.webContents.send('navigate', cmd === 'browser-backward' ? 'back' : 'forward');
+  });
+  win.on('swipe', (_e, dir) => {
+    if (dir === 'left' || dir === 'right') win?.webContents.send('navigate', dir === 'left' ? 'back' : 'forward');
+  });
   // Closing the window keeps Reviewer in the menu bar. Quit from the tray or with Cmd+Q.
   win.on('close', (e) => {
     if (quitting) return;

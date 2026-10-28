@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Loading, cleanError, plural, useAsync } from '../components/ui.tsx';
+import { Brand, Crumbs, Loading, cleanError, plural, useAsync } from '../components/ui.tsx';
 import { timeAgo } from '../../shared/order.ts';
 
 /** Review any branch: yours, a colleague's, or one an agent made without a session. */
@@ -30,7 +30,7 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
     <div className="page">
       <header className="topbar">
         <Brand onClick={() => go({ name: 'home' })} />
-        <span style={{ fontSize: 14, color: 'var(--muted)' }}>Review a branch</span>
+        <Crumbs items={[{ label: 'Inbox', onClick: () => go({ name: 'home' }) }, { label: 'Review a branch' }]} />
       </header>
       <div style={{ width: '100%', maxWidth: 960, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

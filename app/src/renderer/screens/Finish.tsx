@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Go } from '../App.tsx';
-import { LoadingPage, Stat, cleanError, plural, useAsync } from '../components/ui.tsx';
+import { Brand, Crumbs, LoadingPage, Stat, cleanError, plural, reviewCrumbs, useAsync } from '../components/ui.tsx';
 import { ReviewError } from './Review.tsx';
 import { isReviewed } from '../../shared/order.ts';
 import { defaultDrops } from '../../shared/plan.ts';
@@ -108,12 +108,9 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
 
   return (
     <div className="page">
-      <header className="topbar split">
-        <button type="button" className="link" style={{ fontSize: 14, fontWeight: 500 }} onClick={() => go({ name: 'plan', projectId: data.projectId, branch: data.branch })}>
-          ← Back to the review
-        </button>
-        <span style={{ fontWeight: 600, fontSize: 15 }}>Finish review</span>
-        <span style={{ width: 130 }} />
+      <header className="topbar">
+        <Brand onClick={() => go({ name: 'home' })} />
+        <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: () => go({ name: 'plan', projectId: data.projectId, branch: data.branch }), shrink: true }, { label: 'Finish' }]} />
       </header>
 
       <div style={{ width: '100%', maxWidth: 860, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>

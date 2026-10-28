@@ -47,6 +47,13 @@ h1, h2, p { margin: 0; }
 
 .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 14px 24px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
 .topbar.split { justify-content: space-between; }
+.crumbs { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; min-width: 0; }
+.crumbs li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); background: none; border: 0; padding: 0; font: inherit; }
+button.crumb { cursor: pointer; }
+button.crumb:hover { color: var(--accent); text-decoration: underline; }
+.crumb.here { color: var(--text); font-weight: 600; }
+.crumb-sep { color: var(--muted); opacity: 0.6; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; font-size: 16px; letter-spacing: -0.01em; cursor: pointer; background: none; border: 0; padding: 0; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }

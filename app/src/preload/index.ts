@@ -24,6 +24,7 @@ const methods: (keyof ReviewerApi)[] = [
   'ask',
   'cancelExchange',
   'fileLines',
+  'searchCode',
   'shareWalkthrough',
 ];
 
@@ -40,6 +41,11 @@ contextBridge.exposeInMainWorld('events', {
     const listener = (_e: unknown, review: ReviewState) => fn(review);
     ipcRenderer.on('review-state-changed', listener);
     return () => ipcRenderer.removeListener('review-state-changed', listener);
+  },
+  onNavigate(fn: (dir: 'back' | 'forward') => void) {
+    const listener = (_e: unknown, dir: 'back' | 'forward') => fn(dir);
+    ipcRenderer.on('navigate', listener);
+    return () => ipcRenderer.removeListener('navigate', listener);
   },
   onWalkthroughChanged(fn: (job: WalkthroughJob) => void) {
     const listener = (_e: unknown, job: WalkthroughJob) => fn(job);

@@ -118,6 +118,13 @@ export interface DiffLine {
   text: string;
 }
 
+/** Where some text appears in a branch: its checkout, or its commit when it has none. */
+export interface CodeSearchResult {
+  matches: { path: string; line: number; text: string }[];
+  /** More matches than shown: narrow the search. */
+  truncated: boolean;
+}
+
 export interface Risk {
   code: string;
   severity: RiskLevel;
@@ -421,6 +428,7 @@ export interface ReviewerApi {
   cancelExchange(projectId: string, branch: string, exchangeId: string): Promise<void>;
   /** Lines `from`..`to` (1-based, inclusive) of a file on one side of the diff, for showing more context. */
   fileLines(projectId: string, branch: string, path: string, side: 'old' | 'new', from: number, to: number): Promise<{ lines: string[]; total: number }>;
+  searchCode(projectId: string, branch: string, query: string): Promise<CodeSearchResult>;
   /** Posts Reviewer's walkthrough on the pull request, or updates the one it posted before. */
   shareWalkthrough(projectId: string, branch: string): Promise<{ url: string }>;
 }

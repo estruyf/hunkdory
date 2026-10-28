@@ -6,6 +6,7 @@ declare global {
     events: {
       onReviewsChanged(fn: () => void): () => void;
       onWalkthroughChanged(fn: (job: WalkthroughJob) => void): () => void;
+      onNavigate(fn: (dir: 'back' | 'forward') => void): () => void;
       onReviewStateChanged(fn: (review: ReviewState) => void): () => void;
     };
   }

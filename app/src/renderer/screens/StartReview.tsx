@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Later, LoadingPage, RiskPill, cleanError, plural, sizeText, useAsync } from '../components/ui.tsx';
+import { Brand, Crumbs, Later, LoadingPage, RiskPill, cleanError, plural, reviewCrumbs, sizeText, useAsync } from '../components/ui.tsx';
 import { AskedFor, ReviewError } from './Review.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
 import { StackBar, checksText, checksTone } from '../components/github.tsx';
@@ -49,9 +49,7 @@ export function StartReview({ go, projectId, branch }: { go: Go; projectId: stri
     <div className="page">
       <header className="topbar">
         <Brand onClick={() => go({ name: 'home' })} />
-        <span style={{ fontSize: 14, color: 'var(--muted)' }}>
-          {data.projectName} / {data.branch}
-        </span>
+        <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, shrink: true }]} />
       </header>
 
       <div style={{ width: '100%', maxWidth: 1080, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>

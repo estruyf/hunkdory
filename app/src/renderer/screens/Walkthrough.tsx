@@ -1,22 +1,28 @@
 // The step walkthrough: one step at a time, read top to bottom, with one clear next action.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, RiskPill, cleanError, plural, sizeText, usePref } from '../components/ui.tsx';
+import { Brand, Crumbs, RiskPill, cleanError, plural, reviewCrumbs, sizeText, usePref } from '../components/ui.tsx';
 import { DiffHunk, type DiffMode } from '../components/diff.tsx';
 import { ChecksCard, StackBar } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { isReviewed } from '../../shared/order.ts';
-import { buildPlan, isCareful, planProgress } from '../../shared/plan.ts';
-import type { ReviewData, ReviewPatch, ReviewState } from '../../shared/types.ts';
+import { buildPlan, decisionLabels, isCareful, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
+import type { ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 import { AskPanel } from '../components/ask.tsx';
 import { AskedFor, CommentBox, whyFallback } from './Review.tsx';
 
-export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; data: ReviewData; initialState: ReviewState; initialStep?: string }) {
+export function Walkthrough({ go, data, initialState, stepKey, decision }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string }) {
   const [state, setState] = useState(initialState);
   const plan = useMemo(() => buildPlan(data, state), [data, state.order]);
   const steps = plan.sequence;
-  const firstOpen = steps.find((s) => !isReviewed(s, state.reviewed)) ?? steps[0];
-  const [selKey, setSelKey] = useState(initialStep ?? firstOpen?.key);
+  // Where you are comes from the route, so back and forward move between steps and decisions.
+  // Opened without a place ("Continue review"): the first thing not done yet, decisions first.
+  const [start] = useState(() => (stepKey || decision ? null : resumePoint(plan, state)));
+  const startKey = start?.stepKey ?? steps[0]?.key;
+  const decisionId = decision ?? (stepKey ? undefined : start?.decision?.id);
+  const dec = decisionId ? (plan.decisions.find((d) => d.id === decisionId) ?? null) : null;
+  const decPos = dec ? plan.decisions.indexOf(dec) : -1;
+  const selKey = dec ? (stepKey && dec.stepKeys.includes(stepKey) ? stepKey : dec.stepKeys[0]) : (stepKey ?? startKey);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [commenting, setCommenting] = useState(false);
@@ -36,8 +42,8 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
   );
 
   const pos = Math.max(0, steps.findIndex((s) => s.key === selKey));
-  const cur = steps[pos];
-  const progress = planProgress(plan, state);
+  // A decision without a step, like failing CI, gets a page of its own.
+  const cur = dec && !selKey ? undefined : steps[pos];
 
   const patch = async (p: ReviewPatch) => {
     try {
@@ -51,14 +57,25 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
     }
   };
 
-  const select = (key: string) => {
-    setSelKey(key);
+  const at = (to: { stepKey?: string; decision?: string }) => go({ name: 'review', projectId: data.projectId, branch: data.branch, ...to });
+  const select = (key: string) => at({ stepKey: key });
+  const decide = (d: PlanDecision) => at({ decision: d.id, stepKey: d.stepKeys[0] });
+  const toPlan = () => go({ name: 'plan', projectId: data.projectId, branch: data.branch });
+
+  // A new place starts with the comment and question boxes closed.
+  useEffect(() => {
     setAsking(false);
     setCommenting(false);
-    window.scrollTo(0, 0);
-  };
+  }, [selKey, decision]);
 
-  const toPlan = () => go({ name: 'plan', projectId: data.projectId, branch: data.branch });
+  /** After the decisions: the first step you haven't reviewed, or wrap up. */
+  const pastDecisions = (s: ReviewState = state) => {
+    const open = steps.find((x) => !isReviewed(x, s.reviewed));
+    if (open) select(open.key);
+    else go({ name: 'finish', projectId: data.projectId, branch: data.branch });
+  };
+  const nextDecision = () => (plan.decisions[decPos + 1] ? decide(plan.decisions[decPos + 1]) : pastDecisions());
+  const prevDecision = () => (decPos > 0 ? decide(plan.decisions[decPos - 1]) : toPlan());
   const keys = useRef({ looksGood: () => {} });
 
   // j/k between steps, r looks good, c comments, a asks Claude, s switches the diff layout, w hides whitespace edits.
@@ -66,16 +83,14 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, textarea, select, [contenteditable]')) return;
-      if (!steps[pos]) return;
-      const act: Record<string, () => void> = {
-        j: () => pos < steps.length - 1 && select(steps[pos + 1].key),
-        k: () => pos > 0 && select(steps[pos - 1].key),
-        r: () => keys.current.looksGood(),
-        c: () => openComment(),
-        a: () => openAsk(),
-        s: () => setMode(mode === 'split' ? 'unified' : 'split'),
-        w: () => setIgnoreSpace(!ignoreSpace),
-      };
+      if (!cur && !dec) return;
+      // While deciding, next and back go through the decisions.
+      const moves: Record<string, () => void> = dec
+        ? { j: nextDecision, k: prevDecision, r: () => (state.settled?.[dec.id] ? nextDecision() : settle(dec, 'fine')) }
+        : { j: () => pos < steps.length - 1 && select(steps[pos + 1].key), k: () => pos > 0 && select(steps[pos - 1].key), r: () => keys.current.looksGood() };
+      const act: Record<string, () => void> = cur
+        ? { ...moves, c: () => openComment(), a: () => openAsk(), s: () => setMode(mode === 'split' ? 'unified' : 'split'), w: () => setIgnoreSpace(!ignoreSpace) }
+        : { j: moves.j, k: moves.k };
       const fn = act[e.key];
       if (!fn) return;
       e.preventDefault();
@@ -94,6 +109,138 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
     setTimeout(() => (document.querySelector('[aria-label="Your question or change"]') as HTMLElement | null)?.focus(), 0);
   };
 
+  const careful = !!cur && isCareful(cur);
+
+  const settle = async (d: PlanDecision, value: 'fine' | 'fix' | null) => {
+    const comment = settleComment(d, value, cur?.key);
+    const next = await patch({ type: 'settle', id: d.id, value, comment });
+    if (!next) return;
+    // The step's comment box shows what was added; say more there before moving on.
+    if (comment) {
+      setCommentKey((k) => k + 1);
+      setCommenting(true);
+      return;
+    }
+    // Deciding the decision you came for moves you on, like a wizard.
+    if (value && dec?.id === d.id) {
+      const after = [...plan.decisions.slice(decPos + 1), ...plan.decisions.slice(0, decPos)].find((x) => !next.settled?.[x.id]);
+      if (after) decide(after);
+      else pastDecisions(next);
+    }
+  };
+
+  const segs = (list: Step[]) => list.map((s) => ({ key: s.key, title: `Step ${s.index + 1}: ${s.title}`, done: isReviewed(s, state.reviewed), current: !dec && s.key === cur?.key, onClick: () => select(s.key) }));
+  const firstOf = (list: Step[]) => list.find((s) => !isReviewed(s, state.reviewed)) ?? list[0];
+  const phases = [
+    {
+      label: 'Decide',
+      now: !!dec,
+      onClick: () => decide(plan.decisions.find((d) => !state.settled?.[d.id]) ?? plan.decisions[0]),
+      segments: plan.decisions.map((d) => ({ key: d.id, title: d.title, done: !!state.settled?.[d.id], current: d.id === dec?.id, onClick: () => decide(d) })),
+    },
+    { label: 'Look carefully', now: !dec && careful, onClick: () => select(firstOf(plan.careful).key), segments: segs(plan.careful) },
+    { label: 'Skim', now: !dec && !!cur && !careful, onClick: () => select(firstOf(plan.skim).key), segments: segs(plan.skim) },
+  ].filter((p) => p.segments.length > 0);
+
+  const phaseList = careful ? plan.careful : plan.skim;
+  const here = dec
+    ? `Decide · ${decPos + 1} of ${plan.decisions.length}`
+    : cur
+      ? `${careful ? 'Look carefully' : 'Skim'} · ${phaseList.findIndex((s) => s.key === cur.key) + 1} of ${phaseList.length}`
+      : '';
+
+  const header = (
+    <header className="topbar" style={{ position: 'static', gap: '12px 20px', padding: '12px 24px', borderBottomColor: 'var(--divider)' }}>
+      <Brand onClick={() => go({ name: 'home' })} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '1 1 280px', minWidth: 0 }}>
+        <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: toPlan, shrink: true }, { label: here }]} />
+        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          {data.pr ? `PR #${data.pr.number} · ` : ''}
+          {data.stack ? `part ${data.stack.prs.findIndex((p) => p.current) + 1} of ${data.stack.prs.length} in a stack · ` : ''}
+          {sizeText(data.files, data.added, data.removed)}
+        </span>
+      </div>
+      <button type="button" className="btn" style={{ height: 36 }} onClick={toPlan}>
+        Review plan
+      </button>
+      {cur && (
+        <button type="button" className="btn" style={{ height: 36 }} aria-pressed={showContext} onClick={() => setShowContext(!showContext)}>
+          {showContext ? 'Hide context' : 'Context'}
+        </button>
+      )}
+      <button type="button" className="btn primary" style={{ height: 36 }} onClick={() => go({ name: 'finish', projectId: data.projectId, branch: data.branch })}>
+        Finish
+      </button>
+    </header>
+  );
+
+  // One segment per decision or step: click one to go there.
+  const progressNav = (
+    <nav aria-label="Review progress" style={{ padding: '8px 24px 12px', background: 'var(--surface)', borderBottom: '1px solid var(--divider)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      {phases.map((p) => {
+        const n = p.segments.length;
+        const done = p.segments.filter((x) => x.done).length;
+        return (
+          <div key={p.label} style={{ flex: `${Math.max(3, Math.min(n, 12))} 1 160px`, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ display: 'flex', gap: 3, width: '100%' }}>
+              {n <= 40 ? (
+                p.segments.map((x) => (
+                  <button key={x.key} type="button" title={x.title} aria-label={x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} style={{ flex: 1, minWidth: 0, padding: '4px 0', border: 0, background: 'none', cursor: 'pointer' }}>
+                    <span style={{ display: 'block', height: 6, borderRadius: 3, background: x.done ? 'var(--accent)' : x.current ? 'var(--accent-soft)' : 'var(--border)', outline: x.current ? '2px solid var(--accent)' : undefined, outlineOffset: 1 }} />
+                  </button>
+                ))
+              ) : (
+                <span style={{ flex: 1, height: 6, margin: '4px 0', borderRadius: 3, background: `linear-gradient(to right, var(--accent) ${(done / n) * 100}%, var(--border) 0)` }} />
+              )}
+            </span>
+            <button type="button" onClick={p.onClick} style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left', fontSize: 12.5, fontWeight: p.now ? 600 : 400, color: p.now ? 'var(--text)' : 'var(--muted)' }}>
+              {p.label} · {done === n ? `all ${n} done` : `${done} of ${n}`}
+            </button>
+          </div>
+        );
+      })}
+    </nav>
+  );
+
+  // The decision you came for sits in the footer, where "Looks good" is for a step: in reach after reading the code.
+  const decided = dec ? state.settled?.[dec.id] : undefined;
+  const decLabels = dec ? decisionLabels(dec) : null;
+  const decisionActions = dec && decLabels && (
+    decided ? (
+      <>
+        <span style={{ fontSize: 14, fontWeight: 600, color: decided === 'fine' ? 'var(--low-fg)' : 'var(--med-fg)' }}>✓ {decided === 'fine' ? decLabels.fineDone : decLabels.fixDone}</span>
+        <button type="button" className="link" style={{ fontSize: 13.5 }} onClick={() => settle(dec, null)}>
+          Change
+        </button>
+        <button type="button" className="btn lg primary" style={{ minWidth: 170 }} onClick={nextDecision}>
+          {plan.decisions[decPos + 1] ? 'Next decision →' : 'On to the steps →'}
+        </button>
+      </>
+    ) : (
+      <>
+        <button type="button" className="btn lg" onClick={() => settle(dec, 'fix')}>
+          {decLabels.fix}
+        </button>
+        <button type="button" className="btn lg primary" style={{ minWidth: 150 }} onClick={() => settle(dec, 'fine')}>
+          {decLabels.fine} →
+        </button>
+        <button type="button" className="link" style={{ fontSize: 13.5 }} onClick={nextDecision}>
+          Decide later
+        </button>
+      </>
+    )
+  );
+
+  // The header and the progress stay in view while you scroll: there's always a way to see what's left.
+  const top = (
+    <div style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+      {header}
+      {progressNav}
+    </div>
+  );
+
+  if (dec && !cur) return <DecisionPage d={dec} n={decPos + 1} of={plan.decisions.length} data={data} top={top} onBack={prevDecision} actions={decisionActions} error={error} />;
+
   if (!cur) {
     return (
       <div className="page">
@@ -106,13 +253,11 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
   }
 
   const done = isReviewed(cur, state.reviewed);
-  const careful = isCareful(cur);
-  const phaseSteps = careful ? plan.careful : plan.skim;
-  const phasePos = phaseSteps.findIndex((s) => s.key === cur.key);
   const stepExchanges = (state.exchanges ?? []).filter((e) => e.stepKey === cur.key);
   const earlier = since?.earlierComments[cur.key] ?? [];
   const stepComment = state.comments.find((c) => c.stepKey === cur.key && !c.line)?.body ?? '';
-  const stepFlags = plan.decisions.filter((d) => d.stepKeys.includes(cur.key));
+  // The decision you came for first.
+  const stepFlags = plan.decisions.filter((d) => d.stepKeys.includes(cur.key)).sort((a, b) => Number(b.id === dec?.id) - Number(a.id === dec?.id));
   const answers = state.answers?.[cur.key] ?? {};
   const lineComment = (hunkId: string, path: string) => (a: { side: 'LEFT' | 'RIGHT'; line: number }, body: string, id?: string) =>
     patch({ type: 'line-comment', id, stepKey: cur.key, hunkId, path, line: a.line, side: a.side, body });
@@ -143,61 +288,16 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
     }
   };
 
-  const phases = [
-    { label: 'Decide', n: progress.decisions, done: progress.decided, now: false, onClick: toPlan },
-    { label: 'Look carefully', n: progress.careful, done: progress.carefulDone, now: careful, onClick: () => plan.careful[0] && select((plan.careful.find((s) => !isReviewed(s, state.reviewed)) ?? plan.careful[0]).key) },
-    { label: 'Skim', n: progress.skim, done: progress.skimDone, now: !careful, onClick: () => plan.skim[0] && select((plan.skim.find((s) => !isReviewed(s, state.reviewed)) ?? plan.skim[0]).key) },
-  ].filter((p) => p.n > 0);
 
   return (
     <div className="page" style={{ background: 'var(--surface)' }}>
-      <header className="topbar" style={{ gap: '12px 20px', padding: '12px 24px', borderBottomColor: 'var(--divider)' }}>
-        <Brand onClick={() => go({ name: 'home' })} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '1 1 280px', minWidth: 0 }}>
-          <span style={{ fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={data.title}>
-            {data.title}
-          </span>
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-            {data.pr ? `PR #${data.pr.number} · ` : ''}
-            {data.stack ? `part ${data.stack.prs.findIndex((p) => p.current) + 1} of ${data.stack.prs.length} in a stack · ` : ''}
-            {sizeText(data.files, data.added, data.removed)}
-          </span>
-        </div>
-        <button type="button" className="btn" style={{ height: 36 }} onClick={toPlan}>
-          Review plan
-        </button>
-        <button type="button" className="btn" style={{ height: 36 }} aria-pressed={showContext} onClick={() => setShowContext(!showContext)}>
-          {showContext ? 'Hide context' : 'Context'}
-        </button>
-        <button type="button" className="btn primary" style={{ height: 36 }} onClick={() => go({ name: 'finish', projectId: data.projectId, branch: data.branch })}>
-          Finish
-        </button>
-      </header>
-
-      <nav aria-label="Review progress" style={{ padding: '12px 24px', borderBottom: '1px solid var(--divider)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        {phases.map((p) => (
-          <button key={p.label} type="button" onClick={p.onClick} style={{ flex: `${Math.max(3, Math.min(p.n, 12))} 1 160px`, display: 'flex', flexDirection: 'column', gap: 6, background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
-            <span style={{ display: 'flex', gap: 3, height: 6, width: '100%' }}>
-              {p.n <= 40 ? (
-                Array.from({ length: p.n }, (_, i) => <span key={i} style={{ flex: 1, borderRadius: 3, background: i < p.done ? 'var(--accent)' : 'var(--border)' }} />)
-              ) : (
-                <span style={{ flex: 1, borderRadius: 3, background: `linear-gradient(to right, var(--accent) ${(p.done / p.n) * 100}%, var(--border) 0)` }} />
-              )}
-            </span>
-            <span style={{ fontSize: 12.5, fontWeight: p.now ? 600 : 400, color: p.now ? 'var(--text)' : 'var(--muted)' }}>
-              {p.label} · {p.done === p.n ? `all ${p.n} done` : `${p.done} of ${p.n}`}
-            </span>
-          </button>
-        ))}
-      </nav>
+      {top}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center', gap: 24, flex: 1 }}>
         <main style={{ flex: '999 1 560px', minWidth: 0, maxWidth: 920, padding: '32px 24px 32px', display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 10px', fontSize: 13, color: 'var(--muted)' }}>
-              <span style={{ fontWeight: 600 }}>
-                {careful ? 'Look carefully' : 'Skim'} · {phasePos + 1} of {phaseSteps.length}
-              </span>
+              <span style={{ fontWeight: 600 }}>{here}</span>
               <RiskPill risk={cur.risk} />
               {cur.outsideTask && <span className="pill medium">Outside the task</span>}
               {done && <span className="pill low">Reviewed</span>}
@@ -208,12 +308,48 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
           </div>
 
           {stepFlags.length > 0 && (
-            <section className="notice" style={{ flexDirection: 'column', gap: 4 }}>
-              {stepFlags.map((f) => (
-                <span key={f.id}>
-                  <strong>{f.title}.</strong> {state.settled?.[f.id] === 'fine' ? 'You said it’s fine.' : state.settled?.[f.id] === 'fix' ? (f.kind === 'outside' ? 'You chose to drop it.' : 'You said it needs a fix.') : f.detail}
-                </span>
-              ))}
+            <section className="notice" style={{ flexDirection: 'column', gap: 10 }}>
+              {stepFlags.map((f) => {
+                const labels = decisionLabels(f);
+                const value = state.settled?.[f.id];
+                return (
+                  <div key={f.id} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 14px', alignItems: 'center' }}>
+                    <span style={{ flex: '1 1 320px', minWidth: 0, overflowWrap: 'anywhere' }}>
+                      <strong>{f.title}.</strong> {f.detail}
+                    </span>
+                    {f.id === dec?.id && f.stepKeys.length > 1 && (
+                      <span style={{ order: 3, flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 13 }}>
+                        In
+                        {f.stepKeys.map((k) => {
+                          const s = data.steps.find((x) => x.key === k);
+                          return s ? (
+                            <button key={k} type="button" className="link" aria-current={k === cur.key ? 'step' : undefined} style={{ fontSize: 13, fontWeight: k === cur.key ? 700 : 500 }} onClick={() => at({ decision: f.id, stepKey: k })}>
+                              step {s.index + 1}
+                            </button>
+                          ) : null;
+                        })}
+                      </span>
+                    )}
+                    {f.id === dec?.id ? null : value ? (
+                      <span style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5 }}>
+                        <span style={{ fontWeight: 600 }}>✓ {value === 'fine' ? labels.fineDone : labels.fixDone}</span>
+                        <button type="button" className="link" style={{ fontSize: 13 }} onClick={() => settle(f, null)}>
+                          Change
+                        </button>
+                      </span>
+                    ) : (
+                      <span style={{ display: 'flex', gap: 8 }}>
+                        <button type="button" className="btn" style={{ height: 32, fontSize: 13 }} onClick={() => settle(f, 'fine')}>
+                          {labels.fine}
+                        </button>
+                        <button type="button" className="btn" style={{ height: 32, fontSize: 13 }} onClick={() => settle(f, 'fix')}>
+                          {labels.fix}
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </section>
           )}
 
@@ -331,7 +467,7 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
       </div>
 
       <footer style={{ position: 'sticky', bottom: 0, zIndex: 4, background: 'var(--surface)', borderTop: '1px solid var(--divider)', padding: '12px 24px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-        <button type="button" className="btn lg" disabled={pos === 0} onClick={() => select(steps[pos - 1].key)}>
+        <button type="button" className="btn lg" disabled={!dec && pos === 0} onClick={() => (dec ? prevDecision() : select(steps[pos - 1].key))}>
           ← Back
         </button>
         <button type="button" className="btn lg" onClick={openComment}>
@@ -342,16 +478,66 @@ export function Walkthrough({ go, data, initialState, initialStep }: { go: Go; d
             Ask Claude
           </button>
         )}
-        <button type="button" className={`btn lg ${done ? 'done' : 'primary'}`} style={{ minWidth: 170 }} onClick={looksGood}>
-          {done ? (pos < steps.length - 1 ? 'Reviewed · next →' : 'Reviewed ✓') : 'Looks good →'}
-        </button>
+        {dec ? (
+          decisionActions
+        ) : (
+          <button type="button" className={`btn lg ${done ? 'done' : 'primary'}`} style={{ minWidth: 170 }} onClick={looksGood}>
+            {done ? (pos < steps.length - 1 ? 'Reviewed · next →' : 'Reviewed ✓') : 'Looks good →'}
+          </button>
+        )}
         <span style={{ display: 'flex', gap: 10, fontSize: 12.5, color: 'var(--muted)', marginLeft: 8 }} aria-label="Keyboard shortcuts">
-          {[['j', 'next'], ['k', 'back'], ['r', 'looks good'], ['c', 'comment'], ['a', 'ask']].map(([k, what]) => (
+          {[['j', 'next'], ['k', 'back'], ['r', decLabels ? (decided ? 'next decision' : decLabels.fine.toLowerCase()) : 'looks good'], ['c', 'comment'], ['a', 'ask']].map(([k, what]) => (
             <span key={k}>
               <span className="kbd">{k}</span> {what}
             </span>
           ))}
         </span>
+      </footer>
+    </div>
+  );
+}
+
+/** A decision with no step to show, like failing CI: what it is, where to look, and the choice. */
+function DecisionPage(props: {
+  d: PlanDecision;
+  n: number;
+  of: number;
+  data: ReviewData;
+  top: React.ReactNode;
+  onBack: () => void;
+  actions: React.ReactNode;
+  error: string | null;
+}) {
+  const { d, data } = props;
+  const failing = data.pr?.checks.find((c) => c.state === 'fail' && c.url);
+  return (
+    <div className="page" style={{ background: 'var(--surface)' }}>
+      {props.top}
+      <main style={{ width: '100%', maxWidth: 920, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)' }}>
+          Decide · {props.n} of {props.of}
+        </span>
+        <h1 style={{ fontSize: 28, lineHeight: 1.25, letterSpacing: '-0.02em', overflowWrap: 'anywhere' }}>{d.title}</h1>
+        <p style={{ fontSize: 16.5, lineHeight: 1.65, color: 'var(--text-body)', maxWidth: 760 }}>{d.detail}</p>
+        {d.places.length > 1 && (
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 14, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {d.places.map((p, i) => (
+              <li key={i} style={{ overflowWrap: 'anywhere' }}>{p}</li>
+            ))}
+          </ul>
+        )}
+        {d.kind === 'ci' && data.pr && (
+          <button type="button" className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => window.api.openExternal(failing?.url ?? data.pr!.url)}>
+            Open checks ↗
+          </button>
+        )}
+        {props.error && <p className="error">{props.error}</p>}
+      </main>
+      <footer style={{ position: 'sticky', bottom: 0, zIndex: 4, background: 'var(--surface)', borderTop: '1px solid var(--divider)', padding: '12px 24px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+        <button type="button" className="btn lg" onClick={props.onBack}>
+          ← Back
+        </button>
+        {props.actions}
       </footer>
     </div>
   );

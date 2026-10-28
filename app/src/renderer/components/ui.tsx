@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { RiskLevel } from '../../shared/types.ts';
+import type { Go } from '../App.tsx';
 import { RISK_LABEL } from '../../shared/order.ts';
 
 export function Logo({ size = 26 }: { size?: number }) {
@@ -20,6 +21,46 @@ export function Brand({ onClick }: { onClick: () => void }) {
     </button>
   );
 }
+
+export interface Crumb {
+  label: string;
+  onClick?: () => void;
+  /** Long labels, like a review's title, give way first when space runs out. */
+  shrink?: boolean;
+}
+
+/** Where you are. Every part but the last takes you there. */
+export function Crumbs({ items }: { items: Crumb[] }) {
+  return (
+    <nav aria-label="Breadcrumb" style={{ minWidth: 0 }}>
+      <ol className="crumbs">
+        {items.map((c, i) => {
+          const last = i === items.length - 1;
+          return (
+            <li key={i} style={{ flex: `0 ${c.shrink ? 1 : 0} auto` }}>
+              {i > 0 && <span aria-hidden="true" className="crumb-sep">›</span>}
+              {c.onClick && !last ? (
+                <button type="button" className="crumb" title={c.label} onClick={c.onClick}>
+                  {c.label}
+                </button>
+              ) : (
+                <span className={`crumb ${last ? 'here' : ''}`} title={c.label} aria-current={last ? 'page' : undefined}>
+                  {c.label}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+/** The first crumbs of every review screen: the inbox, then the project's own inbox. */
+export const reviewCrumbs = (go: Go, data: { projectId: string; projectName: string }): Crumb[] => [
+  { label: 'Inbox', onClick: () => go({ name: 'home' }) },
+  { label: data.projectName, onClick: () => go({ name: 'home', projectId: data.projectId }) },
+];
 
 export function RiskPill({ risk }: { risk: RiskLevel }) {
   return <span className={`pill ${risk}`}>{RISK_LABEL[risk]}</span>;
