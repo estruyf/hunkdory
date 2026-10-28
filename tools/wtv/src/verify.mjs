@@ -14,14 +14,28 @@ export function loadWalkthrough(path) {
   } catch (e) {
     throw new UsageError(`Walkthrough is not valid JSON: ${e.message}`);
   }
-  if (!Array.isArray(wt.chapters)) throw new UsageError('Walkthrough needs a "chapters" array.');
-  wt.chapters = wt.chapters.map((c, i) => ({
-    title: c.title ?? `Chapter ${i + 1}`,
-    why: c.why ?? '',
-    risk: c.risk ?? null,
-    refs: (c.hunks ?? c.refs ?? []).map(String),
-  }));
-  return wt;
+  return normalizeWalkthrough(wt);
+}
+
+/** Validate and normalise a parsed walkthrough. Unknown fields are kept. */
+export function normalizeWalkthrough(input) {
+  if (!input || !Array.isArray(input.chapters)) throw new UsageError('Walkthrough needs a "chapters" array.');
+  const strings = (v) => (Array.isArray(v) ? v : v ? [v] : []).map(String).filter((s) => s.trim());
+  return {
+    ...input,
+    chapters: input.chapters.map((c, i) => ({
+      title: c.title ?? `Chapter ${i + 1}`,
+      why: c.why ?? '',
+      risk: c.risk ?? null,
+      refs: (c.hunks ?? c.refs ?? []).map(String),
+      checks: strings(c.checks),
+      outsideTask: c.outsideTask === true,
+      // Agent notes per hunk, keyed by one of the chapter's refs: { "h:54b48929c1": "..." }
+      notes: c.notes && typeof c.notes === 'object' && !Array.isArray(c.notes)
+        ? Object.fromEntries(Object.entries(c.notes).filter(([, v]) => typeof v === 'string' && v.trim()))
+        : {},
+    })),
+  };
 }
 
 export class UsageError extends Error {}
@@ -85,7 +99,26 @@ export function verify({ cwd, walkthrough, base, head }) {
     if (!c.refs.length) {
       findings.push({ code: 'empty-chapter', severity: 'medium', message: `Chapter "${c.title}" references nothing.` });
     }
-    return { index, title: c.title, why: c.why, risk: c.risk, refs, hunkIds: [...new Set(refs.flatMap((r) => r.matched))] };
+    const hunkIds = [...new Set(refs.flatMap((r) => r.matched))];
+    // A note must point at hunks this chapter covers, or the reviewer would see it in the wrong place.
+    const notes = Object.entries(c.notes ?? {}).map(([ref, text]) => {
+      const matched = matchRef(ref, hunks).hunks.map((h) => h.id).filter((id) => hunkIds.includes(id));
+      if (!matched.length) {
+        findings.push({ code: 'stray-note', severity: 'low', message: `Chapter "${c.title}" has a note for ${ref}, which is not one of its hunks.` });
+      }
+      return { ref, text, hunkIds: matched };
+    });
+    return {
+      index,
+      title: c.title,
+      why: c.why,
+      risk: c.risk,
+      checks: c.checks ?? [],
+      outsideTask: !!c.outsideTask,
+      notes,
+      refs,
+      hunkIds,
+    };
   });
 
   for (const h of hunks) {
@@ -172,6 +205,7 @@ export function skeleton({ cwd, base, head }) {
       title: path,
       why: 'TODO',
       risk: null,
+      checks: [],
       hunks: refs,
     })),
   };

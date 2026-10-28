@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildFixture } from './fixture.mjs';
-import { verify, loadWalkthrough } from '../src/verify.mjs';
+import { verify, loadWalkthrough, normalizeWalkthrough } from '../src/verify.mjs';
 
 const bin = fileURLToPath(new URL('../bin/wtv.mjs', import.meta.url));
 const wtv = (cwd, args, input) => spawnSync(process.execPath, [bin, ...args], { cwd, input, encoding: 'utf8' });
@@ -97,4 +97,46 @@ test('init writes a skeleton covering every real hunk', () => {
   const json = JSON.parse(v.stdout);
   assert.equal(json.buckets.unnarrated.length, 0);
   assert.ok(json.findings.some((f) => f.code === 'missing-why'));
+});
+
+test('passes through checks, outsideTask and agent notes', () => {
+  const { dir } = buildFixture();
+  const wt = JSON.parse(readFileSync(wtPath(dir), 'utf8'));
+  const list = JSON.parse(wtv(dir, ['list', '--json']).stdout);
+  const tokenId = `h:${list.hunks.find((h) => h.path === 'src/auth/token.js').id}`;
+  wt.chapters.push({
+    title: 'Longer tokens',
+    why: 'Users were logged out mid-sync',
+    checks: ['Is a day too long for a token?'],
+    outsideTask: true,
+    hunks: [tokenId],
+    notes: { [tokenId]: 'I raised this while testing.', 'src/retry.js': 'Not in this chapter.' },
+  });
+  writeFileSync(wtPath(dir), JSON.stringify(wt));
+  const json = JSON.parse(wtv(dir, ['verify', '--json']).stdout);
+  const ch = json.chapters.at(-1);
+  assert.deepEqual(ch.checks, ['Is a day too long for a token?']);
+  assert.equal(ch.outsideTask, true);
+  assert.deepEqual(ch.notes[0], { ref: tokenId, text: 'I raised this while testing.', hunkIds: [tokenId.slice(2)] });
+  assert.deepEqual(ch.notes[1].hunkIds, []);
+  assert.ok(json.findings.some((f) => f.code === 'stray-note' && f.message.includes('src/retry.js')));
+});
+
+test('walkthroughs without the new fields still load', () => {
+  const { dir } = buildFixture();
+  const r = verify({ cwd: dir, walkthrough: loadWalkthrough(wtPath(dir)) });
+  for (const ch of r.chapters) {
+    assert.deepEqual(ch.checks, []);
+    assert.equal(ch.outsideTask, false);
+    assert.deepEqual(ch.notes, []);
+  }
+  assert.ok(!r.findings.some((f) => f.code === 'stray-note'));
+});
+
+test('normalizeWalkthrough accepts a parsed object and rejects bad input', () => {
+  const wt = normalizeWalkthrough({ intent: 'x', chapters: [{ title: 'A', hunks: ['a.js'], checks: 'one check', notes: ['bad'] }] });
+  assert.deepEqual(wt.chapters[0].checks, ['one check']);
+  assert.deepEqual(wt.chapters[0].notes, {});
+  assert.equal(wt.intent, 'x');
+  assert.throws(() => normalizeWalkthrough({}), /chapters/);
 });

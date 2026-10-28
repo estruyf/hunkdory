@@ -44,6 +44,10 @@ including untracked files. The `.review/` folder is never part of the diff.
   and whitespace-normalised content, so the id survives line shifts and rebases.
   Files without text hunks (binary, rename, mode) get a synthetic hunk so they
   can't slip through.
+- **Chapters** have `title`, `why`, optional `risk`, and `hunks` (refs). Optional
+  review fields: `checks` (questions for the reviewer), `outsideTask: true`
+  (work the prompt didn't ask for), and `notes` (`{ "<ref>": "text" }`, an agent
+  note on specific hunks). Older walkthroughs without these still work.
 - **Refs** in a chapter can be `h:<id>`, `path:10-20`, `path` or `folder/`.
 - **Buckets**: narrated, unnarrated, noise (whitespace-only), generated
   (lockfiles, dist), phantom (refs matching nothing), weak (high-risk hunk only
@@ -75,7 +79,7 @@ can't loop, and it never blocks when something goes wrong (no git, no changes).
 ## JSON contract (for a review UI)
 
 `wtv verify --json` returns `ok`, `intent`, `base`, `head`, `chapters` (with
-`hunkIds`), `hunks` (full content, `bucket`, `risks`, `level`, `chapters`),
+`hunkIds`, `checks`, `outsideTask` and `notes` resolved to `hunkIds`), `hunks` (full content, `bucket`, `risks`, `level`, `chapters`),
 `buckets` and `findings`. A UI renders chapters in order and puts
 `buckets.unnarrated` at the top.
 
@@ -90,6 +94,6 @@ can't loop, and it never blocks when something goes wrong (no git, no changes).
 ## Tests
 
 ```bash
-npm test            # 9 tests against a generated fixture repo
+npm test            # 12 tests against a generated fixture repo
 node test/demo.mjs  # see the report on the "sneaky agent" fixture
 ```

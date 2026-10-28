@@ -87,7 +87,8 @@ export function printVerify(r, { hook = false } = {}) {
       const hs = ch.hunkIds.map((id) => byId.get(id));
       const worst = hs.reduce((m, h) => (h.level === 'high' ? 'high' : h.level === 'medium' && m !== 'high' ? 'medium' : m), 'none');
       const mark = worst === 'none' ? '' : ` ${LEVEL[worst](`(${worst} risk)`)}`;
-      out.push(`  ${ch.index + 1}. ${ch.title} ${c.dim(`· ${hs.length} hunk(s)`)}${mark}`);
+      const scope = ch.outsideTask ? c.yellow(' (outside the task)') : '';
+      out.push(`  ${ch.index + 1}. ${ch.title}${scope} ${c.dim(`· ${hs.length} hunk(s)`)}${mark}`);
     }
     const extra = [];
     if (buckets.noise.length) extra.push(`${buckets.noise.length} whitespace-only`);

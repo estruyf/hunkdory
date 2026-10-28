@@ -1,0 +1,217 @@
+{
+  "version": 1,
+  "intent": "Reviewer phase 1: a local Electron app that turns agent branches into ordered review steps, built on wtv, plus the walkthrough fields it needs",
+  "base": "e514729c74704bac578a8234abde1e9cb7c04046",
+  "head": "e514729c74704bac578a8234abde1e9cb7c04046",
+  "chapters": [
+    {
+      "title": "Walkthrough schema: checks, outsideTask and agent notes",
+      "why": "The review screen shows per-step checks, an 'Outside the task you gave' flag and agent notes on hunks. The walkthrough had nowhere to put them, so wtv now reads and passes them through.",
+      "checks": [
+        "Notes are a map keyed by ref, so older wtv versions ignore them and keep working. Is that trade-off (less natural to write than objects in 'hunks') what you want?",
+        "A note on a hunk outside its chapter becomes a low 'stray-note' finding, not a failure. Should it fail instead?"
+      ],
+      "hunks": [
+        "h:7031309f34",
+        "h:4eea86314b",
+        "h:28d6006e58",
+        "h:36925a5370"
+      ],
+      "notes": {
+        "h:7031309f34": "normalizeWalkthrough is split out of loadWalkthrough so the app can verify a walkthrough it read with 'git show', without a file on disk."
+      }
+    },
+    {
+      "title": "Tests and docs for the new fields",
+      "why": "Covers pass-through, the stray-note finding, old walkthroughs without the fields, and normalizing a parsed object. The skill tells agents when to use each field.",
+      "checks": [
+        "Read the new skill rules: they decide what agents will write from now on."
+      ],
+      "hunks": [
+        "h:d66be40eb3",
+        "h:f56352091d",
+        "h:49dcfedc62",
+        "h:90f4c089de",
+        "h:6c59e2374a",
+        "h:3fe11f98ed",
+        "h:dd5bfdce7c"
+      ]
+    },
+    {
+      "title": "Reading Claude Code sessions",
+      "why": "Reviewer needs the session behind a branch: its first prompt, every branch it ran on, and where it ran. The format is undocumented, so it was checked against real 2.1.30x transcripts and the rules live in one module.",
+      "checks": [
+        "Sessions are read from every Claude Code config dir: ~/.claude, $CLAUDE_CONFIG_DIR and any ~/.claude-* with a projects folder. Your intranet sessions live in ~/.claude-work, which is why the inbox was empty before.",
+        "Folder lookup encodes the repo path forward and then confirms with each record's cwd, because the encoding is lossy. The test with a '-legacy' sibling repo covers the false match.",
+        "First prompt skips tool results, meta and subagent turns, task notifications and command output, and strips IDE context. A bare slash command is only a fallback."
+      ],
+      "hunks": [
+        "h:b4975be496",
+        "h:9e8927fde6",
+        "h:441dbacc3e"
+      ],
+      "notes": {
+        "h:b4975be496": "wtv tags this 'auth or security' because of the word 'session'. It only reads files under ~/.claude/projects."
+      }
+    },
+    {
+      "title": "Matching sessions to branches and picking the base",
+      "why": "A branch needs review when an agent session ran on it and it still differs from where it was cut. Integration branches (main, dev, any worktree origin) are never review candidates.",
+      "checks": [
+        "The base is the integration branch the branch has the fewest commits on top of. In claude-code-manager this correctly moved fix/196 from 58 files against main to 'already merged' against dev.",
+        "The prompt and title come from the session where the branch first appeared, not the oldest one that touched it. Resume uses the most recent one.",
+        "A session that only recorded 'HEAD' (this one did: it started before the repo had commits) is attributed to the branch checked out where it ran, never to an integration branch."
+      ],
+      "hunks": [
+        "h:c3ba84b29b",
+        "h:34a8684410",
+        "h:128e4c637e",
+        "h:f36da6242a"
+      ]
+    },
+    {
+      "title": "Running wtv and turning its result into steps",
+      "why": "wtv stays the diff and verification engine. It runs in a worker thread because its git calls are synchronous, and its result is mapped to steps without hiding any hunk.",
+      "checks": [
+        "Unexplained hunks become one 'Not in the walkthrough' step per file, after the agent's chapters, at least 'Look closer'.",
+        "Whitespace-only and lockfile hunks get a final 'Formatting and generated files' step instead of disappearing.",
+        "Context lines around wtv's zero-context hunks are rebuilt from the base and head file contents: display only.",
+        "The 'about N min' estimate ignores lockfile, build output and whitespace-only lines."
+      ],
+      "hunks": [
+        "h:6971d0e4be",
+        "h:7743a3970c",
+        "h:c25edbd8ad",
+        "h:3db1b859e0",
+        "h:aef3804061"
+      ]
+    },
+    {
+      "title": "Review state on disk",
+      "why": "Reviewed steps, comments and decisions must survive a restart. One JSON file in the app's data folder, written atomically, is enough for this size.",
+      "checks": [
+        "A step counts as reviewed only while its hunk ids match what you saw, so a changed step needs a fresh look.",
+        "An unreadable store is renamed aside, not overwritten."
+      ],
+      "hunks": [
+        "h:9ce7230057",
+        "h:cf67884822"
+      ]
+    },
+    {
+      "title": "Finishing: merge, send back, discard",
+      "why": "The three decisions from the Finish screen. Each refuses to act when the repo isn't in a safe state and says why.",
+      "checks": [
+        "Send back runs 'claude --resume <id> --print' with acceptEdits and only wtv plus read-only git allowed. Tested against a throwaway repo: the agent reverted the dropped step and wtv passed.",
+        "A session from another config dir is resumed with CLAUDE_CONFIG_DIR set to that dir; for ~/.claude the variable is removed so the default sign-in is used.",
+        "Pull requests can't be merged locally, and only local branches can be deleted on discard.",
+        "Merge needs the main folder clean and on the base branch. Uncommitted worktree changes are only committed after you click a separate button, and .review stays out of that commit.",
+        "Discard keeps the branch unless you tick delete, and then asks once more."
+      ],
+      "hunks": [
+        "h:7dc374bd5f",
+        "h:f706baa256"
+      ],
+      "notes": {
+        "h:f706baa256": "Apps started from Finder get a minimal PATH, so this borrows the login shell's PATH to find claude and wtv."
+      }
+    },
+    {
+      "title": "Open pull requests through gh",
+      "why": "You want to review open PRs, from agents and colleagues. gh lists them; one git fetch brings their heads and bases into refs/reviewer/*, because wtv needs the commits locally.",
+      "checks": [
+        "Only for projects where you ticked 'Link the GitHub remote'. Nothing is posted to GitHub.",
+        "refs/reviewer/* never touches your branches or working tree. Remove it with: git for-each-ref --format='delete %(refname)' refs/reviewer | git update-ref --stdin",
+        "A PR's base is its own base branch, so stacked PRs show only their own changes."
+      ],
+      "hunks": [
+        "h:b5f0df4d6a",
+        "h:54eb7bee08"
+      ]
+    },
+    {
+      "title": "Review any branch",
+      "why": "Reviews aren't only for agent work. The picker lists every local and remote branch with commits on top of the base; a picked branch stays in the inbox until you finish it, whatever the watch rule.",
+      "checks": [
+        "Remote branches are as fresh as your last fetch; Reviewer doesn't fetch them.",
+        "Without a session or PR, the title is the last commit's subject and the card shows its author."
+      ],
+      "hunks": [
+        "h:545b5016bc"
+      ]
+    },
+    {
+      "title": "App shell: Electron, window, tray and IPC",
+      "why": "The main process owns git, sessions and the store; the renderer is sandboxed and only sees a typed API. Closing the window keeps Reviewer in the menu bar.",
+      "checks": [
+        "New dependencies: electron, electron-vite, vite, react, react-dom, typescript, plus @fontsource fonts so nothing loads from Google Fonts at runtime.",
+        "REVIEWER_USER_DATA points the store somewhere else, for tests and demos.",
+        "The tray only has Open and Quit for now. Badge and notifications are phase 2."
+      ],
+      "hunks": [
+        "h:b4555e2304",
+        "h:af29a948e0",
+        "h:09a4ced799",
+        "h:c9f884a521",
+        "h:70f0b7fe81",
+        "h:e43dde3061",
+        "h:284b2a9799",
+        "h:ac67c52505"
+      ]
+    },
+    {
+      "title": "Design tokens and shared UI",
+      "why": "Colors, type and spacing come from the design screens, as CSS variables. The diff hunk, risk pill and async loader are shared by every screen.",
+      "checks": [
+        "Long hunks show 80 rows and a 'Show N more lines' button."
+      ],
+      "hunks": [
+        "h:47b62df83a",
+        "h:8cfd8c1ee6",
+        "h:d70841dc41",
+        "h:121cfa2a03",
+        "h:717441e81f",
+        "h:a6aefa5ea8"
+      ]
+    },
+    {
+      "title": "Review workspace",
+      "why": "The main screen: steps in the chosen order, why and checks, diff per hunk with agent notes, a comment per step, mark reviewed, progress, and the attention panel.",
+      "checks": [
+        "Step numbers always follow the agent's story order, also when you sort by risk or file, so 'step 5' in the attention panel means the same step everywhere.",
+        "Comments save while you type and when you leave a step, including if you leave before React re-rendered the last keystroke (found with a scripted run).",
+        "Opening a branch discovers only that branch and runs wtv on its own worker, so it takes 0.1 to 0.5 s even during an inbox refresh. Start review hands its data to the workspace instead of loading twice.",
+        "While loading, the page keeps its header and the branch name; the spinner only fades in after 200 ms."
+      ],
+      "hunks": [
+        "h:718563f7fc"
+      ]
+    },
+    {
+      "title": "Welcome, Connect, inbox and Start review",
+      "why": "Getting a project in and choosing what to review. Connect doubles as project settings, opened from the gear next to each project. Phase 2 options from the design are visible but disabled with a 'Later' tag.",
+      "checks": [
+        "You can now change the base branch, watch rule and GitHub link, or remove the project.",
+        "An empty inbox says why per project: sessions found, branches that no longer exist, branches with nothing left to review.",
+        "The inbox refreshes when the window gets focus, since agents keep working in the background."
+      ],
+      "hunks": [
+        "h:9b38c2a157",
+        "h:7999663aa2",
+        "h:938f367524",
+        "h:3df2364a62"
+      ]
+    },
+    {
+      "title": "Finish and Done",
+      "why": "Your decision, your comments, and which out-of-task steps to drop. Starting a new review after a send back archives the earlier round so the new pass starts clean.",
+      "checks": [
+        "Dropping steps only works with Send back for now: the agent reverts them."
+      ],
+      "hunks": [
+        "h:d277a90665",
+        "h:c1dec3133d"
+      ]
+    }
+  ]
+}

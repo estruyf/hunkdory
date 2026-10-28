@@ -26,7 +26,15 @@ real diff. Your job is to make the walkthrough complete and honest.
          "title": "Short name of one idea",
          "why": "Why this was needed, in one or two sentences",
          "risk": "Optional: what could break, what to check",
-         "hunks": ["h:54b48929c1", "src/retry.js", "src/sync.js:10-24"]
+         "checks": ["Optional: questions the reviewer should answer, one per item"],
+         "hunks": ["h:54b48929c1", "src/retry.js", "src/sync.js:10-24"],
+         "notes": { "h:54b48929c1": "Optional: a note on one hunk, e.g. a choice you made" }
+       },
+       {
+         "title": "Something you changed that the task didn't ask for",
+         "why": "Why you did it anyway",
+         "outsideTask": true,
+         "hunks": ["h:cd6e11d63f"]
        }
      ]
    }
@@ -48,6 +56,13 @@ real diff. Your job is to make the walkthrough complete and honest.
 - **One idea per chapter.** If a chapter's "why" needs "and also", split it.
 - **Fill `risk`** for anything tagged high in `wtv list`: say what you changed
   and what the reviewer should check.
+- **Write `checks`** as short questions the reviewer should answer, especially
+  for assumptions you made ("Is falling back to the client IP what you want?").
+- **Mark `outsideTask: true`** on a chapter for anything the prompt didn't ask
+  for: drive-by refactors, formatting, unrelated fixes. Better: revert them.
+- **Use `notes`** for a hunk where you made a choice the reviewer should know
+  about. Key it by one of the chapter's refs. A note on a hunk the chapter
+  doesn't cover is reported.
 - **Don't reference things that aren't in the diff.** Refs that match nothing
   fail the check as phantom claims.
 - Whitespace-only and lockfile hunks are skipped automatically. You don't need

@@ -1,0 +1,83 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { baseRef, fetchRefspecs, foldComments, isCopilot, parseChecks, prRef, readWalkthroughComment, stackOf, walkthroughComment } from '../src/main/github.ts';
+import type { PullRequest } from '../src/shared/types.ts';
+
+const pr = (number: number, headRefOid: string, baseRefName = 'develop/5.5'): PullRequest => ({
+  number,
+  title: `PR ${number}`,
+  headRefName: `feat/${number}`,
+  headRefOid,
+  baseRefName,
+  author: 'someone',
+  isBot: false,
+  isDraft: false,
+  url: `https://github.com/acme/app/pull/${number}`,
+  body: '',
+  updatedAt: '2026-10-28T10:00:00Z',
+  copilot: false,
+  checks: [],
+});
+
+test('fetches only pull requests whose head moved, into a private namespace', () => {
+  const have = new Map([[prRef(1), 'aaa']]);
+  const specs = fetchRefspecs([pr(1, 'aaa'), pr(2, 'bbb'), pr(3, 'ccc', 'main')], have);
+  assert.deepEqual(specs, [
+    '+refs/pull/2/head:refs/reviewer/pr/2',
+    '+refs/pull/3/head:refs/reviewer/pr/3',
+    '+refs/heads/develop/5.5:refs/reviewer/base/develop/5.5',
+    '+refs/heads/main:refs/reviewer/base/main',
+  ]);
+  assert.ok(specs.every((s) => s.split(':')[1].startsWith('refs/reviewer/')), 'never writes to your branches');
+});
+
+test('nothing to fetch when every head is current', () => {
+  assert.deepEqual(fetchRefspecs([pr(1, 'aaa')], new Map([[prRef(1), 'aaa']])), []);
+  assert.equal(baseRef('develop/5.5'), 'refs/reviewer/base/develop/5.5');
+});
+
+test('checks: runs and statuses become pass, fail, pending or skipped', () => {
+  const checks = parseChecks([
+    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://ci/1' },
+    { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { __typename: 'CheckRun', name: 'lint', status: 'IN_PROGRESS', conclusion: '' },
+    { __typename: 'CheckRun', name: 'deploy', status: 'COMPLETED', conclusion: 'SKIPPED' },
+    { __typename: 'StatusContext', context: 'ci/legacy', state: 'PENDING', targetUrl: 'https://ci/2' },
+    { __typename: 'StatusContext', context: 'ci/old', state: 'ERROR' },
+  ]);
+  assert.deepEqual(
+    checks.map((c) => [c.name, c.state]),
+    [['build', 'pass'], ['test', 'fail'], ['lint', 'pending'], ['deploy', 'skipped'], ['ci/legacy', 'pending'], ['ci/old', 'fail']]
+  );
+  assert.equal(checks[0].url, 'https://ci/1');
+  assert.deepEqual(parseChecks(null), []);
+});
+
+test('the Copilot coding agent is recognised by its login', () => {
+  for (const l of ['Copilot', 'app/copilot-swe-agent', 'copilot-swe-agent[bot]']) assert.ok(isCopilot(l), l);
+  for (const l of ['copilot-fan', 'eliostruyf', 'dependabot[bot]']) assert.ok(!isCopilot(l), l);
+});
+
+test('a stack runs from the bottom PR up, through bases that are other PRs\' heads', () => {
+  const p = (n: number, head: string, base: string) => ({ ...pr(n, 'x', base), headRefName: head });
+  const prs = [p(1, 'feat/a', 'develop'), p(2, 'feat/b', 'feat/a'), p(3, 'feat/c', 'feat/b'), p(4, 'feat/d', 'feat/c'), p(9, 'other', 'develop')];
+  const st = stackOf(prs, 3)!;
+  assert.equal(st.base, 'develop');
+  assert.deepEqual(st.prs.map((x) => x.number), [1, 2, 3, 4]);
+  assert.equal(stackOf(prs, 9), null, 'a PR on its own is no stack');
+  assert.deepEqual(stackOf(prs, 1)!.prs.map((x) => x.number), [1, 2, 3, 4]);
+});
+
+test('line comments GitHub cannot place go into the review text with their place', () => {
+  assert.equal(foldComments('Summary', [{ path: 'src/a.ts', line: 4, side: 'RIGHT', body: 'Use the helper' }, { path: 'src/b.ts', line: 9, side: 'LEFT', body: 'Why remove this?' }]), 'Summary\n\n**`src/a.ts:4`**\nUse the helper\n\n**`src/b.ts:9`** (removed line)\nWhy remove this?');
+});
+
+test('a shared walkthrough reads well on GitHub and carries its data for other Reviewers', () => {
+  const data = { version: 1, base: 'abc', chapters: [{ title: 'Retry', why: 'Flaky network', hunks: ['h:1234567'] }] };
+  const body = walkthroughComment({ intent: 'Make sync retry.', chapters: [{ title: 'Retry', why: 'Flaky network', checks: ['Is 3 enough?'], files: ['src/retry.js'] }] }, data);
+  assert.match(body, /## Review walkthrough\n\nMake sync retry\./);
+  assert.match(body, /### 1\. Retry\n\nFlaky network\n\n- \[ \] Is 3 enough\?\n\nFiles: `src\/retry\.js`/);
+  assert.deepEqual(readWalkthroughComment(body), data);
+  assert.equal(readWalkthroughComment('Just a comment'), null);
+  assert.equal(readWalkthroughComment('<!-- reviewer:data:bm90IGpzb24= -->'), null, 'needs the marker');
+});
