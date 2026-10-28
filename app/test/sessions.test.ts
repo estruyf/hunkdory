@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { belongsTo, claudeConfigDirs, encodeProjectPath, parseTranscript, promptText, readSessions, sessionDirsFor } from '../src/main/sessions/claude.ts';
+import { belongsTo, claudeConfigDirs, encodeProjectPath, parseTranscript, promptText, readSessions, sessionDirsFor, testResult } from '../src/main/sessions/claude.ts';
 import { jsonl, lines, ROOT, SESSION, WT } from './fixtures/transcript.ts';
 
 test('encodes project paths the way Claude Code names its folders', () => {
@@ -87,4 +87,40 @@ test('looks in every Claude Code config dir, not just ~/.claude', () => {
   writeFileSync(join(home, '.claude.json'), '{}');
   assert.deepEqual(claudeConfigDirs(home, {}), [join(home, '.claude'), join(home, '.claude-work')], 'only dirs with a projects folder, and not .claude.json');
   assert.deepEqual(claudeConfigDirs(home, { CLAUDE_CONFIG_DIR: '~/custom' }), [join(home, '.claude'), join(home, 'custom'), join(home, '.claude-work')]);
+});
+
+test('test runs come from Bash calls and their output, and the last edit is kept', () => {
+  const at = (m: number) => `2026-10-21T17:${String(m).padStart(2, '0')}:00.000Z`;
+  const use = (m: number, id: string, name: string, input: object) => ({ type: 'assistant', cwd: WT, sessionId: SESSION, timestamp: at(m), message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const result = (m: number, id: string, content: string, isError = false) => ({ type: 'user', cwd: WT, sessionId: SESSION, timestamp: at(m), toolUseResult: { stdout: content }, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } });
+  const s = parseTranscript(
+    jsonl([
+      ...lines,
+      use(1, 'e1', 'Edit', { file_path: '/x.ts' }),
+      use(2, 'b1', 'Bash', { command: 'cd /repo && npm test 2>&1 | tail -3' }),
+      result(3, 'b1', ' Tests  1 failed | 28 passed (29)'),
+      use(4, 'b2', 'Bash', { command: 'node --disable-warning=X --test test/*.test.ts' }),
+      result(5, 'b2', 'ℹ pass 66\nℹ fail 0'),
+      use(6, 'b3', 'Bash', { command: 'grep -rn "vitest" src' }),
+      result(7, 'b3', 'src/a.ts: vitest'),
+      use(6, 'b4', 'Bash', { command: "python3 - <<'EOF'\nprint('npm test')\nEOF" }),
+      result(7, 'b4', 'npm test'),
+      use(8, 'e2', 'Write', { file_path: '/y.ts' }),
+    ]),
+    '/x.jsonl',
+    SESSION
+  )!;
+  assert.deepEqual(s.testRuns, [
+    { command: 'npm test 2>&1 | tail -3', result: 'failed', at: at(2) },
+    { command: 'node --disable-warning=X --test test/*.test.ts', result: 'passed', at: at(4) },
+  ]);
+  assert.equal(s.lastEditAt, at(8));
+});
+
+test('a test result reads the output, since a piped run exits 0', () => {
+  assert.equal(testResult(false, 'Tests:       32 passed, 32 total'), 'passed');
+  assert.equal(testResult(false, '0 failed, 12 passed'), 'passed');
+  assert.equal(testResult(false, '✖ failing tests:'), 'failed');
+  assert.equal(testResult(true, ''), 'failed');
+  assert.equal(testResult(false, 'built in 76ms'), 'unknown');
 });

@@ -34,14 +34,20 @@ export function AskPanel({
   step,
   exchanges,
   onShowChanges,
+  draft,
 }: {
   data: ReviewData;
   step: Step;
   exchanges: Exchange[];
   /** Reloads the review after Claude changed the branch. */
   onShowChanges: () => void;
+  /** A question to start from, like a check you weren't sure about. */
+  draft?: string;
 }) {
   const [text, setText] = useState('');
+  useEffect(() => {
+    if (draft) setText(draft);
+  }, [draft]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const running = exchanges.some((e) => e.status === 'running');

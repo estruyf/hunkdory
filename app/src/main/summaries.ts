@@ -5,7 +5,8 @@ import { dirname } from 'node:path';
 import type { InboxItem } from '../shared/types.ts';
 
 /** Bump when what goes into a summary changes, so old ones aren't trusted. */
-const VERSION = 1;
+// 2: recalibrated risk tags and the new flag wording.
+const VERSION = 2;
 
 export type Summary = Pick<InboxItem, 'title' | 'files' | 'added' | 'removed' | 'steps' | 'minutes' | 'flags' | 'walkthrough'> & { author: string | null };
 

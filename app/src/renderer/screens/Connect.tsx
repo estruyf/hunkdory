@@ -13,6 +13,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const [watch, setWatch] = useState<Watch['mode']>('agent-sessions');
   const [pattern, setPattern] = useState('claude/*, copilot/*');
   const [github, setGithub] = useState<string | null>(null);
+  const [writeWalkthroughs, setWriteWalkthroughs] = useState<boolean | undefined>(undefined);
   const [linking, setLinking] = useState(false);
   const [githubError, setGithubError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       setExisting(p);
       setPath(p.path);
       setGithub(p.github ?? null);
+      setWriteWalkthroughs(p.writeWalkthroughs);
       setWatch(p.watch.mode);
       if (p.watch.mode === 'pattern') setPattern(p.watch.pattern);
     });
@@ -78,8 +80,8 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
     setError(null);
     const w: Watch = watch === 'pattern' ? { mode: 'pattern', pattern } : watch === 'pull-requests' ? { mode: 'pull-requests' } : { mode: 'agent-sessions' };
     try {
-      if (existing) await window.api.updateProject(existing.id, { baseBranch: base, watch: w, github });
-      else await window.api.addProject({ path: check!.root!, baseBranch: base, watch: w, github });
+      if (existing) await window.api.updateProject(existing.id, { baseBranch: base, watch: w, github, writeWalkthroughs });
+      else await window.api.addProject({ path: check!.root!, baseBranch: base, watch: w, github, writeWalkthroughs });
       go({ name: 'home' });
     } catch (e) {
       setError(cleanError(e));
@@ -202,6 +204,17 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
             good={!!github}
           />
           <Source name="Codex CLI" where="~/.codex/sessions" status="Later" />
+          <label className="choice">
+            <input type="checkbox" checked={!!writeWalkthroughs} onChange={(e) => setWriteWalkthroughs(e.target.checked)} />
+            <span>
+              <strong>Let Claude write walkthroughs</strong>
+              <br />
+              <span className="muted">
+                For a branch that opens without one. Claude Code reads the diff, the commits and the session, and like any Claude Code run that goes to Anthropic. Off: you get one step per file, and a button to
+                write one when you want it.
+              </span>
+            </span>
+          </label>
         </Section>
 
         <Section n={3} title="What needs a review">

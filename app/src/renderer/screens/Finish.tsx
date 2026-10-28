@@ -3,7 +3,7 @@ import type { Go } from '../App.tsx';
 import { Brand, Crumbs, LoadingPage, Stat, cleanError, plural, reviewCrumbs, useAsync } from '../components/ui.tsx';
 import { ReviewError } from './Review.tsx';
 import { isReviewed } from '../../shared/order.ts';
-import { defaultDrops } from '../../shared/plan.ts';
+import { buildPlan, defaultDrops, openItems } from '../../shared/plan.ts';
 import type { Decision, GitHubEvent, ReviewData, ReviewState } from '../../shared/types.ts';
 
 const EVENTS: { id: GitHubEvent; title: string }[] = [
@@ -24,8 +24,11 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
   const [drop, setDrop] = useState<Set<string>>(() => new Set(defaultDrops(data.steps, state.settled)));
   const comments = state.comments.filter((c) => c.body.trim());
   const agent = data.session ? 'claude' : data.agent === 'copilot' ? 'copilot' : null;
+  const open = openItems(buildPlan(data, state), state);
   const [pick, setPick] = useState<Decision>(() => (agent && (comments.length || drop.size) ? 'send-back' : data.pr ? 'github' : agent ? 'send-back' : 'merge'));
-  const [event, setEvent] = useState<GitHubEvent>(() => (comments.length ? 'COMMENT' : 'APPROVE'));
+  const [event, setEvent] = useState<GitHubEvent>(() => (open.fixes.length ? 'REQUEST_CHANGES' : comments.length ? 'COMMENT' : 'APPROVE'));
+  // Merging with something still open takes a second click.
+  const [confirming, setConfirming] = useState(false);
   const [note, setNote] = useState('');
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -42,6 +45,13 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
   const minutes = state.startedAt ? Math.max(1, Math.round((Date.now() - Date.parse(state.startedAt)) / 60000)) : null;
   const dropping = pick === 'send-back' ? data.steps.filter((s) => drop.has(s.key)) : [];
   const base = data.baseRef.replace(/^origin\//, '');
+  const unfinished = [
+    open.decisions.length && `${plural(open.decisions.length, 'decision')} not made yet: ${open.decisions.map((d) => d.title).join('; ')}.`,
+    open.fixes.length && `You said ${open.fixes.length === 1 ? 'this needs' : 'these need'} a fix: ${open.fixes.map((d) => d.title).join('; ')}.`,
+    open.careful.length && `${plural(open.careful.length, 'step')} to read closely ${open.careful.length === 1 ? 'is' : 'are'} not reviewed.`,
+    open.skim.length && `${plural(open.skim.length, 'step')} to skim ${open.skim.length === 1 ? 'is' : 'are'} not reviewed.`,
+  ].filter((x): x is string => !!x);
+  const guarded = pick === 'merge' && unfinished.length > 0;
   const stepLabel = (key: string) => {
     const s = data.steps.find((x) => x.key === key);
     return s ? `Step ${s.index + 1} · ${s.files.length === 1 ? s.files[0] : s.title}` : 'Removed step';
@@ -63,7 +73,7 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
           {
             id: 'github' as const,
             title: `Post your review on PR #${data.pr.number}`,
-            detail: `Your ${plural(comments.length, 'comment')} go on GitHub${comments.some((c) => c.line) ? ', line comments on their lines' : ''}. The PR leaves your inbox until it changes.`,
+            detail: `${comments.length ? `Your ${plural(comments.length, 'comment')} ${comments.length === 1 ? 'goes' : 'go'}` : 'Your review goes'} on GitHub${comments.some((c) => c.line) ? ', line comments on their lines' : ''}. The PR leaves your inbox until it changes.`,
             submit: event === 'APPROVE' ? 'Approve on GitHub' : event === 'REQUEST_CHANGES' ? 'Request changes on GitHub' : 'Post review',
           },
         ]
@@ -92,6 +102,10 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
   const current = options.find((o) => o.id === pick)!;
 
   const submit = async (commitFirst = false) => {
+    if (guarded && !confirming) {
+      setConfirming(true);
+      return;
+    }
     if (pick === 'discard' && deleteBranch && !window.confirm(`Delete ${data.branch}${''} and its worktree? Uncommitted changes in it are lost.`)) return;
     setBusy(true);
     setError(null);
@@ -162,6 +176,17 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
           {outside.length > 0 && pick !== 'send-back' && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Dropping steps works with Send back for now: the agent reverts them.</p>}
         </section>
 
+        {unfinished.length > 0 && (
+          <div className="notice" role={confirming ? 'alert' : undefined} style={{ flexDirection: 'column', gap: 6 }}>
+            <strong>{confirming ? 'Merge with these still open?' : 'Not done yet'}</strong>
+            <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {unfinished.map((u) => (
+                <li key={u}>{u}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <section className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <legend className="label" style={{ padding: 0, marginBottom: 6 }}>
@@ -173,7 +198,7 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
                 className={o.disabled ? 'choice off' : 'choice'}
                 style={{ gap: 12, padding: '14px 16px', borderRadius: 10, cursor: o.disabled ? 'default' : 'pointer', border: `1px solid ${pick === o.id ? 'var(--accent)' : 'var(--border)'}`, background: pick === o.id ? 'var(--accent-soft)' : 'var(--surface)' }}
               >
-                <input type="radio" name="decision" disabled={!!o.disabled} checked={pick === o.id} onChange={() => { setPick(o.id); setNeedsCommit(null); setError(null); }} />
+                <input type="radio" name="decision" disabled={!!o.disabled} checked={pick === o.id} onChange={() => { setPick(o.id); setNeedsCommit(null); setError(null); setConfirming(false); }} />
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   <span style={{ fontSize: 15, fontWeight: 600 }}>{o.title}</span>
                   <span style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--muted)' }}>{o.disabled ?? o.detail}</span>
@@ -254,7 +279,7 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
             Keep reviewing
           </button>
           <button type="button" className="btn lg primary" disabled={busy || !!current.disabled} onClick={() => submit(false)}>
-            {busy ? 'Working…' : current.submit}
+            {busy ? 'Working…' : confirming && guarded ? 'Merge anyway' : current.submit}
           </button>
         </div>
       </div>

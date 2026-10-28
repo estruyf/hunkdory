@@ -9,7 +9,7 @@ import type { WtvJob, WtvOutput } from './wtv-worker.ts';
 import * as g from './git.ts';
 import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './sessions/claude.ts';
 import * as gh from './github.ts';
-import { integrationBranches, matchesPattern, matchSessions, withCheckoutFallback, type BranchSessions } from './match.ts';
+import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, withCheckoutFallback, type BranchSessions } from './match.ts';
 import { attention, buildSteps, estimateMinutes } from './steps.ts';
 import type { Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
@@ -143,6 +143,7 @@ export class Projects {
       remote: check.remote,
       watch: input.watch,
       github: input.github,
+      writeWalkthroughs: input.writeWalkthroughs,
       addedAt: new Date().toISOString(),
     };
     this.store.addProject(project);
@@ -152,11 +153,17 @@ export class Projects {
   async updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project> {
     const project = this.store.project(id);
     await this.validate(project.path, input);
-    const updated: Project = { ...project, baseBranch: input.baseBranch, watch: input.watch, github: input.github, remote: await g.remoteUrl(project.path) };
+    const updated: Project = { ...project, baseBranch: input.baseBranch, watch: input.watch, github: input.github, writeWalkthroughs: input.writeWalkthroughs ?? project.writeWalkthroughs, remote: await g.remoteUrl(project.path) };
     this.store.addProject(updated);
     // Bases and watch rules change what every review looks like.
     for (const k of [...this.cache.keys()]) if (k.startsWith(`${id}::`)) this.cache.delete(k);
     return updated;
+  }
+
+  setWriteWalkthroughs(id: string, on: boolean) {
+    this.store.addProject({ ...this.store.project(id), writeWalkthroughs: on });
+    // Every open review carries the answer.
+    for (const k of [...this.cache.keys()]) if (k.startsWith(`${id}::`)) this.cache.delete(k);
   }
 
   /** Every local and remote-tracking branch with commits on top of the base, newest first. */
@@ -229,6 +236,7 @@ export class Projects {
     } else {
       items = await this.discoverBranches(project, sessions, branches, trees, exclude, scan, { only });
     }
+    if (!only) items = foldDuplicates(items);
     scan.waiting = items.length;
     return { items, scan };
   }
@@ -584,6 +592,13 @@ export class Projects {
       repo: project.github,
       projectId: project.id,
       projectName: project.name,
+      agentTests: d.match
+        ? {
+            runs: d.match.sessions.flatMap((s) => s.testRuns ?? []).sort((a, b) => a.at.localeCompare(b.at)),
+            lastEditAt: d.match.sessions.map((s) => s.lastEditAt).filter((t): t is string => !!t).sort().at(-1) ?? null,
+          }
+        : null,
+      writeWalkthroughs: project.writeWalkthroughs ?? null,
       branch: d.branch.name,
       baseRef: d.branch.baseName,
       baseSha,
@@ -624,6 +639,11 @@ export class Projects {
         scans.push({ projectId: project.id, sessions: 0, branchesSeen: 0, gone: 0, upToDate: 0, waiting: 0, pullRequests: null, error: (e as Error).message });
         continue;
       }
+      // Review fixes on top of a PR and the like: their diff holds the other branch's changes too.
+      const unique = new Map(
+        await Promise.all(found.map(async (d) => [d.branch.name, new Set((await g.tryGit(['rev-list', '--max-count=500', `${d.branch.baseRef}..${d.branch.headRef}`], project.path))?.split('\n').filter(Boolean) ?? [])] as const))
+      );
+      const under = buildsOn(found.map((d) => ({ name: d.branch.name, headSha: d.branch.headSha })), unique);
       for (const d of found) {
         const state = this.store.review(project.id, d.branch.name);
         if (state?.status === 'discarded' || state?.status === 'merged') continue;
@@ -650,6 +670,10 @@ export class Projects {
           pr: pr ? { number: pr.number, isDraft: pr.isDraft, url: pr.url } : null,
           checks: pr?.checks ?? [],
           updatedSinceReview,
+          buildsOn: (() => {
+            const o = found.find((x) => x.branch.name === under.get(d.branch.name));
+            return o ? { branch: o.branch.name, pr: o.branch.pr?.number ?? null } : null;
+          })(),
           tracked: !!d.branch.tracked,
           review: state ? { status: state.status, reviewedSteps: Object.keys(state.reviewed).length } : null,
         };
@@ -676,6 +700,20 @@ export class Projects {
   }
 }
 
+/** Folds branches on the same commit as another one into it, sessions and all. */
+function foldDuplicates(items: Discovered[]): Discovered[] {
+  const dups = duplicateBranches(items.map((d) => ({ name: d.branch.name, headSha: d.branch.headSha, pr: !!d.branch.pr, dirty: d.branch.dirtyFiles > 0 })));
+  for (const [name, into] of dups) {
+    const dup = items.find((d) => d.branch.name === name)!;
+    const keep = items.find((d) => d.branch.name === into)!;
+    keep.branch.sessionIds = [...new Set([...keep.branch.sessionIds, ...dup.branch.sessionIds])];
+    // The kept branch's own sessions stay first: they made it, and send back resumes the first.
+    const extra = (dup.match?.sessions ?? []).filter((s) => !keep.match?.sessions.some((k) => k.id === s.id));
+    keep.match = keep.match ? { ...keep.match, sessions: [...keep.match.sessions, ...extra] } : dup.match;
+  }
+  return items.filter((d) => !dups.has(d.branch.name));
+}
+
 async function firstRef(root: string, refs: string[]): Promise<string | null> {
   for (const ref of refs) if (await g.refExists(root, ref)) return ref;
   return null;
@@ -686,9 +724,9 @@ function summarize(data: ReviewData): Summary {
   const deps = new Set(Object.values(data.hunks).filter((h) => h.risks.some((r) => r.code === 'deps')).map((h) => h.path)).size;
   const high = data.steps.filter((s) => s.risk === 'high').length;
   const flags = [];
-  if (outside) flags.push(`${outside} change${outside > 1 ? 's' : ''} outside the task`);
+  if (outside) flags.push(`${outside} change${outside > 1 ? 's' : ''} outside your request`);
   if (deps) flags.push(`${deps === 1 ? 'Dependency' : `${deps} dependency`} change${deps > 1 ? 's' : ''}`);
-  if (high) flags.push(`${high} high-risk step${high > 1 ? 's' : ''}`);
+  if (high) flags.push(`${high} step${high > 1 ? 's need' : ' needs'} attention`);
   return {
     title: data.title,
     files: data.files,

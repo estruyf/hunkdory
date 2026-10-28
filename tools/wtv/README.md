@@ -79,7 +79,8 @@ can't loop, and it never blocks when something goes wrong (no git, no changes).
 ## JSON contract (for a review UI)
 
 `wtv verify --json` returns `ok`, `intent`, `base`, `head`, `chapters` (with
-`hunkIds`, `checks`, `outsideTask` and `notes` resolved to `hunkIds`), `hunks` (full content, `bucket`, `risks`, `level`, `chapters`),
+`hunkIds`, `checks`, `outsideTask` and `notes` resolved to `hunkIds`), `hunks` (full content, `bucket`, `risks`, `level`, `chapters`;
+each risk has `code`, `severity`, `label` and, when a line set it off, `match: { term, line }`),
 `buckets` and `findings`. A UI renders chapters in order and puts
 `buckets.unnarrated` at the top.
 
@@ -87,13 +88,14 @@ can't loop, and it never blocks when something goes wrong (no git, no changes).
 
 - Two edits on adjacent lines merge into one hunk, which gets a new id. Line
   and file refs still match.
-- Risk tags are keyword-based, so expect some false positives (for example
-  `session` or `token` in non-auth code).
+- Risk tags are keyword-based, so expect some false positives. Comment lines are
+  skipped, and weak terms (`session`, `role`, `permission`) only count as medium.
+  Every tag says which text set it off.
 - Whitespace-only detection is off for indentation-sensitive files (Python, YAML).
 
 ## Tests
 
 ```bash
-npm test            # 12 tests against a generated fixture repo
+npm test            # 20 tests: risk rules, and a generated fixture repo
 node test/demo.mjs  # see the report on the "sneaky agent" fixture
 ```

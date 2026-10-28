@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import hljs from 'highlight.js/lib/common';
-import { ignoreWhitespace, languageFor, splitRows } from '../../shared/diff.ts';
+import { ignoreWhitespace, languageFor, riskReason, splitRows } from '../../shared/diff.ts';
 import type { Comment, DiffLine, HunkView } from '../../shared/types.ts';
 import { Markdown } from './markdown.tsx';
 
@@ -208,7 +208,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
         <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {badge}
           {risks.map((r) => (
-            <span key={r.code} className={`pill ${r.severity}`} style={{ fontSize: 11 }}>
+            <span key={r.code} className={`pill ${r.severity}`} style={{ fontSize: 11 }} title={riskReason(r) ?? undefined}>
               {r.label}
             </span>
           ))}

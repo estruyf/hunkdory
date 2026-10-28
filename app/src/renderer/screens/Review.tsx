@@ -3,6 +3,7 @@ import type { Go } from '../App.tsx';
 import { Brand, LoadingPage, useAsync } from '../components/ui.tsx';
 import type { ReviewData, ReviewState, Step } from '../../shared/types.ts';
 import { Markdown } from '../components/markdown.tsx';
+import { timeAgo } from '../../shared/order.ts';
 import { Walkthrough } from './Walkthrough.tsx';
 
 type At = { stepKey?: string; decision?: string };
@@ -43,6 +44,28 @@ export function AskedFor({ data, clamp }: { data: ReviewData; clamp?: number }) 
     <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5 }}>
       {data.pr ? 'The pull request has no description, and no Claude Code session on this Mac worked on its branch.' : 'No Claude Code session ran on this branch, so there is no prompt to show.'}
     </p>
+  );
+}
+
+/** Whether the agent ran tests in its session, and whether that still covers the last edit. */
+export function AgentTests({ data }: { data: ReviewData }) {
+  const t = data.agentTests;
+  if (!t) return null;
+  const last = t.runs.at(-1);
+  if (!last) return <span style={{ color: 'var(--med-fg)', fontWeight: 600 }}>The agent didn’t run any tests in its session.</span>;
+  const outcome = { passed: 'they passed', failed: 'they failed', unknown: 'the output doesn’t say if they passed' }[last.result];
+  const stale = !!t.lastEditAt && t.lastEditAt > last.at;
+  return (
+    <span>
+      <span style={{ fontWeight: 600, color: last.result === 'passed' && !stale ? 'var(--low-fg)' : 'var(--med-fg)' }}>
+        Last run {timeAgo(last.at)}: {outcome}.
+      </span>{' '}
+      <span className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>
+        {last.command}
+      </span>
+      {stale && <> The agent edited files after that run.</>}
+      {t.runs.length > 1 && <span className="muted"> ({t.runs.length} runs in all)</span>}
+    </span>
   );
 }
 

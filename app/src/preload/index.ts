@@ -9,6 +9,7 @@ const methods: (keyof ReviewerApi)[] = [
   'addProject',
   'updateProject',
   'removeProject',
+  'setWriteWalkthroughs',
   'checkGitHub',
   'listBranches',
   'trackBranch',

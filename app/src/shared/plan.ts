@@ -25,6 +25,8 @@ export interface SkimGroup {
 
 export interface Plan {
   decisions: PlanDecision[];
+  /** Medium flags on steps you read anyway: shown on the step, not asked as a decision. */
+  notes: PlanDecision[];
   careful: Step[];
   skim: Step[];
   skimGroups: SkimGroup[];
@@ -104,9 +106,12 @@ export function decisionLabels(d: Pick<PlanDecision, 'kind'>) {
     : { fine: 'It’s fine', fix: 'Needs a fix', fineDone: 'You said it’s fine', fixDone: d.kind === 'flag' ? 'Added to your comments' : 'Needs a fix' };
 }
 
-/** A flag that needs a fix becomes a comment on the step you decided it on. */
-export function settleComment(d: Pick<PlanDecision, 'kind' | 'title' | 'detail'>, value: 'fine' | 'fix' | null, stepKey: string | undefined) {
-  return value === 'fix' && d.kind === 'flag' && stepKey ? { stepKey, body: `Needs a fix: ${d.title}. ${d.detail}` } : undefined;
+/**
+ * A flag that needs a fix becomes a comment on the step you decided it on.
+ * Sent with every settle of a flag, so the main process can also take the line out when you change your mind.
+ */
+export function settleComment(d: Pick<PlanDecision, 'kind' | 'title' | 'detail'>, stepKey: string | undefined) {
+  return d.kind === 'flag' ? { stepKey, body: `Needs a fix: ${d.title}. ${d.detail}` } : undefined;
 }
 
 /** Where a step lives, in two folder names: "events/registrations". */
@@ -133,8 +138,11 @@ export function buildPlan(data: Pick<ReviewData, 'steps' | 'attention' | 'pr' | 
   const careful = orderSteps(data.steps.filter(isCareful), state.order);
   const skim = orderSteps(data.steps.filter((s) => !isCareful(s)), state.order);
   const groups = skimGroups(skim);
+  const all = buildDecisions(data.steps, data.attention, data.pr?.checks ?? [], !!(data.prompt || data.pr?.body.trim()));
+  const isNote = (d: PlanDecision) => d.kind === 'flag' && d.severity === 'medium' && d.stepKeys.length > 0;
   return {
-    decisions: buildDecisions(data.steps, data.attention, data.pr?.checks ?? [], !!(data.prompt || data.pr?.body.trim())),
+    decisions: all.filter((d) => !isNote(d)),
+    notes: all.filter(isNote),
     careful,
     skim,
     skimGroups: groups,
@@ -176,8 +184,29 @@ export function resumePoint(plan: Plan, state: Pick<ReviewState, 'reviewed' | 's
   return step ? { decision: null, stepKey: step.key } : null;
 }
 
-/** Steps to drop when you finish: those outside the task, unless you decided to keep them. */
+/** Steps to drop when you finish: those outside the task, only when you decided to drop them. */
 export function defaultDrops(steps: Step[], settled: ReviewState['settled']): string[] {
-  if (settled?.outside === 'fine') return [];
+  if (settled?.outside !== 'fix') return [];
   return steps.filter((s) => s.outsideTask).map((s) => s.key);
+}
+
+export interface OpenItems {
+  /** Decisions you haven't made yet. */
+  decisions: PlanDecision[];
+  /** Steps to read closely that you haven't marked reviewed. */
+  careful: Step[];
+  /** Steps to skim that you haven't marked reviewed. */
+  skim: Step[];
+  /** Flags you said need a fix. */
+  fixes: PlanDecision[];
+}
+
+/** What's still open or asks for a change, for warning before a merge. */
+export function openItems(plan: Plan, state: Pick<ReviewState, 'reviewed' | 'settled'>): OpenItems {
+  return {
+    decisions: plan.decisions.filter((d) => !state.settled?.[d.id]),
+    careful: plan.careful.filter((s) => !isReviewed(s, state.reviewed)),
+    skim: plan.skim.filter((s) => !isReviewed(s, state.reviewed)),
+    fixes: plan.decisions.filter((d) => d.kind !== 'outside' && state.settled?.[d.id] === 'fix'),
+  };
 }

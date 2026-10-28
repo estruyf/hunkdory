@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Loading, plural, sizeText, useAsync } from '../components/ui.tsx';
+import { Brand, Loading, plural, sizeText, useAsync, usePref } from '../components/ui.tsx';
 import { checksText, checksTone } from '../components/github.tsx';
-import { timeAgo } from '../../shared/order.ts';
+import { formatDuration, suggestedOrder, timeAgo, tooBig } from '../../shared/order.ts';
 import type { InboxItem, Project, ProjectScan, ReviewState } from '../../shared/types.ts';
 
 export function Home({ go, initialProject }: { go: Go; initialProject?: string }) {
@@ -10,6 +10,7 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
   const inbox = useAsync(() => window.api.inbox(), []);
   const [filter, setFilter] = useState<string | null>(initialProject ?? null);
   const [query, setQuery] = useState('');
+  const [order, setOrder] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
   // The project list stays in view under the header while the inbox scrolls; it needs the header's height for that.
   const headerRef = useRef<HTMLElement>(null);
   const [headerHeight, setHeaderHeight] = useState(68);
@@ -46,7 +47,9 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
   const q = query.trim().toLowerCase();
   const waiting = all.filter((w) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName}`.toLowerCase().includes(q)));
   const running = all.filter((w) => w.review?.status === 'sent-back');
-  const ready = waiting.filter((w) => w.review?.status !== 'sent-back');
+  const unsent = waiting.filter((w) => w.review?.status !== 'sent-back');
+  // The main process lists newest first.
+  const ready = order === 'suggested' ? suggestedOrder(unsent) : unsent;
   const done = (inbox.value?.done ?? []).filter((d) => d.decision?.result !== 'running');
   const names = new Map(projects.value?.map((p) => [p.id, p.name]));
 
@@ -92,7 +95,13 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <h1 style={{ fontSize: 22, letterSpacing: '-0.01em' }}>Waiting for you</h1>
               <span style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: 'var(--muted)' }}>Newest first</span>
+                <label className="sr-only" htmlFor="inbox-order">
+                  Order
+                </label>
+                <select id="inbox-order" className="field" value={order} onChange={(e) => setOrder(e.target.value as 'suggested' | 'newest')} style={{ height: 34, fontSize: 13, padding: '0 8px' }}>
+                  <option value="suggested">What to review first</option>
+                  <option value="newest">Newest first</option>
+                </select>
                 <button type="button" className="btn" style={{ height: 34 }} onClick={() => go({ name: 'pick', projectId: filter ?? undefined })}>
                   Review a branch…
                 </button>
@@ -117,8 +126,8 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
                 )}
               </div>
             )}
-            {ready.map((w) => (
-              <InboxCard key={`${w.projectId}:${w.branch}`} item={w} go={go} />
+            {ready.map((w, i) => (
+              <InboxCard key={`${w.projectId}:${w.branch}`} item={w} go={go} first={i === 0} />
             ))}
           </section>
 
@@ -225,7 +234,8 @@ function ProjectLink({ name, sub, count, active, strong, onClick, onSettings }: 
   );
 }
 
-function InboxCard({ item: w, go }: { item: InboxItem; go: Go }) {
+function InboxCard({ item: w, go, first }: { item: InboxItem; go: Go; first: boolean }) {
+  const big = !w.error && tooBig(w);
   const inProgress = !!w.review && w.review.reviewedSteps > 0 && w.review.status === 'open';
   const tag = w.updatedSinceReview ? { text: 'Updated since your review', cls: 'medium' } : inProgress ? { text: 'In progress', cls: 'low' } : { text: 'New', cls: 'accent' };
   const open = () => go(inProgress ? { name: 'review', projectId: w.projectId, branch: w.branch } : { name: 'start', projectId: w.projectId, branch: w.branch });
@@ -242,6 +252,16 @@ function InboxCard({ item: w, go }: { item: InboxItem; go: Go }) {
               PR #{w.pr.number}
               {w.pr.isDraft ? ' · draft' : ''} ↗
             </button>
+          )}
+          {big && (
+            <span className="pill high" style={{ border: 0 }} title="More than one sitting can take in. Ask the agent to split it, or review it over several sittings.">
+              Too big for one sitting
+            </span>
+          )}
+          {w.buildsOn && (
+            <span className="pill neutral" style={{ border: 0 }} title={`This branch starts from ${w.buildsOn.branch}, so that branch's changes show up in this review too.`}>
+              Builds on {w.buildsOn.pr ? `PR #${w.buildsOn.pr}` : w.buildsOn.branch}
+            </span>
           )}
           {w.tracked && (
             <span className="pill neutral" style={{ border: 0 }}>
@@ -272,19 +292,21 @@ function InboxCard({ item: w, go }: { item: InboxItem; go: Go }) {
         ) : (
           <>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-              {inProgress ? `${w.review!.reviewedSteps} of ${plural(w.steps, 'step')} reviewed` : `${plural(w.steps, 'step')} · about ${w.minutes} min`}
+              {inProgress ? `${w.review!.reviewedSteps} of ${plural(w.steps, 'step')} reviewed` : `${plural(w.steps, 'step')} · about ${formatDuration(w.minutes)}`}
               {w.walkthrough === 'skeleton' && ' · no walkthrough'}
               {w.walkthrough === 'reviewer' && ' · walkthrough by Reviewer'}
             </span>
-            {w.flags.map((f) => (
-              <span key={f} style={{ fontSize: 13, fontWeight: 600, color: 'var(--med-fg)' }}>
-                {f}
+            {/* The most important flag; the rest is one hover away. */}
+            {w.flags.length > 0 && (
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--med-fg)' }} title={w.flags.join('\n')}>
+                {w.flags[0]}
+                {w.flags.length > 1 && <span style={{ fontWeight: 400, color: 'var(--muted)' }}> +{w.flags.length - 1} more</span>}
               </span>
-            ))}
+            )}
           </>
         )}
       </div>
-      <button type="button" className="btn primary" onClick={open} disabled={!!w.error}>
+      <button type="button" className={`btn ${first ? 'primary' : ''}`} onClick={open} disabled={!!w.error}>
         {inProgress ? 'Continue review' : 'Start review'}
       </button>
     </article>

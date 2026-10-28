@@ -5,12 +5,12 @@ import { Brand, Crumbs, RiskPill, cleanError, plural, reviewCrumbs, sizeText, us
 import { DiffHunk, type DiffMode } from '../components/diff.tsx';
 import { ChecksCard, StackBar } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
-import { isReviewed } from '../../shared/order.ts';
+import { OUTSIDE_HINT, isReviewed } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, isCareful, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
 import type { ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 import { AskPanel } from '../components/ask.tsx';
 import { useCodeSearch } from '../components/search.tsx';
-import { AskedFor, CommentBox, whyFallback } from './Review.tsx';
+import { AgentTests, AskedFor, CommentBox, whyFallback } from './Review.tsx';
 
 export function Walkthrough({ go, data, initialState, stepKey, decision }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string }) {
   const [state, setState] = useState(initialState);
@@ -26,9 +26,11 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
   const selKey = dec ? (stepKey && dec.stepKeys.includes(stepKey) ? stepKey : dec.stepKeys[0]) : (stepKey ?? startKey);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  // A check you weren't sure about, ready to ask Claude on that step.
+  const [askDraft, setAskDraft] = useState<{ stepKey: string; text: string } | null>(null);
   const [commenting, setCommenting] = useState(false);
   const [commentKey, setCommentKey] = useState(0);
-  const [showContext, setShowContext] = usePref<boolean>('walkthrough-context', false);
+  const [showContext, setShowContext] = usePref<boolean>('walkthrough-context', true);
   const [mode, setMode] = usePref<DiffMode>('diff-mode', 'unified');
   const [ignoreSpace, setIgnoreSpace] = usePref<boolean>('diff-ignore-space', false);
   const since = useMemo(() => sinceLastRound(data.steps, state), [data.steps, state.rounds]);
@@ -114,11 +116,15 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
   const careful = !!cur && isCareful(cur);
 
   const settle = async (d: PlanDecision, value: 'fine' | 'fix' | null) => {
-    const comment = settleComment(d, value, cur?.key);
-    const next = await patch({ type: 'settle', id: d.id, value, comment });
+    const comment = settleComment(d, cur?.key);
+    let next = await patch({ type: 'settle', id: d.id, value, comment });
     if (!next) return;
+    // Deciding next to the code is reviewing it: the step doesn't come back later as one to read.
+    if (value && cur && d.stepKeys.includes(cur.key) && !isReviewed(cur, next.reviewed)) {
+      next = (await patch({ type: 'reviewed', stepKey: cur.key, hunkIds: cur.hunkIds, on: true })) ?? next;
+    }
     // The step's comment box shows what was added; say more there before moving on.
-    if (comment) {
+    if (value === 'fix' && comment?.stepKey) {
       setCommentKey((k) => k + 1);
       setCommenting(true);
       return;
@@ -140,15 +146,15 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
       onClick: () => decide(plan.decisions.find((d) => !state.settled?.[d.id]) ?? plan.decisions[0]),
       segments: plan.decisions.map((d) => ({ key: d.id, title: d.title, done: !!state.settled?.[d.id], current: d.id === dec?.id, onClick: () => decide(d) })),
     },
-    { label: 'Look carefully', now: !dec && careful, onClick: () => select(firstOf(plan.careful).key), segments: segs(plan.careful) },
+    { label: 'Read closely', now: !dec && careful, onClick: () => select(firstOf(plan.careful).key), segments: segs(plan.careful) },
     { label: 'Skim', now: !dec && !!cur && !careful, onClick: () => select(firstOf(plan.skim).key), segments: segs(plan.skim) },
   ].filter((p) => p.segments.length > 0);
 
   const phaseList = careful ? plan.careful : plan.skim;
   const here = dec
-    ? `Decide · ${decPos + 1} of ${plan.decisions.length}`
+    ? `Decision ${decPos + 1} of ${plan.decisions.length}`
     : cur
-      ? `${careful ? 'Look carefully' : 'Skim'} · ${phaseList.findIndex((s) => s.key === cur.key) + 1} of ${phaseList.length}`
+      ? `${careful ? 'Read closely' : 'Skim'} · step ${phaseList.findIndex((s) => s.key === cur.key) + 1} of ${phaseList.length}`
       : '';
 
   const header = (
@@ -197,7 +203,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
               )}
             </span>
             <button type="button" onClick={p.onClick} style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left', fontSize: 12.5, fontWeight: p.now ? 600 : 400, color: p.now ? 'var(--text)' : 'var(--muted)' }}>
-              {p.label} · {done === n ? `all ${n} done` : `${done} of ${n}`}
+              {p.label} · {done === n ? `all ${n} done` : `${done} of ${n} done`}
             </button>
           </div>
         );
@@ -261,7 +267,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
   const earlier = since?.earlierComments[cur.key] ?? [];
   const stepComment = state.comments.find((c) => c.stepKey === cur.key && !c.line)?.body ?? '';
   // The decision you came for first.
-  const stepFlags = plan.decisions.filter((d) => d.stepKeys.includes(cur.key)).sort((a, b) => Number(b.id === dec?.id) - Number(a.id === dec?.id));
+  const stepFlags = [...plan.decisions, ...plan.notes].filter((d) => d.stepKeys.includes(cur.key)).sort((a, b) => Number(b.id === dec?.id) - Number(a.id === dec?.id));
   const answers = state.answers?.[cur.key] ?? {};
   const lineComment = (hunkId: string, path: string) => (a: { side: 'LEFT' | 'RIGHT'; line: number }, body: string, id?: string) =>
     patch({ type: 'line-comment', id, stepKey: cur.key, hunkId, path, line: a.line, side: a.side, body });
@@ -289,6 +295,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
         setCommentKey((k) => k + 1);
       }
       setCommenting(true);
+      setAskDraft({ stepKey: cur.key, text: cur.checks[index] });
+      setAsking(true);
     }
   };
 
@@ -303,7 +311,11 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 10px', fontSize: 13, color: 'var(--muted)' }}>
               <span style={{ fontWeight: 600 }}>{here}</span>
               <RiskPill risk={cur.risk} />
-              {cur.outsideTask && <span className="pill medium">Outside the task</span>}
+              {cur.outsideTask && (
+                <span className="pill medium" title={OUTSIDE_HINT}>
+                  Outside your request
+                </span>
+              )}
               {done && <span className="pill low">Reviewed</span>}
               {since?.byStep[cur.key] && since.byStep[cur.key] !== 'same' && <span className="pill accent">{since.byStep[cur.key] === 'new' ? 'New' : 'Changed'} since last review</span>}
             </div>
@@ -439,6 +451,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
               data={data}
               step={cur}
               exchanges={stepExchanges}
+              draft={askDraft?.stepKey === cur.key ? askDraft.text : undefined}
               onShowChanges={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() })}
             />
           )}
@@ -460,6 +473,12 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
                 </button>
               )}
             </section>
+            {data.agentTests && (
+              <section className="card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 14, lineHeight: 1.5 }}>
+                <h2 className="label">The agent’s tests</h2>
+                <AgentTests data={data} />
+              </section>
+            )}
             {data.stack && (
               <section className="card" style={{ padding: '16px 18px' }}>
                 <StackBar data={data} go={go} />
@@ -519,7 +538,7 @@ function DecisionPage(props: {
       {props.top}
       <main style={{ width: '100%', maxWidth: 920, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)' }}>
-          Decide · {props.n} of {props.of}
+          Decision {props.n} of {props.of}
         </span>
         <h1 style={{ fontSize: 28, lineHeight: 1.25, letterSpacing: '-0.02em', overflowWrap: 'anywhere' }}>{d.title}</h1>
         <p style={{ fontSize: 16.5, lineHeight: 1.65, color: 'var(--text-body)', maxWidth: 760 }}>{d.detail}</p>

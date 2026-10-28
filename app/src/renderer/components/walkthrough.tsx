@@ -4,7 +4,7 @@ import { cleanError } from './ui.tsx';
 
 /**
  * Follows Reviewer writing a walkthrough for one branch. With `auto`, starts it as soon as a branch
- * without a walkthrough opens; the main process makes sure that happens once per diff.
+ * without a walkthrough opens, if the project allows it; the main process checks that, and runs it once per diff.
  */
 export function useWalkthroughJob(data: ReviewData | undefined, opts: { auto?: boolean; onDone?: () => void } = {}) {
   const [job, setJob] = useState<WalkthroughJob | null>(null);
@@ -59,6 +59,8 @@ function useTick(on: boolean) {
 export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType<typeof useWalkthroughJob> }) {
   const { job } = w;
   const [sharing, setSharing] = useState<'idle' | 'busy' | string>('idle');
+  // Your answer to "may Claude write walkthroughs here?", before the review data catches up.
+  const [allowed, setAllowed] = useState(data.writeWalkthroughs);
   const running = job?.status === 'running';
   useTick(running);
   if (data.walkthrough === 'agent') return null;
@@ -127,6 +129,25 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
       <span style={{ display: 'flex', gap: 14 }}>
         {data.pr && action(sharing === 'busy' ? 'Sharing…' : shared || sharing.startsWith('https://') ? 'Share again' : `Share on PR #${data.pr.number}`, share)}
         {action('Rewrite', w.write)}
+      </span>
+    );
+  }
+
+  if (allowed === null && !job) {
+    const answer = async (on: boolean) => {
+      setAllowed(on);
+      await window.api.setWriteWalkthroughs(data.projectId, on);
+      if (on) w.write();
+    };
+    return row(
+      'notice info',
+      <span>
+        <strong>No walkthrough on this branch.</strong> The steps below are one per file, without reasons. Claude Code can write one: it reads the diff, the commits and the agent session, and like any Claude Code run that goes to
+        Anthropic. Should Reviewer do that for every branch in {data.projectName} that opens without one? You can change this in the project's settings.
+      </span>,
+      <span style={{ display: 'flex', gap: 14 }}>
+        {action('Yes, for this project', () => answer(true))}
+        {action('Only when I ask', () => answer(false))}
       </span>
     );
   }

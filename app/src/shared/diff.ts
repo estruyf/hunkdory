@@ -1,5 +1,5 @@
 // Diff rows for display: side by side, and with whitespace-only edits folded away. Pure.
-import type { DiffLine } from './types.ts';
+import type { DiffLine, Risk } from './types.ts';
 
 export interface SplitRow {
   left: DiffLine | null;
@@ -68,4 +68,11 @@ export function languageFor(path: string): string | null {
   if (name === 'dockerfile' || name === 'makefile') return LANGS[name];
   const ext = name.includes('.') ? name.split('.').pop()! : '';
   return LANGS[ext] ?? null;
+}
+
+/** "Matched “role” on line 68", to say why a risk tag is there. */
+export function riskReason(r: Pick<Risk, 'match'>, path?: string) {
+  if (!r.match) return null;
+  const where = r.match.line === null ? ' in the path' : ` on line ${r.match.line}${path ? ` of ${path.split('/').pop()}` : ''}`;
+  return `Matched “${r.match.term}”${where}`;
 }

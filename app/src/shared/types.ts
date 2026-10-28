@@ -16,6 +16,11 @@ export interface Project {
   github: string | null;
   /** Branches you picked with "Review a branch". They stay in the inbox whatever the watch rule. */
   tracked?: string[];
+  /**
+   * Whether Reviewer may have Claude Code write a walkthrough when a branch opens without one.
+   * Unset until you answer: until then nothing is sent to Claude unless you click "Write one".
+   */
+  writeWalkthroughs?: boolean;
   addedAt: string;
 }
 
@@ -69,6 +74,15 @@ export interface StackEntry {
 }
 
 /** A Claude Code session, parsed from ~/.claude/projects/<encoded cwd>/<id>.jsonl. */
+/** A test command the agent ran in its session, and what came out. */
+export interface TestRun {
+  /** The command, shortened for display. */
+  command: string;
+  /** From the output, since a piped run (`npm test | tail`) exits 0 even when tests fail. */
+  result: 'passed' | 'failed' | 'unknown';
+  at: string;
+}
+
 export interface SessionInfo {
   id: string;
   file: string;
@@ -85,6 +99,10 @@ export interface SessionInfo {
   title: string | null;
   startedAt: string | null;
   endedAt: string | null;
+  /** Test commands the agent ran, oldest first. */
+  testRuns: TestRun[];
+  /** When the agent last changed a file with Edit or Write. Edits through Bash don't show up here. */
+  lastEditAt: string | null;
 }
 
 export type Checkout =
@@ -129,7 +147,10 @@ export interface Risk {
   code: string;
   severity: RiskLevel;
   label: string;
+  /** What set it off: the matched text and its line, or a null line for a match on the path. */
+  match?: { term: string; line: number | null };
 }
+
 
 /** A wtv hunk, plus what the review screen needs to show it. */
 export interface HunkView {
@@ -194,6 +215,10 @@ export interface AttentionFlag {
 export interface ReviewData {
   projectId: string;
   projectName: string;
+  /** Tests the agents ran in the branch's sessions; null without a session. */
+  agentTests: { runs: TestRun[]; lastEditAt: string | null } | null;
+  /** The project's answer to letting Claude write walkthroughs; null when you haven't answered yet. */
+  writeWalkthroughs: boolean | null;
   branch: string;
   baseRef: string;
   baseSha: string;
@@ -339,6 +364,8 @@ export interface InboxItem {
   updatedSinceReview: boolean;
   tracked: boolean;
   review: { status: ReviewState['status']; reviewedSteps: number } | null;
+  /** Another inbox branch this one starts from: its changes show up in this review too. */
+  buildsOn: { branch: string; pr: number | null } | null;
   error?: string;
 }
 
@@ -409,6 +436,8 @@ export interface ReviewerApi {
   addProject(input: ProjectInput): Promise<Project>;
   updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project>;
   removeProject(id: string): Promise<void>;
+  /** Lets Claude write walkthroughs for a project's branches without one, or not. */
+  setWriteWalkthroughs(projectId: string, on: boolean): Promise<void>;
   /** Links the GitHub remote: checks gh can see the repo. Returns "owner/name". */
   checkGitHub(path: string): Promise<string>;
   listBranches(projectId: string): Promise<BranchChoice[]>;
@@ -438,6 +467,8 @@ export interface ProjectInput {
   baseBranch: string;
   watch: Watch;
   github: string | null;
+  /** Left out: keep what the project had. */
+  writeWalkthroughs?: boolean;
 }
 
 export type ReviewPatch =
@@ -445,8 +476,11 @@ export type ReviewPatch =
   | { type: 'order'; order: ReviewOrder }
   | { type: 'reviewed'; stepKey: string; hunkIds: string[]; on: boolean }
   | { type: 'comment'; stepKey: string; body: string }
-  /** Settles a review plan decision. `comment` is added to that step's comment when you say it needs a fix. */
-  | { type: 'settle'; id: string; value: 'fine' | 'fix' | null; comment?: { stepKey: string; body: string } }
+  /**
+   * Settles a review plan decision. `comment` is the line a "needs a fix" adds to the step's comment;
+   * any other value takes it out again, so a decision you changed doesn't leave its old comment behind.
+   */
+  | { type: 'settle'; id: string; value: 'fine' | 'fix' | null; comment?: { stepKey?: string; body: string } }
   | { type: 'answer'; stepKey: string; index: number; value: 'yes' | 'unsure' | null }
   /** Adds a line comment, or edits it when `id` is set. An empty body removes it. */
   | { type: 'line-comment'; id?: string; stepKey: string; hunkId: string; path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string };

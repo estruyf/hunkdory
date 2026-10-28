@@ -5,7 +5,7 @@ import { AskedFor, ReviewError } from './Review.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
 import { StackBar, checksText, checksTone } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
-import { delta, orderSteps, timeAgo } from '../../shared/order.ts';
+import { delta, formatDuration, orderSteps, timeAgo, tooBig } from '../../shared/order.ts';
 import type { ReviewOrder } from '../../shared/types.ts';
 
 const ORDERS: { id: ReviewOrder; title: string; detail: string }[] = [
@@ -19,6 +19,7 @@ export function StartReview({ go, projectId, branch }: { go: Go; projectId: stri
   const [order, setOrder] = useState<ReviewOrder | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [skipSeen, setSkipSeen] = useState(true);
+  const [copied, setCopied] = useState(false);
   // Opening a branch without a walkthrough has Reviewer write one; the steps update when it's ready.
   const w = useWalkthroughJob(loaded.value?.data, { auto: true, onDone: loaded.reload });
 
@@ -109,6 +110,28 @@ export function StartReview({ go, projectId, branch }: { go: Go; projectId: stri
 
           <WalkthroughNotice data={data} w={w} />
 
+          {tooBig({ minutes: data.minutes, steps: data.steps.length }) && (
+            <div className="notice" role="note" style={{ flexDirection: 'column', gap: 8 }}>
+              <span>
+                <strong>Too big for one sitting.</strong> {plural(data.steps.length, 'step')}, about {formatDuration(data.minutes)} of reading. Smaller branches get a better review: ask the agent to split it, in a session that can
+                use git. Or review it over several sittings: Reviewer keeps your place.
+              </span>
+              <span>
+                <button
+                  type="button"
+                  className="link"
+                  style={{ fontSize: 13.5, fontWeight: 600 }}
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(splitRequest(data.branch, data.steps.length, formatDuration(data.minutes)));
+                    setCopied(true);
+                  }}
+                >
+                  {copied ? 'Copied. Paste it into the agent’s session.' : 'Copy a request to split it'}
+                </button>
+              </span>
+            </div>
+          )}
+
           <section className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             <h2 className="label">{data.prompt || !data.pr ? 'Your prompt' : 'Pull request description'}</h2>
             <AskedFor data={data} clamp={900} />
@@ -117,7 +140,7 @@ export function StartReview({ go, projectId, branch }: { go: Go; projectId: stri
           <section className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
               <h2 className="label">How the change splits up</h2>
-              <span style={{ fontSize: 13, color: 'var(--muted)' }}>About {data.minutes} min</span>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>About {formatDuration(data.minutes)}</span>
             </div>
             <ol style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column' }}>
               {steps.map((s) => (
@@ -177,4 +200,14 @@ export function StartReview({ go, projectId, branch }: { go: Go; projectId: stri
       </div>
     </div>
   );
+}
+
+/** What to ask an agent when its change is too big to review well. */
+function splitRequest(branch: string, steps: number, time: string) {
+  return [
+    `The change on ${branch} is too big to review well: ${steps} steps, about ${time} of reading.`,
+    'Split it into a stack of smaller branches, each one reviewable in under an hour and each building on the one before.',
+    'Keep the code as it is: move it into the smaller branches, don’t rewrite it.',
+    'Give each branch a commit message that says what it is for, and list the branches in order when you are done.',
+  ].join(' ');
 }

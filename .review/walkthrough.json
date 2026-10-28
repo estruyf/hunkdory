@@ -1,28 +1,272 @@
 {
   "version": 1,
-  "title": "Search the branch\u2019s code from a review",
-  "intent": "Let the reviewer search the whole branch for a name from a question or note (e.g. toggleSharePointInterface) and see where it is used, without leaving Reviewer",
-  "base": "4f0d4b5",
+  "title": "Make Reviewer trustworthy and easy to follow",
+  "intent": "Fix what a critical review of Reviewer found: Finish could act against what you decided, code went to Claude without asking, risk tags cried wolf, the request was hidden, and the screens used three overlapping sets of labels. Make the inbox say what to review first, and show whether the agent ran its tests.",
+  "base": "01b67fe",
   "chapters": [
     {
-      "title": "Search the branch\u2019s code",
-      "why": "A question like 'what does toggleSharePointInterface do with\u2026' needs the code around the change, not only the diff. projects.searchCode (already in 4f0d4b5) runs git grep over the whole branch: the checkout with uncommitted and untracked files when there is one, else the branch's commit; plain text, smart case, 20 matches a file, 300 in all, .review excluded. The panel (/ or Cmd+F, or the header button) fills in the selected text, groups matches by file with the change's files first, marks lines this change added with their step, and shows nine lines around a match from fileLines.",
-      "risk": "The query goes to git as one -e argument with --fixed-strings and execFile, so it is never a pattern or shell text.",
+      "title": "Changing a decision takes its comment back out",
+      "why": "Saying a flag needs a fix appends \"Needs a fix: <flag>\" to the step comment. Switching to It's fine (or Change) never removed it, so PR #2288's Finish showed and would send a fix the reviewer had taken back. settleComment now returns the line for every settle of a flag; main adds it on fix and otherwise removes it from every step comment, dropping a comment left empty. The helpers move to shared/comments.ts so they can be tested.",
+      "risk": "Removal matches the exact line text, so an identical line the reviewer typed by hand would also go.",
       "checks": [
-        "Cmd+F no longer does nothing in a review: it opens this search.",
-        "The query stays while the panel is closed on the same screen; going from the plan to a step starts empty."
+        "Walkthrough only opens the comment box after a fix, not after It's fine.",
+        "A comment with other text keeps that text when the line is removed."
       ],
       "hunks": [
-        "h:e4b073160f",
-        "h:b9d8b3f85f",
-        "h:e4f5c40022",
-        "h:ef9ae53c91",
-        "h:12c9fb434e",
-        "h:d88d1f2a0b",
-        "h:7cd3abf593",
-        "h:227400fd53",
-        "h:f5d64fd65c",
-        "h:f5c8dd05d9"
+        "h:7965addf47",
+        "h:3dea721b57",
+        "h:ac26f4a15d",
+        "h:031441cd52",
+        "h:480fd4d55f",
+        "h:08fec70acb",
+        "h:83a4b2e2e6",
+        "h:834d4e607d",
+        "h:429cf08380"
+      ],
+      "notes": {
+        "h:031441cd52": "The old addToStepComment, moved to shared/comments.ts."
+      }
+    },
+    {
+      "title": "Outside steps are only dropped when you said so",
+      "why": "defaultDrops pre-ticked every outside-the-task step unless it was kept, and Finish then defaulted to Send back: the default path asked the agent to revert work nobody had decided on. Now only an explicit Drop them pre-ticks.",
+      "hunks": [
+        "h:15f9f55644",
+        "h:5e7f435ee1"
+      ]
+    },
+    {
+      "title": "Merging warns about what is still open",
+      "why": "openItems lists undecided decisions, flags you said need a fix, and unreviewed careful and skim steps. Finish shows them above Your decision, a merge with any of them takes a second click (Merge anyway), and a GitHub review defaults to Request changes when a fix was asked for. Also fixes \"Your 1 comment go on GitHub\".",
+      "checks": [
+        "Changing the picked option resets the second click."
+      ],
+      "hunks": [
+        "h:311f30aa9a",
+        "h:aef79eae45",
+        "h:0505a3d4fb",
+        "h:d54ed910f7",
+        "h:665f86d99b",
+        "h:f6a4f35ef2",
+        "h:d5a197064f",
+        "h:02f25d04fc",
+        "h:2f728d1ec4",
+        "h:679131863e"
+      ]
+    },
+    {
+      "title": "Claude writes walkthroughs only when the project allows it",
+      "why": "Opening a branch without a walkthrough started a Claude Code run straight away, while Welcome said code never leaves the Mac. Projects now carry writeWalkthroughs, unset until you answer. Writer.start with auto returns without running unless the project said yes, so the check sits in main, not only in the UI. A branch without a walkthrough asks once per project (Yes, for this project / Only when I ask); the project settings have the same switch, and Write one still works for a single branch. Welcome now says when code does go to Claude.",
+      "risk": "Existing projects have no answer yet, so their next skeleton branch asks instead of writing one.",
+      "checks": [
+        "Answering Yes starts the writer for the branch you are on.",
+        "Saving project settings without touching the switch keeps the old answer."
+      ],
+      "hunks": [
+        "h:8922c9ac43",
+        "h:7e267aeaa8",
+        "h:2d0192bd2e",
+        "h:a8b51c7e65",
+        "h:a37b05a53b",
+        "h:faf8d58a60",
+        "h:10675da59b",
+        "h:ee3c44b8a7",
+        "h:5c8b774d20",
+        "h:d8b1a8e059",
+        "h:e91dc609b9",
+        "h:1f2cabd15c",
+        "h:4d10d892d0",
+        "h:fe01afbeda",
+        "h:0fd7247e5f",
+        "h:d04ddc10f3",
+        "h:223c1361d1",
+        "h:bc77b8988d"
+      ]
+    },
+    {
+      "title": "Risk tags: fewer false alarms, and each says why",
+      "why": "On real branches most cards were orange: a package.json version bump counted as a dependency change, \"role\" in a doc comment or a role=\"button\" attribute made a file \"auth or security\", author, crypto.randomUUID and re.exec( matched too. risk.mjs now skips comment lines, splits security terms into strong (high) and weak (session, role, permission, crypto: medium, with their own label), ignores author, crypto.randomUUID, role= attributes and re.exec(, and treats top-level package.json fields like version as not dependencies (a new low Version bumped tag). Every risk carries match {term, line} found by locate/locateLine.",
+      "risk": "Fewer tags means some real risks now read as medium or skim, e.g. a session handling change or cp.exec(. Camel-case names like accessToken never matched and still don't.",
+      "checks": [
+        "The fixture demo still flags TOKEN_EXPIRY_SECONDS as high (path and strong term).",
+        "A hunk with only removed lines reports old-file line numbers."
+      ],
+      "hunks": [
+        "h:e4b8838f36",
+        "h:5c817b71b8",
+        "h:887228d23e",
+        "h:7e5d352ed9",
+        "h:3c3c4bc246",
+        "h:c9686cec45",
+        "h:42dbd1843e",
+        "h:be25516e38",
+        "h:1b9f90582e",
+        "h:699f6904dc",
+        "h:8e2273e1db",
+        "h:9182862840",
+        "h:845db1b87c"
+      ],
+      "notes": {
+        "h:e4b8838f36": "The term lists themselves trip the security and exec tags.",
+        "h:887228d23e": "re.exec on our own pattern, not process execution.",
+        "h:42dbd1843e": "The rule that detects security terms contains them."
+      }
+    },
+    {
+      "title": "The app shows the reason",
+      "why": "Risk gains an optional match; riskReason (shared/diff.ts) turns it into \"Matched “role” on line 68 of ui-toggle.ts\". Diff chips show it on hover and attention flags end with it. Flags group by code and severity so the medium security label doesn't merge into the high one. The writer prompt says version bumps and changelog entries the repo expects are not outside the task. The inbox summary cache moves to version 2 so cards recount with the new rules.",
+      "hunks": [
+        "h:5db57878c2",
+        "h:d54e39b2ba",
+        "h:1d480ad17a",
+        "h:09dd58fd22",
+        "h:dac397b3ad",
+        "h:5107f0293b",
+        "h:9f5ffe4633",
+        "h:301db87418",
+        "h:66cbadda0c",
+        "h:81108be4e4",
+        "h:f09e23c942",
+        "h:69fa83f8b4",
+        "h:672a2eea14",
+        "h:455286b18f"
+      ]
+    },
+    {
+      "title": "The plan opens with what you asked and what it did",
+      "why": "The prompt was behind a Context button that was off by default, while it is the yardstick for the whole review. The plan now starts with You asked (the prompt or PR description), It did (the walkthrough's intent) and It also did (the steps outside your request, as links). The step screen shows the context panel by default, and Welcome says what Reviewer guarantees: every changed line belongs to a step, and work you didn't ask for is called out.",
+      "hunks": [
+        "h:f750680035",
+        "h:ae36594ffc",
+        "h:9b4c503099",
+        "h:aa4dd89889"
+      ],
+      "notes": {
+        "h:ae36594ffc": "Also holds HowItWorks (labels chapter) and the Its tests row (agent tests chapter): all three sit above Decide.",
+        "h:f750680035": "Imports AgentTests too."
+      }
+    },
+    {
+      "title": "One set of labels, and fewer decisions",
+      "why": "Three overlapping vocabularies (Decide / Look carefully / Skim; Look into this / Flagged / High risk / Look closer; Outside the task / Outside your request) are now one: Decide, Read closely, Skim, with one severity scale (Needs attention, Worth a look, Low risk) on pills, decision cards and the inbox, and Outside your request with a hint. Progress agrees: the bar counts what's done (\"1 of 4 done\"), the heading where you are (\"Decision 2 of 4\"). Medium flags tied to a step become notes shown on that step instead of decisions, since the step is read closely anyway (PR #2197 went from 10 decisions to 4); deciding a flag next to its step also marks that step reviewed. Each phase says in a line what it is for, a first-run card explains the flow, and Not sure on a check opens Ask Claude with the question filled in.",
+      "risk": "Medium flags no longer block a merge through openItems; they only show on their step.",
+      "checks": [
+        "Decisions you settled before on medium flags are kept in the state but no longer shown.",
+        "Not sure still adds the line to the step comment."
+      ],
+      "hunks": [
+        "h:2c5a624fd1",
+        "h:5a694866a3",
+        "h:cad0637f7b",
+        "h:ad86b3286b",
+        "h:da2411c1ef",
+        "h:6d5fa37fa3",
+        "h:dfa8d6f146",
+        "h:38182583fa",
+        "h:0035adf70d",
+        "h:55ad0db593",
+        "h:e90c6f5e3f",
+        "h:22701aa828",
+        "h:c741bbfca7",
+        "h:1ccc21d45c",
+        "h:3ee38b2a02",
+        "h:fc9c5476ea",
+        "h:854b38a66b",
+        "h:c4f7fc09ab",
+        "h:9c0e3dda5b",
+        "h:8ba57d9a64",
+        "h:2a683bba95",
+        "h:4d2985b4d9",
+        "h:03f387675c",
+        "h:493374eddf",
+        "h:8b1ffc35df",
+        "h:62c295b90e",
+        "h:5f22035c58",
+        "h:a44e0ddcc3",
+        "h:da56d247e1",
+        "h:e460e085bf",
+        "h:f8ad9b87e2",
+        "h:569482d5d7"
+      ]
+    },
+    {
+      "title": "An inbox that says what to review first",
+      "why": "Nine equal cards, newest first, every one with a big blue button, said nothing about where to start, and the same change could show twice. suggestedOrder puts reviews you started first, then branches updated since your review, then the rest smallest first with failing CI later, and changes too big for one sitting last; Newest first stays as an option. Only the top card gets the primary button, a card shows its most important flag with +N more on hover, and times read \"about 5 h\" instead of \"about 271 min\". A change over 2 h or 60 steps is marked Too big for one sitting, and its start screen offers a request to split it to copy into the agent's session. Discovery folds a branch that points at another branch's commit (a worktree Claude Code made for a question about PR #2288) into that branch with its sessions, and the inbox marks a branch whose own commits contain another inbox branch's head as Builds on it.",
+      "risk": "Builds on runs one git rev-list per inbox branch on every inbox load. Folding only happens when the whole project is scanned, so opening the folded-into branch directly shows its own sessions only.",
+      "checks": [
+        "A pull request is never folded away, and branches with uncommitted work never fold.",
+        "The split request is copied, not sent: send back has read-only git, so the agent couldn't create branches from there."
+      ],
+      "hunks": [
+        "h:1eea0e8823",
+        "h:823839e73f",
+        "h:1e547a3bd4",
+        "h:78bc44a771",
+        "h:e15ec5a145",
+        "h:63bd1d3e79",
+        "h:99b739bc95",
+        "h:a5f75cf268",
+        "h:b15da14554",
+        "h:99e96bc72f",
+        "h:3f4aae2c4f",
+        "h:f414116421",
+        "h:3456c33e53",
+        "h:bc8e048de4",
+        "h:401e7150cb",
+        "h:fd142f4ef0",
+        "h:525394cc94",
+        "h:280f777729",
+        "h:60ed48ba5f",
+        "h:66cc523c92",
+        "h:d0b0b77c0b",
+        "h:b30727192a",
+        "h:56c6bee4ea",
+        "h:f5bd8333c4",
+        "h:c79560de2f"
+      ]
+    },
+    {
+      "title": "Did the agent test it?",
+      "why": "The transcript says whether the agent ran its tests, and Reviewer already reads it. parseTranscript now collects Bash calls with a test runner in command position (npm test, vitest, node --test, heft test and the like; not inside a heredoc or a grep), and the result from the output, since a piped run like npm test | tail exits 0 even when tests fail. It also keeps when the agent last used Edit or Write. The plan's request card and the step's context panel say \"Last run 2 h ago: they passed\", that the agent edited files after that run, or that it didn't run any tests.",
+      "risk": "Results come from output patterns (\"1 failed\", \"ℹ fail 1\", \"✔\"), so a run whose output was cut down to nothing reads as unknown. Edits made through Bash (sed, heredocs) don't count as edits.",
+      "checks": [
+        "Sessions folded in from a duplicate branch add their test runs too."
+      ],
+      "hunks": [
+        "h:9e227b36b8",
+        "h:d2e92d091e",
+        "h:c633afe4e1",
+        "h:ea85cf0a10",
+        "h:783ec824cf",
+        "h:e978989d24",
+        "h:d6b66d54d4",
+        "h:73a4dfb881",
+        "h:c81759058d",
+        "h:0d0173b3e9",
+        "h:eed7b7fa99",
+        "h:d4e6563325",
+        "h:274bcbe5f1"
+      ],
+      "notes": {
+        "h:c633afe4e1": "Also carries ReviewData.writeWalkthroughs from the opt-in chapter.",
+        "h:c81759058d": "Also carries writeWalkthroughs from the opt-in chapter."
+      }
+    },
+    {
+      "title": "Tests",
+      "why": "defaultDrops without a decision drops nothing; openItems sorts open work; adding a fix line twice adds it once and removing it leaves the reviewer's own text; medium step flags become notes. The resume test's second flag is now high so it stays a decision. The inbox order, duplicate folding, builds-on and durations have their own tests, and so do test-run parsing and results.",
+      "hunks": [
+        "h:5a34b4f952",
+        "h:7ceab34e18",
+        "h:61479b0f67",
+        "h:414bbb2b67",
+        "h:2a1e3cc1db",
+        "h:159fb83fd7",
+        "h:699e8352be",
+        "h:a5c59c99db",
+        "h:eda62135ae",
+        "h:77e455e4fa",
+        "h:32f3eed0dd"
       ]
     }
   ]

@@ -1,5 +1,6 @@
 // wtv verify result → review steps and "Needs your attention" flags. Pure.
 import type { AttentionFlag, DiffLine, RiskLevel, Step, WalkthroughSource } from '../shared/types.ts';
+import { riskReason } from '../shared/diff.ts';
 
 const RANK = { none: 0, low: 1, medium: 2, high: 3 } as const;
 const maxLevel = (levels: (keyof typeof RANK)[]): RiskLevel => {
@@ -125,15 +126,15 @@ export function attention(r: WtvResult, steps: Step[], source: WalkthroughSource
     });
   }
 
-  // One flag per risk type, listing where it happens.
-  const byCode = new Map<string, { label: string; severity: RiskLevel; hunks: WtvHunk[] }>();
+  // One flag per risk type and severity, listing where it happens. Security comes in two strengths with their own labels.
+  const byCode = new Map<string, { label: string; severity: RiskLevel; hunks: WtvHunk[]; reason: string | null }>();
   for (const h of r.hunks) {
     for (const risk of h.risks) {
       if (risk.severity === 'low') continue;
-      const g = byCode.get(risk.code) ?? { label: risk.label, severity: risk.severity, hunks: [] };
-      if (RANK[risk.severity] > RANK[g.severity]) g.severity = risk.severity;
+      const key = `${risk.code}:${risk.severity}`;
+      const g = byCode.get(key) ?? { label: risk.label, severity: risk.severity, hunks: [], reason: riskReason(risk, h.path) };
       g.hunks.push(h);
-      byCode.set(risk.code, g);
+      byCode.set(key, g);
     }
   }
   for (const [, g] of [...byCode].sort((a, b) => RANK[b[1].severity] - RANK[a[1].severity])) {
@@ -143,7 +144,7 @@ export function attention(r: WtvResult, steps: Step[], source: WalkthroughSource
     flags.push({
       severity: g.severity === 'high' ? 'high' : 'medium',
       title: g.label,
-      detail: `${where}${stepNames(ids) ? ` in ${stepNames(ids)}` : ''}.`,
+      detail: `${where}${stepNames(ids) ? ` in ${stepNames(ids)}` : ''}.${g.reason ? ` ${g.reason}${g.hunks.length > 1 ? ', first of them' : ''}.` : ''}`,
       stepKey: stepOf(ids[0])?.key ?? null,
     });
   }

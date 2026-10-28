@@ -14,7 +14,7 @@ export function Welcome({ go }: { go: Go }) {
           </div>
           <h1 style={{ fontSize: 40, lineHeight: 1.15, letterSpacing: '-0.02em' }}>Review what your agents wrote, one step at a time.</h1>
           <p style={{ fontSize: 17, lineHeight: 1.6, color: 'var(--muted)', maxWidth: 620 }}>
-            Connect a project. Reviewer picks up the branches your coding agents create, reads the session that produced them, and turns each change into a short story you can actually follow.
+            Connect a project. Reviewer picks up the branches your coding agents create, reads the session that produced them, and splits each change into steps you can follow. Every changed line belongs to a step, and anything you didn't ask for is called out.
           </p>
         </div>
 
@@ -72,7 +72,7 @@ export function Welcome({ go }: { go: Go }) {
             <rect x="5" y="11" width="14" height="10" rx="2" />
             <path d="M8 11V7a4 4 0 0 1 8 0v4" />
           </svg>
-          Reviewer runs on your machine. Your code and sessions never leave it.
+          Reviewer runs on your machine. It only sends code to Claude when you let it write a walkthrough, ask a question, or send work back.
         </p>
       </div>
     </div>

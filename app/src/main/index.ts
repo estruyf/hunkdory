@@ -7,6 +7,7 @@ import { Actions } from './actions.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
+import { addToStepComment, removeFromStepComments } from '../shared/comments.ts';
 import type { ReviewerApi, ReviewPatch, ReviewState } from '../shared/types.ts';
 
 let win: BrowserWindow | null = null;
@@ -94,23 +95,17 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
     r.settled ??= {};
     if (patch.value) r.settled[patch.id] = patch.value;
     else delete r.settled[patch.id];
-    if (patch.value === 'fix' && patch.comment) addToStepComment(r, patch.comment.stepKey, patch.comment.body);
+    // Changing your mind takes the "needs a fix" line back out of the step's comment.
+    if (patch.comment) {
+      if (patch.value === 'fix' && patch.comment.stepKey) addToStepComment(r, patch.comment.stepKey, patch.comment.body);
+      else removeFromStepComments(r, patch.comment.body);
+    }
   } else if (patch.type === 'answer') {
     r.answers ??= {};
     const forStep = (r.answers[patch.stepKey] ??= {});
     if (patch.value) forStep[patch.index] = patch.value;
     else delete forStep[patch.index];
   }
-}
-
-/** Appends a line to a step's comment, once. */
-function addToStepComment(r: ReviewState, stepKey: string, line: string) {
-  const text = line.trim();
-  if (!text) return;
-  const existing = r.comments.find((c) => c.stepKey === stepKey && !c.line);
-  if (existing) {
-    if (!existing.body.includes(text)) existing.body = `${existing.body.trim()}\n${text}`;
-  } else r.comments.push({ id: crypto.randomUUID(), stepKey, hunkId: null, line: null, body: text, createdAt: new Date().toISOString() });
 }
 
 const api: ReviewerApi = {
@@ -124,6 +119,7 @@ const api: ReviewerApi = {
   addProject: (input) => projects.addProject(input),
   updateProject: (id, input) => projects.updateProject(id, input),
   removeProject: async (id) => store.removeProject(id),
+  setWriteWalkthroughs: async (id, on) => projects.setWriteWalkthroughs(id, on),
   checkGitHub: (path) => projects.checkGitHub(path),
   listBranches: (projectId) => projects.listBranches(projectId),
   trackBranch: (projectId, branch) => projects.trackBranch(projectId, branch),

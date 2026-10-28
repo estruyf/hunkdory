@@ -26,7 +26,7 @@ interface WtvHunk {
   whitespaceOnly: boolean;
   lockfile: boolean;
   generated: boolean;
-  risks: { code: string; severity: 'high' | 'medium' | 'low'; label: string }[];
+  risks: { code: string; severity: 'high' | 'medium' | 'low'; label: string; match?: { term: string; line: number | null } }[];
   level: 'high' | 'medium' | 'low' | 'none';
   chapters: number[];
   bucket: 'narrated' | 'unnarrated' | 'noise' | 'generated';

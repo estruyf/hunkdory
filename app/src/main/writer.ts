@@ -137,7 +137,7 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
     '- Fill `risk` for chapters with hunks tagged in brackets above: what could break and what to look at.',
     '- `checks` are short questions the reviewer should answer, especially about assumptions in the code.',
     input.prompt || input.pr?.body.trim()
-      ? '- Set `outsideTask: true` on a chapter whose changes the request above did not ask for (refactors, config, stray files).'
+      ? '- Set `outsideTask: true` on a chapter whose changes the request above did not ask for (refactors, config, stray files). Routine upkeep the repo expects with every change, like a package version bump or a changelog entry, is not outside the task.'
       : '- There is no stated request, so leave `outsideTask` out.',
     '- `notes` (optional) maps one of the chapter\'s refs to a one-line remark on that hunk.',
     '- `title` names the change like a pull request title: under 70 characters, no full stop.',
@@ -190,8 +190,8 @@ export class Writer {
   }
 
   /**
-   * Starts writing a walkthrough. With `auto`, only for a branch without one, and only once per diff:
-   * opening the same review again doesn't start another run after one finished or failed.
+   * Starts writing a walkthrough. With `auto`, only for a branch without one, only when the project allows it,
+   * and only once per diff: opening the same review again doesn't start another run after one finished or failed.
    */
   async start(projectId: string, branch: string, opts: { auto?: boolean } = {}): Promise<WalkthroughJob | null> {
     const key = id(projectId, branch);
@@ -199,7 +199,7 @@ export class Writer {
     if (existing?.status === 'running') return this.job(projectId, branch);
     const data = await this.projects.review(projectId, branch);
     if (data.walkthrough === 'agent') return null;
-    if (opts.auto && (data.walkthrough !== 'skeleton' || existing?.diffKey === diffKey(data))) return this.job(projectId, branch);
+    if (opts.auto && (!data.writeWalkthroughs || data.walkthrough !== 'skeleton' || existing?.diffKey === diffKey(data))) return this.job(projectId, branch);
     if (!Object.keys(data.hunks).length) return null;
 
     this.jobs.set(key, { projectId, branch, status: 'running', startedAt: new Date().toISOString(), finishedAt: null, activity: 'Starting Claude Code…', attempt: 1, diffKey: diffKey(data) });

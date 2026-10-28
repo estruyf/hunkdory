@@ -15,6 +15,8 @@ const session = (id: string, startedAt: string, branches: [string, string, strin
   title: null,
   startedAt,
   endedAt: branches.at(-1)?.[1] ?? startedAt,
+  testRuns: [],
+  lastEditAt: null,
 });
 
 const a = session('a', '2026-10-01T10:00:00Z', [['main', '2026-10-01T10:01:00Z'], ['feat/x', '2026-10-01T11:00:00Z']]);
