@@ -9,6 +9,7 @@ import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, isCareful, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
 import type { ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 import { AskPanel } from '../components/ask.tsx';
+import { useCodeSearch } from '../components/search.tsx';
 import { AskedFor, CommentBox, whyFallback } from './Review.tsx';
 
 export function Walkthrough({ go, data, initialState, stepKey, decision }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string }) {
@@ -61,6 +62,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
   const select = (key: string) => at({ stepKey: key });
   const decide = (d: PlanDecision) => at({ decision: d.id, stepKey: d.stepKeys[0] });
   const toPlan = () => go({ name: 'plan', projectId: data.projectId, branch: data.branch });
+  const search = useCodeSearch(data, (key) => select(key));
 
   // A new place starts with the comment and question boxes closed.
   useEffect(() => {
@@ -160,6 +162,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
           {sizeText(data.files, data.added, data.removed)}
         </span>
       </div>
+      {search.button}
       <button type="button" className="btn" style={{ height: 36 }} onClick={toPlan}>
         Review plan
       </button>
@@ -236,6 +239,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
     <div style={{ position: 'sticky', top: 0, zIndex: 5 }}>
       {header}
       {progressNav}
+      {search.panel}
     </div>
   );
 

@@ -1,188 +1,28 @@
 {
   "version": 1,
-  "title": "Faster inbox, a Decide pass, back/forward, breadcrumbs",
-  "intent": "Make the inbox show up faster on launch: skip diff rows the inbox never shows, and keep per-branch summaries on disk so unchanged branches aren't recomputed after a restart. Also: flagged decisions are made in the step that shows the code, not on the plan card before you have seen it. Plus: mouse back/forward through screens and steps, and a Decide pass that walks through every decision like a wizard",
-  "base": "ce381f5662e770469c7c0c14ee94f9ab17f0fba2",
+  "title": "Search the branch\u2019s code from a review",
+  "intent": "Let the reviewer search the whole branch for a name from a question or note (e.g. toggleSharePointInterface) and see where it is used, without leaving Reviewer",
+  "base": "4f0d4b5",
   "chapters": [
     {
-      "title": "wtv jobs can skip the diff rows",
-      "why": "Building each hunk's rows runs git show for every changed file on both sides. On the intranet repo that was about 3.5 of the 5.5 seconds spent per inbox load. The inbox only needs counts, so a job can now ask for the result without rows.",
+      "title": "Search the branch\u2019s code",
+      "why": "A question like 'what does toggleSharePointInterface do with\u2026' needs the code around the change, not only the diff. projects.searchCode (already in 4f0d4b5) runs git grep over the whole branch: the checkout with uncommitted and untracked files when there is one, else the branch's commit; plain text, smart case, 20 matches a file, 300 in all, .review excluded. The panel (/ or Cmd+F, or the header button) fills in the selected text, groups matches by file with the change's files first, marks lines this change added with their step, and shows nine lines around a match from fileLines.",
+      "risk": "The query goes to git as one -e argument with --fixed-strings and execFile, so it is never a pattern or shell text.",
       "checks": [
-        "With lines: false, lines and ranges come back empty. Only the inbox path asks for that."
+        "Cmd+F no longer does nothing in a review: it opens this search.",
+        "The query stays while the panel is closed on the same screen; going from the plan to a step starts empty."
       ],
       "hunks": [
-        "h:102e87f76c",
-        "h:15d5334898"
-      ]
-    },
-    {
-      "title": "Inbox summaries kept on disk",
-      "why": "Every launch used to start from an empty in-memory cache and run wtv on every branch again. Summaries are now saved in userData/inbox-summaries.json under each branch's fingerprint. It is only a cache: an unreadable file or a version change just means everything is recomputed.",
-      "risk": "A stale summary would show wrong counts until the branch changes. The key covers the head, the base, the walkthrough text, uncommitted files' mtimes and sizes, plus the PR/session title inputs.",
-      "checks": [
-        "Writes are batched with a 500 ms debounce, so one inbox refresh is one write.",
-        "Entries for branches that leave the inbox are pruned.",
-        "test/summaries.test.ts covers key mismatch, restart, pruning and unreadable or older files."
-      ],
-      "hunks": [
-        "h:2123e95286",
-        "h:ba6d50c91b",
-        "h:6f4e349420",
-        "h:ded601e8fd"
-      ]
-    },
-    {
-      "title": "Inbox reads summaries first and runs wtv without rows on a miss",
-      "why": "prepare() splits out locate + walkthrough + fingerprint, so the inbox can look up the disk cache before deciding to run wtv. On a miss it runs wtv with lines: false. The in-memory cache marks entries as full or not, so opening a review never gets rowless data.",
-      "risk": "Opening a review after the inbox now runs wtv with rows for that one branch (about 0.3 to 1.3 s on the intranet branches). Before, the inbox had already done this for every branch.",
-      "checks": [
-        "A full cache entry still serves the inbox; a rowless one never serves review().",
-        "The Brand click (refresh) bypasses both caches as before."
-      ],
-      "hunks": [
-        "h:3e9f37c387",
-        "h:f1a14d81f7",
-        "h:184b1d97ed",
-        "h:d3e4fc4ac6",
-        "h:3949bec7d4",
-        "h:258d3dc9a0",
-        "h:6a9c4e72d5",
-        "h:8bfbac109b",
-        "h:95246ebdfd",
-        "h:3bcff1837f",
-        "h:992aabeb76",
-        "h:1d937e0b98",
-        "h:5d236e6771",
-        "h:b0922ab9b3",
-        "h:47250b6205",
-        "h:93a1c9c812",
-        "h:d37ecea8ee"
-      ]
-    },
-    {
-      "title": "Decide flags next to the code",
-      "why": "The plan card asked 'It's fine / Needs a fix' before you had seen the change. Cards with steps now have one action, 'Look at the change', and the verdict buttons sit in the step's flag notice above the diff. CI and step-less decisions keep their buttons on the card, since their evidence isn't in a step.",
-      "checks": [
-        "Settling in a step still adds 'Needs a fix: \u2026' to that step's comment, and the comment box reloads to show it.",
-        "A settled card shows the result with Change and Look again.",
-        "On branches without a walkthrough the step is named after its file; the card hides that line because the detail already names the file."
-      ],
-      "hunks": [
-        "h:b27c899393",
-        "h:5b3ff898d0",
-        "h:2b6339131e",
-        "h:e222ecac03",
-        "h:1e2d13039f",
-        "h:ef732ed91d",
-        "h:2e71af6aba",
-        "h:2a47d960e2",
-        "h:9962bf63d5"
-      ]
-    },
-    {
-      "title": "Back and forward like a browser",
-      "why": "Routes now form a history. Mouse buttons 4/5, Cmd+[ / Cmd+], trackpad swipes and app commands (Windows/Linux mouse buttons) move through it. Moving between steps and decisions is a route change too, so back goes to the previous step. The review screen reads the branch once per branch, so a step change doesn't reload it.",
-      "risk": "A screen you go back to carries the review state from when you left it. updateReview now broadcasts review-state-changed, and the App swaps in the newest state on back/forward, so a decision made later still shows.",
-      "checks": [
-        "Going to Done resets history to the inbox, so back can't land on Finish for a review that's finished.",
-        "The Review key now includes project and branch: another branch's review remounts."
-      ],
-      "hunks": [
-        "h:2470adb5e3",
-        "h:8d95723d27",
-        "h:e492c58fd6",
-        "h:b1bb08e1b6",
-        "h:4b3d5d10ec",
-        "h:403c1744a5",
-        "h:87e4cf7239",
-        "h:fa5ab4edca",
-        "h:014952b418",
-        "h:afc8196fb5",
-        "h:e6d07888ca",
-        "h:8097773fcf",
-        "h:4c82d2d39b",
-        "h:df29d75642",
-        "h:2ca3580e9b",
-        "h:7efceec466"
-      ]
-    },
-    {
-      "title": "Decide as its own pass",
-      "why": "'Look at the change' starts a Decide pass: the step is shown with 'Decide \u00b7 n of N', the Decide phase is the bold one, and next/back (buttons, j/k, r) go through the decisions. The decision's buttons sit in the sticky footer where 'Looks good' is for a step, so they're in reach after reading the code and its questions; r means 'It's fine' until you've decided. 'It's fine' (or Keep/Drop) moves on to the next open decision; after the last one you continue with the first unreviewed step. 'Needs a fix' on a flag stays on the step and opens the comment box with the note filled in. Decisions without a step (CI, 'No tests changed') get a page of their own. Every progress segment is a button that goes to that decision or step.",
-      "checks": [
-        "Settling a different decision on the same step doesn't move you.",
-        "With more than 40 steps a phase falls back to one bar without per-step buttons.",
-        "The notice at the top no longer has buttons for the decision you came for; other flags on the same step keep theirs."
-      ],
-      "hunks": [
-        "h:c82b0389f4",
-        "h:830b3a5486",
-        "h:5721f6049e",
-        "h:4c5334ba21",
-        "h:ed429a93dc",
-        "h:5972b6fbd6",
-        "h:13696fc7e6",
-        "h:c4300df0e1",
-        "h:0434cf06a5",
-        "h:88b1b34443",
-        "h:fb16ef0aa9",
-        "h:63e5238555",
-        "h:424e516a14",
-        "h:0172e3a16b"
-      ]
-    },
-    {
-      "title": "Breadcrumbs, and navigation that stays in view",
-      "why": "Review screens show where you are as Inbox \u203a project \u203a review \u203a here. The project crumb opens the inbox filtered to that project (the home route takes an optional projectId), and the review title goes back to its plan. In a review, the header and the Decide / Look carefully / Skim progress share one sticky block, so what's left stays visible while you scroll. On the inbox the project list sticks under the header too, offset by the header's measured height (a ResizeObserver, since the header can wrap), and scrolls on its own if there are more projects than fit.",
-      "checks": [
-        "Connect keeps its way back to Welcome when there are no projects yet.",
-        "Finish lost its '\u2190 Back to the review' link; the review crumb does the same."
-      ],
-      "hunks": [
-        "h:d47474ca3e",
-        "h:c1711bd735",
-        "h:b35b4b2d5a",
-        "h:597c1f363d",
-        "h:4cfe734dd7",
-        "h:fe7dee2bde",
-        "h:d723f730b7",
-        "h:c8b98d8133",
-        "h:72d8eb1101",
-        "h:661d2c1c5f",
-        "h:b3a39de243",
-        "h:1605faba04",
-        "h:865aa9a0c4",
-        "h:7ff849794d",
-        "h:d2d2f8d805",
-        "h:a2012b61eb",
-        "h:c68eaa1af7",
-        "h:fa752103d7",
-        "h:9d85d6c771",
-        "h:a6f24105f0",
-        "h:87c66e20fc",
-        "h:2124df52b5",
-        "h:53bf87d140",
-        "h:ece682a722",
-        "h:443041208a",
-        "h:6a6787490f"
-      ]
-    },
-    {
-      "title": "Continue where nothing is done yet",
-      "why": "'Continue review' (inbox) and 'Continue' (plan) used to open the first unreviewed step, skipping decisions you put off with 'Decide later'. resumePoint() picks the first open decision, then the first unreviewed step in review order. The review screen uses it only when the route names no place; any step or decision you go to wins.",
-      "checks": [
-        "Before anything is done the plan's button reads 'Start with the decisions' when there are any.",
-        "test/plan.test.ts covers a put-off decision, a skipped earlier step, and all done."
-      ],
-      "hunks": [
-        "h:6ceddb2df0",
-        "h:0a1e19896f",
-        "h:3c1f6bea36",
-        "h:d24f7188d4",
-        "h:80d089176f",
-        "h:b810263ee7",
-        "h:123bc6d228",
-        "h:93e81c10c2"
+        "h:e4b073160f",
+        "h:b9d8b3f85f",
+        "h:e4f5c40022",
+        "h:ef9ae53c91",
+        "h:12c9fb434e",
+        "h:d88d1f2a0b",
+        "h:7cd3abf593",
+        "h:227400fd53",
+        "h:f5d64fd65c",
+        "h:f5c8dd05d9"
       ]
     }
   ]

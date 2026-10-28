@@ -4,6 +4,7 @@ import type { Go } from '../App.tsx';
 import { Brand, Crumbs, LoadingPage, RiskPill, cleanError, plural, reviewCrumbs, sizeText, useAsync } from '../components/ui.tsx';
 import { StackBar } from '../components/github.tsx';
 import { ReviewError } from './Review.tsx';
+import { useCodeSearch } from '../components/search.tsx';
 import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, planProgress, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
 import type { ReviewData, ReviewState, Step } from '../../shared/types.ts';
@@ -46,6 +47,7 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
   );
 
   const open = (step: Step | undefined) => step && go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: step.key, preloaded: { data, state } });
+  const search = useCodeSearch(data, (key) => open(data.steps.find((s) => s.key === key)));
   const firstOpen = (steps: Step[]) => steps.find((s) => !isReviewed(s, state.reviewed)) ?? steps[0];
   const next = plan.sequence.find((s) => !isReviewed(s, state.reviewed));
   const started = Object.keys(state.reviewed).length > 0 || progress.decided > 0;
@@ -78,6 +80,7 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
             {data.stack ? ` · part ${data.stack.prs.findIndex((p) => p.current) + 1} of ${data.stack.prs.length} in a stack` : ''} · {sizeText(data.files, data.added, data.removed)}
           </span>
         </div>
+        {search.button}
         {resume && (
           <button type="button" className="btn" onClick={goResume}>
             {started ? 'Continue' : resume.decision ? 'Start with the decisions' : 'Start at step 1'}
@@ -87,6 +90,7 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
           Finish
         </button>
       </header>
+      {search.panel}
 
       <div style={{ width: '100%', maxWidth: 1240, margin: '0 auto', padding: '28px 24px 56px', display: 'flex', flexDirection: 'column', gap: 32 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
