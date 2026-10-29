@@ -156,7 +156,6 @@ button.crumb:hover { color: var(--accent); text-decoration: underline; }
 .pill.accent { background: var(--accent-tint); color: var(--accent); }
 .pill.neutral { background: var(--neutral-bg); color: var(--muted); }
 .pill.solid { background: var(--accent-fill); color: var(--on-accent); }
-.later { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); margin-left: 6px; vertical-align: 1px; }
 
 .choice { display: flex; gap: 10px; font-size: 14px; line-height: 1.5; align-items: flex-start; }
 .choice input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); flex: none; }
@@ -244,3 +243,26 @@ mark { background: var(--mark-bg); color: inherit; border-radius: 2px; padding: 
 .mac .topbar :is(button, a, input, select, textarea, label, [role="group"], [role="button"]) { -webkit-app-region: no-drag; }
 /* Before the first screen draws, there's still somewhere to grab the window. */
 .mac .drag-strip { position: fixed; top: 0; left: 0; right: 0; height: 44px; -webkit-app-region: drag; z-index: 1; }
+
+/* A button that stays out of the way until it's the next step, like Finish before you're done. */
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.quiet:hover:not(:disabled) { color: var(--text); background: var(--btn-hover); }
+
+/* Inbox rows: the whole row opens the review; Ignore shows on hover, focus and selection. */
+.row-wrap { display: flex; align-items: center; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.row-wrap:hover, .row-wrap[data-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.inbox-row { flex: 1; min-width: 0; display: flex; gap: 14px; align-items: center; padding: 14px 18px; border: 0; border-radius: 12px; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.inbox-row .row-go { color: var(--accent); font-size: 14px; font-weight: 600; white-space: nowrap; opacity: 0; }
+.row-wrap:hover .row-go, .row-wrap[data-selected="true"] .row-go, .inbox-row:focus-visible .row-go { opacity: 1; }
+.row-wrap .row-extra { opacity: 0; transition: opacity .1s; margin-right: 12px; }
+.row-wrap:hover .row-extra, .row-wrap:focus-within .row-extra, .row-wrap[data-selected="true"] .row-extra { opacity: 1; }
+.status-dot { width: 10px; height: 10px; border-radius: 999px; flex: none; }
+
+/* A "+" next to the line number shows where a line comment goes. */
+.diff-n-btn { position: relative; }
+.diff-row:hover .diff-n-btn::before, .diff-cell:hover .diff-n-btn::before { content: '+'; position: absolute; left: 4px; top: 0; width: 16px; height: 18px; margin-top: 1px; border-radius: 4px; background: var(--accent-fill); color: var(--on-accent); font-weight: 700; text-align: center; line-height: 18px; }
+
+/* Radio cards: a choice with its own settings under it once picked. */
+.option { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
+.option[data-on="true"] { border: 2px solid var(--accent); padding: 13px 15px; background: var(--accent-soft); }
+.option-body { display: flex; flex-direction: column; gap: 10px; padding-left: 28px; }

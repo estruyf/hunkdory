@@ -1,7 +1,7 @@
 // The step walkthrough: one step at a time, read top to bottom, with one clear next action.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Crumbs, RiskPill, cleanError, plural, reviewCrumbs, sizeText, usePref } from '../components/ui.tsx';
+import { Brand, Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, useMediaQuery, usePref, useShortcutSheet } from '../components/ui.tsx';
 import { DiffHunk, type DiffMode } from '../components/diff.tsx';
 import { ChecksCard, StackBar } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
@@ -12,8 +12,9 @@ import { AskPanel } from '../components/ask.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import { AgentTests, AskedFor, CommentBox, whyFallback } from './Review.tsx';
+import { askedLabel } from './Plan.tsx';
 
-export function Walkthrough({ go, data, initialState, stepKey, decision }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string }) {
+export function Walkthrough({ go, data, initialState, stepKey, decision, group }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string }) {
   const [state, setState] = useState(initialState);
   const plan = useMemo(() => buildPlan(data, state), [data, state.order]);
   const steps = plan.sequence;
@@ -34,6 +35,17 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
   const [showContext, setShowContext] = usePref<boolean>('walkthrough-context', true);
   const [mode, setMode] = usePref<DiffMode>('diff-mode', 'unified');
   const [ignoreSpace, setIgnoreSpace] = usePref<boolean>('diff-ignore-space', false);
+  // Context steps aside when the diff needs the room: side by side, or a narrow window. You can still open it.
+  const wide = useMediaQuery('(min-width: 1400px)');
+  const autoHide = mode === 'split' || !wide;
+  const [contextOverride, setContextOverride] = useState<boolean | null>(null);
+  useEffect(() => setContextOverride(null), [autoHide]);
+  const contextShown = contextOverride ?? (showContext && !autoHide);
+  const toggleContext = () => {
+    setContextOverride(!contextShown);
+    if (!autoHide) setShowContext(!contextShown);
+  };
+  const skimGroup = group ? (plan.skimGroups.find((g) => g.name === group) ?? null) : null;
   const since = useMemo(() => sinceLastRound(data.steps, state), [data.steps, state.rounds]);
 
   // Answers and Claude's progress arrive while you read.
@@ -61,7 +73,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
     }
   };
 
-  const at = (to: { stepKey?: string; decision?: string }) => go({ name: 'review', projectId: data.projectId, branch: data.branch, ...to });
+  const at = (to: { stepKey?: string; decision?: string; group?: string }) => go({ name: 'review', projectId: data.projectId, branch: data.branch, ...to });
   const select = (key: string) => at({ stepKey: key });
   const decide = (d: PlanDecision) => at({ decision: d.id, stepKey: d.stepKeys[0] });
   const toPlan = () => go({ name: 'plan', projectId: data.projectId, branch: data.branch });
@@ -81,20 +93,45 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
   };
   const nextDecision = () => (plan.decisions[decPos + 1] ? decide(plan.decisions[decPos + 1]) : pastDecisions());
   const prevDecision = () => (decPos > 0 ? decide(plan.decisions[decPos - 1]) : toPlan());
-  const keys = useRef({ looksGood: () => {} });
+  const keys = useRef({ looksGood: () => {}, groupDone: () => {} });
+
+  const sheet = useShortcutSheet([
+    ['j', dec ? 'Next decision' : 'Next step'],
+    ['k', dec ? 'Previous decision' : 'Previous step'],
+    ['r', dec ? 'Choose the main answer, or go to the next decision' : skimGroup ? 'All look good' : 'Looks good, next'],
+    ['c', 'Comment on this step'],
+    ['a', 'Ask Claude'],
+    ['s', 'Unified or side by side'],
+    ['w', 'Hide whitespace changes'],
+    ['x', 'Show or hide context'],
+    ['/', 'Search the code'],
+    ['p', 'Back to the plan'],
+    ['f', 'Finish'],
+    ['?', 'This list'],
+  ]);
 
   // j/k between steps, r looks good, c comments, a asks Claude, s switches the diff layout, w hides whitespace edits.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, textarea, select, [contenteditable]')) return;
-      if (!cur && !dec) return;
+      if (!isPlainKey(e) || sheet.open) return;
+      const global: Record<string, () => void> = { p: toPlan, f: () => go({ name: 'finish', projectId: data.projectId, branch: data.branch }), x: toggleContext, s: () => setMode(mode === 'split' ? 'unified' : 'split'), w: () => setIgnoreSpace(!ignoreSpace) };
+      if (skimGroup && e.key === 'r') {
+        e.preventDefault();
+        keys.current.groupDone();
+        return;
+      }
+      if (global[e.key]) {
+        e.preventDefault();
+        global[e.key]();
+        return;
+      }
+      if (skimGroup || (!cur && !dec)) return;
       // While deciding, next and back go through the decisions.
       const moves: Record<string, () => void> = dec
         ? { j: nextDecision, k: prevDecision, r: () => (state.settled?.[dec.id] ? nextDecision() : settle(dec, 'fine')) }
         : { j: () => pos < steps.length - 1 && select(steps[pos + 1].key), k: () => pos > 0 && select(steps[pos - 1].key), r: () => keys.current.looksGood() };
       const act: Record<string, () => void> = cur
-        ? { ...moves, c: () => openComment(), a: () => openAsk(), s: () => setMode(mode === 'split' ? 'unified' : 'split'), w: () => setIgnoreSpace(!ignoreSpace) }
+        ? { ...moves, c: () => openComment(), a: () => openAsk() }
         : { j: moves.j, k: moves.k };
       const fn = act[e.key];
       if (!fn) return;
@@ -152,64 +189,69 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
   ].filter((p) => p.segments.length > 0);
 
   const phaseList = careful ? plan.careful : plan.skim;
-  const here = dec
+  const here = skimGroup
+    ? `Skim · ${skimGroup.name}`
+    : dec
     ? `Decision ${decPos + 1} of ${plan.decisions.length}`
     : cur
       ? `${careful ? 'Read closely' : 'Skim'} · step ${phaseList.findIndex((s) => s.key === cur.key) + 1} of ${phaseList.length}`
       : '';
 
-  const header = (
-    <header className="topbar" style={{ borderBottomColor: 'var(--divider)' }}>
-      <Brand onClick={() => go({ name: 'home' })} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '1 1 280px', minWidth: 0 }}>
-        <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: toPlan, shrink: true }, { label: here }]} />
-        <span className="topbar-sub">
-          {data.pr ? `PR #${data.pr.number} · ` : ''}
-          {data.stack ? `part ${data.stack.prs.findIndex((p) => p.current) + 1} of ${data.stack.prs.length} in a stack · ` : ''}
-          {sizeText(data.files, data.added, data.removed)}
-        </span>
-      </div>
-      {search.button}
-      <button type="button" className="btn" style={{ height: 36 }} onClick={toPlan}>
-        Review plan
-      </button>
-      {cur && (
-        <button type="button" className="btn" style={{ height: 36 }} aria-pressed={showContext} onClick={() => setShowContext(!showContext)}>
-          {showContext ? 'Hide context' : 'Context'}
-        </button>
-      )}
-      <button type="button" className="btn primary" style={{ height: 36 }} onClick={() => go({ name: 'finish', projectId: data.projectId, branch: data.branch })}>
-        Finish
-      </button>
-    </header>
-  );
+  const allDone = steps.every((x) => isReviewed(x, state.reviewed)) && plan.decisions.every((d) => state.settled?.[d.id]);
+  const nowPhase = phases.find((p) => p.now);
 
-  // One segment per decision or step: click one to go there.
-  const progressNav = (
-    <nav aria-label="Review progress" style={{ padding: '8px 24px 12px', background: 'var(--surface)', borderBottom: '1px solid var(--divider)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+  // One segment per decision or step, under the crumbs: click one to go there.
+  const progressBar = (
+    <nav aria-label="Review progress" style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
       {phases.map((p) => {
         const n = p.segments.length;
         const done = p.segments.filter((x) => x.done).length;
         return (
-          <div key={p.label} style={{ flex: `${Math.max(3, Math.min(n, 12))} 1 160px`, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ display: 'flex', gap: 3, width: '100%' }}>
-              {n <= 40 ? (
-                p.segments.map((x) => (
-                  <button key={x.key} type="button" title={x.title} aria-label={x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} style={{ flex: 1, minWidth: 0, padding: '4px 0', border: 0, background: 'none', cursor: 'pointer' }}>
-                    <span style={{ display: 'block', height: 6, borderRadius: 3, background: x.done ? 'var(--accent)' : x.current ? 'var(--accent-soft)' : 'var(--border)', outline: x.current ? '2px solid var(--accent)' : undefined, outlineOffset: 1 }} />
-                  </button>
-                ))
-              ) : (
-                <span style={{ flex: 1, height: 6, margin: '4px 0', borderRadius: 3, background: `linear-gradient(to right, var(--accent) ${(done / n) * 100}%, var(--border) 0)` }} />
-              )}
-            </span>
-            <button type="button" onClick={p.onClick} style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left', fontSize: 12.5, fontWeight: p.now ? 600 : 400, color: p.now ? 'var(--text)' : 'var(--muted)' }}>
-              {p.label} · {done === n ? `all ${n} done` : `${done} of ${n} done`}
-            </button>
-          </div>
+          <span key={p.label} title={`${p.label} · ${done} of ${n} done`} style={{ flex: `${Math.max(2, Math.min(n, 12))} 1 60px`, display: 'flex', gap: 2, minWidth: 0 }}>
+            {n <= 40 ? (
+              p.segments.map((x) => (
+                <button key={x.key} type="button" title={x.title} aria-label={x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} style={{ flex: 1, minWidth: 0, padding: '3px 0', border: 0, background: 'none', cursor: 'pointer' }}>
+                  <span style={{ display: 'block', height: 5, borderRadius: 3, background: x.done ? 'var(--accent)' : x.current ? 'var(--accent-soft)' : 'var(--border)', outline: x.current ? '2px solid var(--accent)' : undefined, outlineOffset: 1 }} />
+                </button>
+              ))
+            ) : (
+              <button type="button" onClick={p.onClick} aria-label={`${p.label}: ${done} of ${n} done`} style={{ flex: 1, padding: '3px 0', border: 0, background: 'none', cursor: 'pointer' }}>
+                <span style={{ display: 'block', height: 5, borderRadius: 3, background: `linear-gradient(to right, var(--accent) ${(done / n) * 100}%, var(--border) 0)` }} />
+              </button>
+            )}
+          </span>
         );
       })}
+      {nowPhase && (
+        <span style={{ flex: 'none', fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+          {nowPhase.label} · {nowPhase.segments.filter((x) => x.done).length} of {nowPhase.segments.length}
+        </span>
+      )}
     </nav>
+  );
+
+  // Crumbs, progress and actions in one bar, so the diff gets the height.
+  const header = (
+    <header className="topbar" style={{ borderBottomColor: 'var(--divider)' }}>
+      <Brand onClick={() => go({ name: 'home' })} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 280px', minWidth: 0 }}>
+        <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: toPlan, shrink: true }, { label: here }]} />
+        {progressBar}
+      </div>
+      {search.button}
+      <button type="button" className="btn" style={{ height: 36 }} onClick={toPlan} title="Back to the plan (p)">
+        Plan
+      </button>
+      {cur && !skimGroup && (
+        <button type="button" className="btn" style={{ height: 36 }} aria-pressed={contextShown} onClick={toggleContext} title="Show or hide context (x)">
+          Context
+        </button>
+      )}
+      {/* Finish stays quiet until everything is done: "Looks good" is the next click until then. */}
+      <button type="button" className={`btn ${allDone ? 'primary' : 'quiet'}`} style={{ height: 36 }} onClick={() => go({ name: 'finish', projectId: data.projectId, branch: data.branch })} title="Finish (f)">
+        Finish
+      </button>
+    </header>
   );
 
   // The decision you came for sits in the footer, where "Looks good" is for a step: in reach after reading the code.
@@ -245,10 +287,89 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
   const top = (
     <div style={{ position: 'sticky', top: 0, zIndex: 5 }}>
       {header}
-      {progressNav}
       {search.panel}
+      {sheet.sheet}
     </div>
   );
+
+  // A skim folder on one page: every low-risk step in it, and one action for all of them.
+  if (skimGroup) {
+    const groupSteps = skimGroup.steps;
+    const left = groupSteps.filter((x) => !isReviewed(x, state.reviewed));
+    const groupDone = (keys.current.groupDone = async () => {
+      let next: ReviewState = state;
+      for (const x of left) {
+        const r = await patch({ type: 'reviewed', stepKey: x.key, hunkIds: x.hunkIds, on: true });
+        if (!r) return;
+        next = r;
+      }
+      // On to the next folder with something left, then any step left, then wrap up.
+      const after = plan.skimGroups.find((g) => g.steps.some((x) => !isReviewed(x, next.reviewed)));
+      if (after) return at({ group: after.name });
+      const open = steps.find((x) => !isReviewed(x, next.reviewed));
+      if (open) select(open.key);
+      else go({ name: 'finish', projectId: data.projectId, branch: data.branch });
+    });
+    return (
+      <div className="page" style={{ background: 'var(--surface)' }}>
+        {top}
+        <main style={{ width: '100%', maxWidth: 1080, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: 28, flex: 1 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)' }}>
+              Skim · {plural(groupSteps.length, 'low-risk step')} · {plural(skimGroup.files, 'file')}
+              {left.length < groupSteps.length ? ` · ${groupSteps.length - left.length} already reviewed` : ''}
+            </span>
+            <h1 className="mono" style={{ fontSize: 26, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+              {skimGroup.name}
+            </h1>
+            <p style={{ fontSize: 15.5, lineHeight: 1.6, color: 'var(--muted)', maxWidth: 760 }}>Everything low risk in this folder, on one page. Scroll through, comment on a line where something looks off, then mark the whole folder reviewed.</p>
+          </div>
+          {groupSteps.map((x) => (
+            <section key={x.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+                <h2 style={{ fontSize: 17, overflowWrap: 'anywhere' }}>
+                  Step {x.index + 1}: {x.title}
+                </h2>
+                <RiskPill risk={x.risk} />
+                {isReviewed(x, state.reviewed) && <span className="pill low">Reviewed</span>}
+              </div>
+              {x.why && <p style={{ fontSize: 14.5, lineHeight: 1.6, color: 'var(--text-body)', maxWidth: 760 }}>{x.why}</p>}
+              {x.hunkIds.map((id) => {
+                const h = data.hunks[id];
+                return h ? (
+                  <DiffHunk
+                    key={id}
+                    hunk={h}
+                    mode={mode}
+                    ignoreSpace={ignoreSpace}
+                    comments={state.comments.filter((c) => c.hunkId === id && c.line)}
+                    onComment={(a, body, cid) => patch({ type: 'line-comment', id: cid, stepKey: x.key, hunkId: id, path: h.path, line: a.line, side: a.side, body })}
+                    loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
+                    noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
+                  />
+                ) : null;
+              })}
+            </section>
+          ))}
+          {error && <p className="error">{error}</p>}
+        </main>
+        <footer style={{ position: 'sticky', bottom: 0, zIndex: 4, background: 'var(--surface)', borderTop: '1px solid var(--divider)', padding: '12px 24px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+          <button type="button" className="btn lg" onClick={toPlan}>
+            ← Plan
+          </button>
+          <button type="button" className={`btn lg ${left.length ? 'primary' : 'done'}`} style={{ minWidth: 200 }} onClick={groupDone}>
+            {left.length ? `All ${plural(groupSteps.length, 'step')} look good →` : 'Reviewed · next →'}
+          </button>
+          <span style={{ display: 'flex', gap: 10, fontSize: 12.5, color: 'var(--muted)', marginLeft: 8, alignItems: 'center' }}>
+            <span>
+              <span className="kbd">r</span> all look good
+            </span>
+            {sheet.button}
+          </span>
+        </footer>
+      </div>
+    );
+  }
 
   if (dec && !cur) return <DecisionPage d={dec} n={decPos + 1} of={plan.decisions.length} data={data} top={top} onBack={prevDecision} actions={decisionActions} error={error} />;
 
@@ -383,8 +504,20 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
           )}
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
-            <span className="muted">
-              {plural(cur.files.length, 'file')} · {plural(cur.hunkIds.length, 'change')}
+            <span style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+              <span className="muted">
+                {plural(cur.files.length, 'file')} · {plural(cur.hunkIds.length, 'change')}
+              </span>
+              {/* With more than one file, a chip per file jumps to its first change. */}
+              {cur.files.length > 1 &&
+                cur.files.map((f) => {
+                  const first = cur.hunkIds.find((id) => data.hunks[id]?.path === f);
+                  return first ? (
+                    <button key={f} type="button" className="pill neutral mono" title={f} style={{ cursor: 'pointer', fontSize: 11.5, border: 0 }} onClick={() => document.getElementById(`hunk-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+                      {f.split('/').pop()}
+                    </button>
+                  ) : null;
+                })}
             </span>
             <span style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
               <span role="group" aria-label="Diff layout" style={{ display: 'inline-flex', border: '1px solid var(--border-strong)', borderRadius: 8, overflow: 'hidden' }}>
@@ -406,8 +539,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
             if (!h) return null;
             const isNew = since && !since.before.has(id);
             return (
+              <div key={`${cur.key}:${id}`} id={`hunk-${id}`} style={{ scrollMarginTop: 'calc(var(--topbar-h) + 12px)' }}>
               <DiffHunk
-                key={`${cur.key}:${id}`}
                 hunk={h}
                 mode={mode}
                 ignoreSpace={ignoreSpace}
@@ -418,6 +551,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
                 badge={isNew ? <span className="pill accent" style={{ border: 0, fontSize: 11 }}>New since last review</span> : null}
                 noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
               />
+              </div>
             );
           })}
 
@@ -465,11 +599,11 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
           {error && <p className="error">{error}</p>}
         </main>
 
-        {showContext && (
+        {contextShown && (
           <aside aria-label="Context" style={{ flex: '1 1 300px', maxWidth: 360, padding: '32px 24px 32px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
             <section className="card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <h2 className="label">{data.prompt || !data.pr ? 'What you asked for' : 'Pull request description'}</h2>
-              <AskedFor data={data} clamp={400} />
+              <h2 className="label">{askedLabel(data)}</h2>
+              <AskedFor data={data} clamp={pos === 0 ? 400 : 160} />
               {data.session && (
                 <button type="button" className="link" style={{ fontSize: 13, fontWeight: 500, textAlign: 'left' }} onClick={() => window.api.openSessionFile(data.session!.file)}>
                   Open full agent session
@@ -511,12 +645,13 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
             {done ? (pos < steps.length - 1 ? 'Reviewed · next →' : 'Reviewed ✓') : 'Looks good →'}
           </button>
         )}
-        <span style={{ display: 'flex', gap: 10, fontSize: 12.5, color: 'var(--muted)', marginLeft: 8 }} aria-label="Keyboard shortcuts">
-          {[['j', 'next'], ['k', 'back'], ['r', decLabels ? (decided ? 'next decision' : decLabels.fine.toLowerCase()) : 'looks good'], ['c', 'comment'], ['a', 'ask']].map(([k, what]) => (
+        <span style={{ display: 'flex', gap: 10, fontSize: 12.5, color: 'var(--muted)', marginLeft: 8, alignItems: 'center' }} aria-label="Keyboard shortcuts">
+          {[['j', 'next'], ['k', 'back'], ['r', decLabels ? (decided ? 'next decision' : decLabels.fine.toLowerCase()) : 'looks good']].map(([k, what]) => (
             <span key={k}>
               <span className="kbd">{k}</span> {what}
             </span>
           ))}
+          {sheet.button}
         </span>
       </footer>
     </div>

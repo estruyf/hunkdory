@@ -20,7 +20,7 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
   const pick = async (name: string) => {
     try {
       await window.api.trackBranch(current!, name);
-      go({ name: 'start', projectId: current!, branch: name });
+      go({ name: 'plan', projectId: current!, branch: name });
     } catch (e) {
       setError(cleanError(e));
     }
@@ -30,11 +30,11 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
     <div className="page">
       <header className="topbar">
         <Brand onClick={() => go({ name: 'home' })} />
-        <Crumbs items={[{ label: 'Inbox', onClick: () => go({ name: 'home' }) }, { label: 'Review a branch' }]} />
+        <Crumbs items={[{ label: 'Inbox', onClick: () => go({ name: 'home' }) }, { label: 'Review another branch' }]} />
       </header>
       <div style={{ width: '100%', maxWidth: 960, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <h1 style={{ fontSize: 26, letterSpacing: '-0.015em' }}>Review a branch</h1>
+          <h1 style={{ fontSize: 26, letterSpacing: '-0.015em' }}>Review another branch</h1>
           <p style={{ fontSize: 15, lineHeight: 1.6, color: 'var(--muted)' }}>
             Any branch with commits on top of {project ? <span className="mono">{project.baseBranch}</span> : 'the base'}: yours, a colleague's, or an agent's. Remote branches are as fresh as your last fetch.
           </p>
@@ -69,9 +69,12 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
                   </span>
                 </div>
                 {b.inInbox ? (
-                  <button type="button" className="btn" onClick={() => go({ name: 'start', projectId: current!, branch: b.name })}>
-                    In your inbox
-                  </button>
+                  <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <span className="pill neutral">In your inbox</span>
+                    <button type="button" className="btn" onClick={() => go({ name: 'plan', projectId: current!, branch: b.name })}>
+                      Open
+                    </button>
+                  </span>
                 ) : (
                   <button type="button" className="btn primary" onClick={() => pick(b.name)}>
                     Review

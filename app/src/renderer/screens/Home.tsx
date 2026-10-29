@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, GearIcon, Loading, plural, sizeText, useAsync, useInbox, usePref } from '../components/ui.tsx';
-import { checksText, checksTone } from '../components/github.tsx';
-import { suggestedOrder, timeAgo, tooBig } from '../../shared/order.ts';
+import { Brand, GearIcon, Loading, isPlainKey, plural, sizeText, useAsync, useInbox, usePref, useShortcutSheet } from '../components/ui.tsx';
+import { checkCounts } from '../components/github.tsx';
+import { formatDuration, suggestedOrder, timeAgo, tooBig } from '../../shared/order.ts';
 import { githubLink } from '../../shared/decisions.ts';
 import { hidesLocal, matchesPeople, peopleLine, peopleOptions, type PeopleFilter } from '../../shared/people.ts';
 import type { InboxItem, Project, ProjectScan, ReviewState } from '../../shared/types.ts';
@@ -16,6 +16,9 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
   const [query, setQuery] = useState('');
   const [order, setOrder] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
   const [people, setPeople] = usePref<PeopleFilter>('inbox-people', 'anyone');
+  // The row j and k move to, and Enter opens.
+  const [sel, setSel] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // Agents keep working while you look at the inbox: refresh when the window comes back,
   // at most every 30 seconds.
@@ -67,6 +70,48 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
     await window.api.ignoreBranch(w.projectId, w.branch, on);
     inbox.reload();
   };
+  const openItem = (w: InboxItem) => !w.error && go({ name: 'plan', projectId: w.projectId, branch: w.branch });
+
+  const at = Math.min(sel, Math.max(0, ready.length - 1));
+  const sheet = useShortcutSheet([
+    ['j', 'Next branch'],
+    ['k', 'Previous branch'],
+    ['↵', 'Open the selected branch'],
+    ['i', 'Ignore the selected branch'],
+    ['/', 'Search'],
+    ['b', 'Review another branch'],
+    ['?', 'This list'],
+  ]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isPlainKey(e) || sheet.open) return;
+      const inList = tab === 'waiting' && ready.length > 0;
+      const move = (to: number) => {
+        e.preventDefault();
+        setSel(to);
+        document.getElementById(`row-${to}`)?.scrollIntoView({ block: 'nearest' });
+      };
+      if (e.key === '/') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === 'b') {
+        e.preventDefault();
+        go({ name: 'pick', projectId: filter ?? undefined });
+      } else if (inList && (e.key === 'j' || e.key === 'ArrowDown') && !(e.target as HTMLElement).closest('[role="tablist"]')) move(Math.min(ready.length - 1, at + 1));
+      else if (inList && (e.key === 'k' || e.key === 'ArrowUp') && !(e.target as HTMLElement).closest('[role="tablist"]')) move(Math.max(0, at - 1));
+      else if (inList && e.key === 'Enter' && !(e.target as HTMLElement).closest('button, a')) {
+        e.preventDefault();
+        openItem(ready[at]);
+      } else if (inList && e.key === 'i') {
+        e.preventDefault();
+        ignore(ready[at], true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const scanOf = (p: Project) => inbox.value?.scans.find((x) => x.projectId === p.id);
 
   return (
     <div className="page">
@@ -75,7 +120,7 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
         <label htmlFor="search" className="sr-only">
           Search reviews
         </label>
-        <input id="search" className="field" placeholder="Search branches, titles, projects" value={query} onChange={(e) => setQuery(e.target.value)} style={{ flex: '1 1 280px', maxWidth: 480, height: 38 }} />
+        <input ref={searchRef} id="search" className="field" placeholder="Search branches, titles, projects   /" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && (e.target as HTMLInputElement).blur()} style={{ flex: '1 1 280px', maxWidth: 480, height: 38 }} />
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'center' }}>
           {inbox.loading && inbox.value && <span className="spinner" />}
@@ -85,24 +130,17 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
           <GearIcon size={18} />
         </button>
       </header>
+      {sheet.sheet}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 20, padding: '20px 24px' }}>
         {/* The project list stays in view under the header while the inbox scrolls. */}
-        <nav aria-label="Projects" style={{ flex: '1 1 240px', maxWidth: 280, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 'calc(var(--topbar-h) + 20px)', maxHeight: 'calc(100vh - var(--topbar-h) - 40px)', overflowY: 'auto' }}>
+        <nav aria-label="Projects" style={{ flex: '1 1 220px', maxWidth: 260, display: 'flex', flexDirection: 'column', gap: 4, position: 'sticky', top: 'calc(var(--topbar-h) + 20px)', maxHeight: 'calc(100vh - var(--topbar-h) - 40px)', overflowY: 'auto' }}>
           <h2 className="label" style={{ marginBottom: 6 }}>
             Projects
           </h2>
           <ProjectLink active={!filter} name="All projects" count={all.length} onClick={() => setFilter(null)} strong />
           {projects.value?.map((p) => (
-            <ProjectLink
-              key={p.id}
-              active={filter === p.id}
-              name={p.name}
-              sub={sourcesLabel(p)}
-              count={all.filter((w) => w.projectId === p.id).length}
-              onClick={() => setFilter(p.id)}
-              onSettings={() => go({ name: 'connect', projectId: p.id })}
-            />
+            <ProjectLink key={p.id} active={filter === p.id} name={p.name} problem={scanOf(p)?.error ?? null} count={all.filter((w) => w.projectId === p.id).length} onClick={() => setFilter(p.id)} onSettings={() => go({ name: 'connect', projectId: p.id })} />
           ))}
           <button type="button" className="link" style={{ padding: '10px 12px', fontSize: 14, fontWeight: 500, textAlign: 'left' }} onClick={() => go({ name: 'connect' })}>
             + Add project
@@ -114,22 +152,28 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
           <Tabs tabs={tabs} current={tab} onChange={setTab} />
           {inbox.error && <p className="error">{inbox.error}</p>}
 
-          <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* One filter bar for every tab: what narrows a list is always in sight. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <PeopleSelect value={people} onChange={setPeople} everyone={everyone} />
             {tab === 'waiting' && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
+              <>
                 <label className="sr-only" htmlFor="inbox-order">
                   Order
                 </label>
-                <PeopleSelect value={people} onChange={setPeople} everyone={everyone} />
                 <select id="inbox-order" className="field" value={order} onChange={(e) => setOrder(e.target.value as 'suggested' | 'newest')} style={{ height: 34, fontSize: 13, padding: '0 8px' }}>
                   <option value="suggested">What to review first</option>
                   <option value="newest">Newest first</option>
                 </select>
-                <button type="button" className="btn" style={{ height: 34 }} onClick={() => go({ name: 'pick', projectId: filter ?? undefined })}>
-                  Review a branch…
-                </button>
-              </div>
+              </>
             )}
+            <span style={{ flex: 1 }} />
+            {sheet.button}
+            <button type="button" className="btn" style={{ height: 34 }} onClick={() => go({ name: 'pick', projectId: filter ?? undefined })}>
+              Review another branch…
+            </button>
+          </div>
+
+          <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {!inbox.value && inbox.loading && <Loading label="Checking agent branches…" />}
 
             {tab === 'waiting' && inbox.value && ready.length === 0 && (
@@ -145,26 +189,17 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
                     {(projects.value ?? [])
                       .filter((p) => !filter || p.id === filter)
                       .map((p) => {
-                        const scan = inbox.value!.scans.find((x) => x.projectId === p.id);
+                        const scan = scanOf(p);
                         return scan ? <ScanLine key={p.id} project={p} scan={scan} go={go} /> : null;
                       })}
                   </>
                 )}
               </div>
             )}
-            {tab === 'waiting' && ready.map((w, i) => <InboxCard key={`${w.projectId}:${w.branch}`} item={w} me={me} go={go} first={i === 0} onIgnore={() => ignore(w, true)} />)}
+            {tab === 'waiting' && ready.map((w, i) => <InboxRow key={`${w.projectId}:${w.branch}`} n={i} item={w} me={me} selected={i === at} onOpen={() => openItem(w)} onFocus={() => setSel(i)} onIgnore={() => ignore(w, true)} />)}
 
-            {(tab === 'sent' || tab === 'ignored') && people !== 'anyone' && (
-              <p style={{ fontSize: 13, color: 'var(--muted)' }}>
-                Only {peopleLabel(people).toLowerCase()}, from the People filter on Waiting for you.{' '}
-                <button type="button" className="link" style={{ fontSize: 13 }} onClick={() => setPeople('anyone')}>
-                  Show anyone
-                </button>
-              </p>
-            )}
             {tab === 'sent' && inbox.value && running.length === 0 && <div className="card" style={emptyCard}>{q ? 'Nothing matches.' : 'Nothing is with an agent right now. Reviews you send back show here while the agent works on them.'}</div>}
-            {tab === 'sent' &&
-              running.map((w) => <RunningRow key={`${w.projectId}:${w.branch}`} item={w} state={inbox.value!.done.find((d) => d.projectId === w.projectId && d.branch === w.branch)} go={go} />)}
+            {tab === 'sent' && running.map((w) => <RunningRow key={`${w.projectId}:${w.branch}`} item={w} state={inbox.value!.done.find((d) => d.projectId === w.projectId && d.branch === w.branch)} go={go} />)}
 
             {tab === 'reviewed' && inbox.value && done.length === 0 && <div className="card" style={emptyCard}>{q ? 'Nothing matches.' : 'Nothing reviewed in the last seven days.'}</div>}
             {tab === 'reviewed' && done.length > 0 && (
@@ -234,15 +269,6 @@ function Tabs({ tabs, current, onChange }: { tabs: { id: Tab; label: string; cou
   );
 }
 
-function sourcesLabel(p: Project) {
-  const parts: string[] = [];
-  if (p.watch.anyBranch) parts.push('Any branch');
-  if (p.watch.pattern) parts.push(`Branches ${p.watch.pattern}`);
-  if (p.watch.pullRequests) parts.push(`Open pull requests · ${p.github}`);
-  else if (p.github) parts.push('GitHub');
-  return parts.join(' · ');
-}
-
 /** Why a project has nothing in the inbox, in numbers you can check. */
 function ScanLine({ project, scan, go }: { project: Project; scan: ProjectScan; go: Go }) {
   const parts: string[] = [];
@@ -257,7 +283,7 @@ function ScanLine({ project, scan, go }: { project: Project; scan: ProjectScan; 
     <span>
       <strong style={{ color: 'var(--text)', fontWeight: 600 }}>{project.name}:</strong> {parts.join(' ')}{' '}
       <button type="button" className="link" style={{ fontSize: 14 }} onClick={() => go({ name: 'pick', projectId: project.id })}>
-        Review a branch
+        Review another branch
       </button>{' '}
       ·{' '}
       <button type="button" className="link" style={{ fontSize: 14 }} onClick={() => go({ name: 'connect', projectId: project.id })}>
@@ -267,107 +293,93 @@ function ScanLine({ project, scan, go }: { project: Project; scan: ProjectScan; 
   );
 }
 
-function ProjectLink({ name, sub, count, active, strong, onClick, onSettings }: { name: string; sub?: string; count: number; active: boolean; strong?: boolean; onClick: () => void; onSettings?: () => void }) {
+
+function ProjectLink({ name, count, active, strong, problem, onClick, onSettings }: { name: string; count: number; active: boolean; strong?: boolean; problem?: string | null; onClick: () => void; onSettings?: () => void }) {
   return (
     <div style={{ position: 'relative' }} className="project-link">
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        width: '100%',
-        padding: '10px 12px',
-        borderRadius: 8,
-        background: active ? 'var(--surface)' : 'transparent',
-        border: `1px solid ${active ? 'var(--border)' : 'transparent'}`,
-        color: 'var(--text)',
-        fontSize: 14,
-        fontWeight: strong ? 600 : 400,
-        cursor: 'pointer',
-        textAlign: 'left',
-        font: 'inherit',
-      }}
-    >
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontWeight: strong ? 600 : 500, fontSize: 14 }}>{name}</span>
-        {sub && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{sub}</span>}
-      </span>
-      <span className={`pill ${strong ? 'solid' : count ? 'accent' : 'neutral'}`} style={{ border: 0, marginRight: onSettings ? 30 : 0 }}>
-        {count}
-      </span>
-    </button>
-    {onSettings && (
-      <button type="button" aria-label={`Settings for ${name}`} title="Project settings" onClick={onSettings} className="icon-btn" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)' }}>
-        <GearIcon />
+      <button
+        type="button"
+        onClick={onClick}
+        title={problem ?? undefined}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, width: '100%', padding: '9px 12px', borderRadius: 8, background: active ? 'var(--surface)' : 'transparent', border: `1px solid ${active ? 'var(--border)' : 'transparent'}`, color: 'var(--text)', cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          {problem && <span className="status-dot" style={{ width: 8, height: 8, background: 'var(--high-fg)' }} aria-label="Scan problem" />}
+          <span style={{ fontWeight: strong ? 600 : 500, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+        </span>
+        <span className={`pill ${strong ? 'solid' : count ? 'accent' : 'neutral'}`} style={{ border: 0, marginRight: onSettings ? 30 : 0 }}>
+          {count}
+        </span>
       </button>
-    )}
+      {onSettings && (
+        <button type="button" aria-label={`Settings for ${name}`} title="Project settings" onClick={onSettings} className="icon-btn" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)' }}>
+          <GearIcon />
+        </button>
+      )}
     </div>
   );
 }
 
-function InboxCard({ item: w, me, go, first, onIgnore }: { item: InboxItem; me: string | null; go: Go; first: boolean; onIgnore: () => void }) {
+/** One warning at most: the one that most changes whether you start now. */
+function warningOf(w: InboxItem): { text: string; cls: string; hint: string } | null {
+  if (w.error) return null;
+  if (checkCounts(w.checks).fail) return { text: 'CI failing', cls: 'high', hint: 'A check on GitHub failed.' };
+  if (tooBig(w)) return { text: 'Too big for one sitting', cls: 'high', hint: 'More than one sitting can take in. Ask the agent to split it, or review it over several sittings.' };
+  return null;
+}
+
+/** A branch waiting for you: a status dot, the title, one line of facts, and at most one warning. The whole row opens it. */
+function InboxRow({ item: w, n, me, selected, onOpen, onFocus, onIgnore }: { item: InboxItem; n: number; me: string | null; selected: boolean; onOpen: () => void; onFocus: () => void; onIgnore: () => void }) {
   const who = peopleLine(w, me);
-  const big = !w.error && tooBig(w);
   const inProgress = !!w.review && w.review.reviewedSteps > 0 && w.review.status === 'open';
-  const tag = w.updatedSinceReview ? { text: 'Updated since your review', cls: 'medium' } : inProgress ? { text: 'In progress', cls: 'low' } : { text: 'New', cls: 'accent' };
-  const open = () => go(inProgress ? { name: 'review', projectId: w.projectId, branch: w.branch } : { name: 'start', projectId: w.projectId, branch: w.branch });
+  const status = w.error
+    ? { text: 'Can’t open', color: 'var(--high-fg)' }
+    : w.updatedSinceReview
+      ? { text: 'Updated since your review', color: 'var(--med-fg)' }
+      : inProgress
+        ? { text: 'In progress', color: 'var(--low-fg)' }
+        : { text: 'New', color: 'var(--accent)' };
+  const left = inProgress ? Math.max(1, Math.round(w.minutes * (1 - w.review!.reviewedSteps / Math.max(1, w.steps)))) : w.minutes;
+  const warn = warningOf(w);
   return (
-    <article className="card" style={{ padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
-      <div style={{ flex: '1 1 360px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{w.projectName}</span>
-          <span className={`pill ${tag.cls}`} style={{ border: 0 }}>
-            {tag.text}
+    <div className="row-wrap" data-selected={selected}>
+      <button type="button" id={`row-${n}`} className="inbox-row" onClick={onOpen} onFocus={onFocus} disabled={!!w.error} aria-describedby={`row-${n}-meta`}>
+        <span className="status-dot" style={{ background: status.color }} title={status.text} aria-label={status.text} />
+        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span className="clamp-2" title={w.title} style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+            {w.title}
           </span>
-          {w.pr && (
-            <button type="button" className="pill neutral" style={{ border: 0, cursor: 'pointer', font: 'inherit', fontSize: 12, fontWeight: 600 }} title="Open on GitHub" onClick={() => window.api.openExternal(w.pr!.url)}>
-              PR #{w.pr.number}
-              {w.pr.isDraft ? ' · draft' : ''} ↗
-            </button>
-          )}
-          {big && (
-            <span className="pill high" style={{ border: 0 }} title="More than one sitting can take in. Ask the agent to split it, or review it over several sittings.">
-              Too big for one sitting
+          <span id={`row-${n}-meta`} style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', fontSize: 13, color: 'var(--muted)' }}>
+            {w.error ? (
+              <span className="error" style={{ fontSize: 13 }}>
+                {w.error}
+              </span>
+            ) : (
+              <strong style={{ color: 'var(--text)', fontWeight: 600 }}>{inProgress ? `${formatDuration(left)} left · ${w.review!.reviewedSteps} of ${plural(w.steps, 'step')}` : `About ${formatDuration(left)}`}</strong>
+            )}
+            {status.text !== 'New' && status.text !== 'In progress' && !w.error && <span>· {status.text.toLowerCase()}</span>}
+            <span>· {w.projectName}</span>
+            <span>
+              · <span className="mono">{w.branch}</span>
             </span>
-          )}
-          {w.buildsOn && (
-            <span className="pill neutral" style={{ border: 0 }} title={`This branch starts from ${w.buildsOn.branch}, so that branch's changes show up in this review too.`}>
-              Builds on {w.buildsOn.pr ? `PR #${w.buildsOn.pr}` : w.buildsOn.branch}
-            </span>
-          )}
-          {w.tracked && (
-            <span className="pill neutral" style={{ border: 0 }}>
-              Picked by you
-            </span>
-          )}
-          {w.checks.length > 0 && (
-            <span className={`pill ${checksTone(w.checks)}`} style={{ border: 0 }} title="CI on GitHub">
-              CI: {checksText(w.checks)}
-            </span>
-          )}
-        </div>
-        <h2 className="clamp-2" title={w.title} style={{ fontSize: 16, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
-          {w.title}
-        </h2>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 13, color: 'var(--muted)' }}>
-          <span className="mono">{w.branch}</span>
-          {!w.error && <span>{sizeText(w.files, w.added, w.removed)}</span>}
-          {w.updatedAt && <span>{timeAgo(w.updatedAt)}</span>}
-          {w.error && <span className="error">{w.error}</span>}
-        </div>
-        {who && <p style={{ fontSize: 13, color: 'var(--muted)', overflowWrap: 'anywhere' }}>{who}</p>}
-      </div>
-      <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <button type="button" className="btn" style={{ border: 0, color: 'var(--muted)' }} title="Take it out of your inbox, e.g. when someone else reviews it on GitHub. You can bring it back from Ignored." onClick={onIgnore}>
-          Ignore
-        </button>
-        <button type="button" className={`btn ${first ? 'primary' : ''}`} style={{ minWidth: 160 }} onClick={open} disabled={!!w.error}>
-          {inProgress ? 'Continue review' : 'Start review'}
-        </button>
-      </span>
-    </article>
+            {!w.error && <span>· {sizeText(w.files, w.added, w.removed)}</span>}
+            {w.pr && <span>· PR #{w.pr.number}{w.pr.isDraft ? ' (draft)' : ''}</span>}
+            {w.buildsOn && <span title={`This branch starts from ${w.buildsOn.branch}, so that branch's changes show up in this review too.`}>· builds on {w.buildsOn.pr ? `PR #${w.buildsOn.pr}` : w.buildsOn.branch}</span>}
+            {w.updatedAt && <span>· {timeAgo(w.updatedAt)}</span>}
+          </span>
+          {who && <span style={{ fontSize: 12.5, color: 'var(--muted)', overflowWrap: 'anywhere' }}>{who}</span>}
+        </span>
+        {warn && (
+          <span className={`pill ${warn.cls}`} style={{ border: 0 }} title={warn.hint}>
+            {warn.text}
+          </span>
+        )}
+        {!w.error && <span className="row-go">{inProgress ? 'Continue →' : 'Review →'}</span>}
+      </button>
+      <button type="button" className="btn row-extra" style={{ height: 32, border: 0, color: 'var(--muted)', background: 'transparent' }} title="Take it out of your inbox, e.g. when someone else reviews it on GitHub. You can bring it back from Ignored. (i)" onClick={onIgnore}>
+        Ignore
+      </button>
+    </div>
   );
 }
 
@@ -382,7 +394,7 @@ function RunningRow({ item: w, state, go }: { item: InboxItem; state?: ReviewSta
       </span>
       <span style={{ flex: 1 }} />
       {!running && (
-        <button type="button" className="btn" onClick={() => go({ name: 'start', projectId: w.projectId, branch: w.branch })}>
+        <button type="button" className="btn" onClick={() => go({ name: 'plan', projectId: w.projectId, branch: w.branch })}>
           Review again
         </button>
       )}

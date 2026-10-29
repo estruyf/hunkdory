@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Welcome } from './screens/Welcome.tsx';
 import { Connect } from './screens/Connect.tsx';
 import { Home } from './screens/Home.tsx';
-import { StartReview } from './screens/StartReview.tsx';
 import { Review } from './screens/Review.tsx';
 import { Finish } from './screens/Finish.tsx';
 import { Done } from './screens/Done.tsx';
@@ -19,10 +18,10 @@ export type Route =
   | { name: 'settings' }
   // `projectId` opens the inbox on that project.
   | { name: 'home'; projectId?: string }
-  | { name: 'start'; projectId: string; branch: string }
   | { name: 'plan'; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }
   // `decision` is set while you go through the decisions: the step shown is the one the decision is about.
-  | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number }
+  // `group` shows a whole skim folder on one page.
+  | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; group?: string; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number }
   | { name: 'finish'; projectId: string; branch: string }
   | { name: 'done'; projectId: string; branch: string; result: FinishResult };
 
@@ -101,13 +100,11 @@ export function App() {
       return <Settings go={go} />;
     case 'home':
       return <Home key={route.projectId ?? 'all'} go={go} initialProject={route.projectId} />;
-    case 'start':
-      return <StartReview go={go} projectId={route.projectId} branch={route.branch} />;
     case 'plan':
       return <PlanScreen key={`${route.projectId}:${route.branch}`} go={go} projectId={route.projectId} branch={route.branch} preloaded={route.preloaded} />;
     case 'review':
       // A new `reload` remounts the review, so it reads the branch again.
-      return <Review key={`${route.projectId}:${route.branch}:${route.reload ?? ''}`} go={go} projectId={route.projectId} branch={route.branch} stepKey={route.stepKey} decision={route.decision} preloaded={route.preloaded} />;
+      return <Review key={`${route.projectId}:${route.branch}:${route.reload ?? ''}`} go={go} projectId={route.projectId} branch={route.branch} stepKey={route.stepKey} decision={route.decision} group={route.group} preloaded={route.preloaded} />;
     case 'finish':
       return <Finish go={go} projectId={route.projectId} branch={route.branch} />;
     case 'done':

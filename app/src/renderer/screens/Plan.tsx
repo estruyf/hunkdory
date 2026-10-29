@@ -1,24 +1,31 @@
-// The review plan: decide, read closely, skim. Sorts a big change so you know where to start.
+// The review plan, and the way into a review: decide, read closely, skim.
+// Opening a branch lands here. One button starts (or continues) the review where it makes sense.
 import { useEffect, useMemo, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Crumbs, LoadingPage, RiskPill, cleanError, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
-import { StackBar } from '../components/github.tsx';
+import { Brand, Crumbs, LoadingPage, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref, useShortcutSheet } from '../components/ui.tsx';
+import { StackBar, checksText, checksTone } from '../components/github.tsx';
 import { AgentTests, AskedFor, ReviewError } from './Review.tsx';
 import { useCodeSearch } from '../components/search.tsx';
-import { OUTSIDE_HINT, RISK_LABEL, isReviewed } from '../../shared/order.ts';
+import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
+import { sinceLastRound } from '../../shared/rounds.ts';
+import { OUTSIDE_HINT, RISK_LABEL, formatDuration, isReviewed, timeAgo, tooBig } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, planProgress, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
-import type { ReviewData, ReviewState, Step } from '../../shared/types.ts';
+import type { ReviewData, ReviewOrder, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
+
+const ORDERS: { id: ReviewOrder; label: string }[] = [
+  { id: 'story', label: 'Story order' },
+  { id: 'risk', label: 'Riskiest first' },
+  { id: 'file', label: 'By file' },
+];
 
 export function PlanScreen({ go, projectId, branch, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }) {
-  if (preloaded) return <PlanView go={go} data={preloaded.data} initialState={preloaded.state} />;
-  return <LoadPlan go={go} projectId={projectId} branch={branch} />;
-}
-
-function LoadPlan({ go, projectId, branch }: { go: Go; projectId: string; branch: string }) {
-  const loaded = useAsync(() => window.api.loadReview(projectId, branch), [projectId, branch]);
+  // A new walkthrough changes the steps: `version` reads the branch again.
+  const [version, setVersion] = useState(0);
+  const loaded = useAsync(() => (preloaded && version === 0 ? Promise.resolve(preloaded) : window.api.loadReview(projectId, branch)), [projectId, branch, version]);
+  const value = loaded.value ?? (version === 0 ? preloaded : undefined);
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
-  if (!loaded.value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
-  return <PlanView go={go} data={loaded.value.data} initialState={loaded.value.state} />;
+  if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
+  return <PlanView key={version} go={go} data={value.data} initialState={value.state} onReload={() => setVersion((v) => v + 1)} />;
 }
 
 const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
@@ -31,12 +38,16 @@ function headline(decisions: number, careful: number, skim: number) {
   return 'Low risk all round: a quick skim';
 }
 
-function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initialState: ReviewState }) {
+function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewData; initialState: ReviewState; onReload: () => void }) {
   const [state, setState] = useState(initialState);
   const [error, setError] = useState<string | null>(null);
   const [allCareful, setAllCareful] = useState(false);
+  const [skipSeen, setSkipSeen] = useState(true);
+  const [copied, setCopied] = useState(false);
   const plan = useMemo(() => buildPlan(data, state), [data, state.order]);
   const progress = planProgress(plan, state);
+  // Opening a branch without a walkthrough has Hunkdory write one; the steps update when it's ready.
+  const w = useWalkthroughJob(data, { auto: true, onDone: onReload });
 
   useEffect(
     () =>
@@ -46,27 +57,99 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
     [data.projectId, data.branch]
   );
 
-  const open = (step: Step | undefined) => step && go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: step.key, preloaded: { data, state } });
-  const search = useCodeSearch(data, (key) => open(data.steps.find((s) => s.key === key)));
-  const firstOpen = (steps: Step[]) => steps.find((s) => !isReviewed(s, state.reviewed)) ?? steps[0];
-  const next = plan.sequence.find((s) => !isReviewed(s, state.reviewed));
-  const started = Object.keys(state.reviewed).length > 0 || progress.decided > 0;
-  const allDone = !next && progress.decided === progress.decisions;
-  // Continue where nothing is done yet, decisions first, so nothing you put off gets skipped.
-  const resume = resumePoint(plan, state);
-  const goResume = () =>
-    resume && go({ name: 'review', projectId: data.projectId, branch: data.branch, decision: resume.decision?.id, stepKey: resume.stepKey, preloaded: { data, state } });
+  // A review you finished before opens a new round when you start again; one you never started gets its start time.
+  const needsStart = !state.startedAt || !!state.decision;
+  // What changed since your last pass, while that pass is still the latest.
+  const since = useMemo(
+    () => (needsStart ? sinceLastRound(data.steps, { rounds: [...(state.rounds ?? []), ...(state.decision ? [{ decision: state.decision, comments: state.comments, reviewed: state.reviewed }] : [])] }) : null),
+    [data.steps, needsStart, state.rounds, state.decision]
+  );
+  const counts = since ? Object.values(since.byStep).reduce((n, c) => ({ ...n, [c]: n[c] + 1 }), { new: 0, changed: 0, same: 0 }) : null;
 
-  const settle = async (d: PlanDecision, value: 'fine' | 'fix' | null) => {
+  const patch = async (p: ReviewPatch) => {
     try {
-      setState(await window.api.updateReview(data.projectId, data.branch, { type: 'settle', id: d.id, value, comment: settleComment(d, d.stepKeys[0]) }));
+      const next = await window.api.updateReview(data.projectId, data.branch, p);
+      setState(next);
       setError(null);
+      return next;
     } catch (e) {
       setError(cleanError(e));
+      return null;
     }
   };
 
+  /** Starts the review (or a new round) before you go into it, so progress and timing count from here. */
+  const begin = async (): Promise<ReviewState | null> => {
+    if (!needsStart) return state;
+    let next = await patch({ type: 'start', order: state.order });
+    if (!next) return null;
+    // Steps whose every change you reviewed before count as reviewed again.
+    if (since && skipSeen) {
+      for (const s of since.alreadyReviewed) next = (await patch({ type: 'reviewed', stepKey: s.key, hunkIds: s.hunkIds, on: true })) ?? next;
+    }
+    return next;
+  };
+
+  const enter = async (to: { stepKey?: string; decision?: string; group?: string }) => {
+    const s = await begin();
+    if (s) go({ name: 'review', projectId: data.projectId, branch: data.branch, ...to, preloaded: { data, state: s } });
+  };
+  const open = (step: Step | undefined) => step && enter({ stepKey: step.key });
+  const search = useCodeSearch(data, (key) => open(data.steps.find((s) => s.key === key)));
+  const toFinish = () => go({ name: 'finish', projectId: data.projectId, branch: data.branch });
+
+  const resume = resumePoint(plan, state);
+  const allDone = !needsStart && !resume;
+  const go1 = async () => {
+    if (allDone) return toFinish();
+    if (needsStart) {
+      const s = await begin();
+      if (!s) return;
+      const r = resumePoint(plan, s);
+      if (!r) return toFinish();
+      return go({ name: 'review', projectId: data.projectId, branch: data.branch, decision: r.decision?.id, stepKey: r.stepKey, preloaded: { data, state: s } });
+    }
+    if (resume) go({ name: 'review', projectId: data.projectId, branch: data.branch, decision: resume.decision?.id, stepKey: resume.stepKey, preloaded: { data, state } });
+  };
+
+  const writing = w.job?.status === 'running' && data.walkthrough === 'skeleton';
+  const ctaLabel = (() => {
+    if (allDone) return 'Finish the review →';
+    if (!resume) return 'Start review →';
+    const verb = needsStart ? 'Start' : 'Continue';
+    if (writing && needsStart) return 'Start with one step per file';
+    if (resume.decision) return `${verb}: decision ${plan.decisions.indexOf(resume.decision) + 1} of ${plan.decisions.length} →`;
+    return `${verb}: step ${plan.sequence.findIndex((s) => s.key === resume.stepKey) + 1} of ${plan.sequence.length} →`;
+  })();
+
+  const sheet = useShortcutSheet([
+    ['↵', ctaLabel.replace(' →', '')],
+    ['/', 'Search the code'],
+    ['f', 'Finish'],
+    ['?', 'This list'],
+  ]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isPlainKey(e) || sheet.open || (e.target as HTMLElement).closest('button, a')) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        go1();
+      } else if (e.key === 'f') {
+        e.preventDefault();
+        toFinish();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const settle = async (d: PlanDecision, value: 'fine' | 'fix' | null) => {
+    if (!(await begin())) return;
+    await patch({ type: 'settle', id: d.id, value, comment: settleComment(d, d.stepKeys[0]) });
+  };
+
   const carefulShown = allCareful ? plan.careful : plan.careful.slice(0, 8);
+  const minutesFor = (n: number) => Math.max(1, Math.round((data.minutes * n) / Math.max(1, data.steps.length)));
 
   return (
     <div className="page">
@@ -81,34 +164,101 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
           </span>
         </div>
         {search.button}
-        {resume && (
-          <button type="button" className="btn" onClick={goResume}>
-            {started ? 'Continue' : resume.decision ? 'Start with the decisions' : 'Start at step 1'}
-          </button>
-        )}
-        <button type="button" className={`btn ${allDone ? 'primary' : ''}`} style={allDone ? undefined : { borderColor: 'var(--accent)', color: 'var(--accent)' }} onClick={() => go({ name: 'finish', projectId: data.projectId, branch: data.branch })}>
+        <button type="button" className={`btn ${allDone ? 'primary' : 'quiet'}`} style={{ height: 36 }} onClick={toFinish}>
           Finish
         </button>
       </header>
       {search.panel}
+      {sheet.sheet}
 
-      <div style={{ width: '100%', maxWidth: 1240, margin: '0 auto', padding: '28px 24px 56px', display: 'flex', flexDirection: 'column', gap: 32 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <h1 style={{ fontSize: 26, letterSpacing: '-0.015em' }}>{allDone ? 'All done. Time to wrap up.' : headline(plan.decisions.length, plan.careful.length, plan.skim.length)}</h1>
-          <p style={{ fontSize: 15.5, lineHeight: 1.6, color: 'var(--muted)', maxWidth: 760 }}>
-            {allDone
-              ? 'You made every decision and looked at every step. Finish to merge, send it back, or post your review.'
-              : `Hunkdory sorted the ${plural(data.steps.length, 'step')} for you. Start with what only you can decide. ${plan.skim.length ? 'The low-risk rest is grouped so you can skim it.' : ''}`}
-          </p>
-          {data.stack && (
-            <div style={{ paddingTop: 6 }}>
-              <StackBar data={data} go={go} />
-            </div>
-          )}
-          {data.walkthrough === 'skeleton' && (
-            <p className="notice info">This branch has no walkthrough, so each step is one file and there is less to go on.</p>
-          )}
+      <div style={{ width: '100%', maxWidth: 1240, margin: '0 auto', padding: '28px 24px 56px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px 24px', alignItems: 'flex-end' }}>
+          <div style={{ flex: '1 1 520px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span style={{ fontSize: 13, color: 'var(--muted)', display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
+              <span>About {formatDuration(data.minutes)}</span>
+              <span>{plural(data.steps.length, 'step')}</span>
+              <span>
+                {data.session
+                  ? `Claude Code session, last active ${timeAgo(data.session.endedAt)}`
+                  : data.agent === 'copilot' && data.pr
+                    ? `GitHub Copilot, updated ${timeAgo(data.pr.updatedAt)}`
+                    : data.pr
+                      ? `PR by ${data.pr.author}, updated ${timeAgo(data.pr.updatedAt)}`
+                      : data.author
+                        ? `Last commit by ${data.author}`
+                        : 'No agent session found'}
+              </span>
+              {data.pr && data.pr.checks.length > 0 && (
+                <span className={`pill ${checksTone(data.pr.checks)}`} style={{ border: 0 }}>
+                  CI: {checksText(data.pr.checks)}
+                </span>
+              )}
+              {data.pr && (
+                <button type="button" className="link" style={{ fontSize: 13 }} onClick={() => window.api.openExternal(data.pr!.url)}>
+                  Open on GitHub ↗
+                </button>
+              )}
+            </span>
+            <h1 style={{ fontSize: 28, lineHeight: 1.2, letterSpacing: '-0.015em' }}>{allDone ? 'All done. Time to wrap up.' : headline(plan.decisions.length, plan.careful.length, plan.skim.length)}</h1>
+            <p style={{ fontSize: 15, lineHeight: 1.6, color: 'var(--muted)', maxWidth: 720 }}>
+              {allDone
+                ? 'You made every decision and looked at every step. Finish to merge, send it back, or post your review.'
+                : `Hunkdory sorted the ${plural(data.steps.length, 'step')} for you. Start with what only you can decide.${plan.skim.length ? ' The low-risk rest is grouped so you can skim it.' : ''}`}
+            </p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+            <button type="button" className="btn primary" style={{ height: 48, padding: '0 24px', fontSize: 15, borderRadius: 10 }} onClick={go1}>
+              {ctaLabel}
+            </button>
+            <span style={{ fontSize: 12.5, color: 'var(--muted)', display: 'flex', gap: 12 }}>
+              <span>
+                <span className="kbd">↵</span> to {needsStart ? 'start' : 'go'}
+              </span>
+              {sheet.button}
+            </span>
+          </div>
         </div>
+
+        {since && counts && (
+          <section className="notice info" aria-label="Since your last review" style={{ flexWrap: 'wrap', alignItems: 'center', gap: '8px 16px' }}>
+            <span style={{ flex: '1 1 420px' }}>
+              <strong>Since your last review:</strong>{' '}
+              {[counts.changed && `${plural(counts.changed, 'step')} changed`, counts.new && `${plural(counts.new, 'step')} new`, counts.same && `${counts.same} the same`].filter(Boolean).join(', ') || 'nothing changed'}
+              {since.gone ? `. ${plural(since.gone, 'earlier change')} ${since.gone === 1 ? 'is' : 'are'} gone.` : '.'}{' '}
+              <span className="muted">
+                You {since.decision.kind === 'send-back' ? 'sent it back' : since.decision.kind === 'github' ? 'reviewed it on GitHub' : 'finished it'} {timeAgo(since.decision.at)}.
+              </span>
+            </span>
+            {since.alreadyReviewed.length > 0 && (
+              <label className="choice" style={{ alignItems: 'center' }}>
+                <input type="checkbox" checked={skipSeen} onChange={(e) => setSkipSeen(e.target.checked)} style={{ marginTop: 0 }} />
+                Mark the {plural(since.alreadyReviewed.length, 'unchanged step')} as reviewed
+              </label>
+            )}
+          </section>
+        )}
+
+        {data.stack && <StackBar data={data} go={go} />}
+        <WalkthroughNotice data={data} w={w} />
+
+        {tooBig({ minutes: data.minutes, steps: data.steps.length }) && (
+          <div className="notice" role="note" style={{ flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ flex: '1 1 480px' }}>
+              <strong>Too big for one sitting.</strong> About {formatDuration(data.minutes)} of reading. Smaller branches get a better review: ask the agent to split it. Or take it over several sittings: Hunkdory keeps your place.
+            </span>
+            <button
+              type="button"
+              className="link"
+              style={{ fontSize: 13.5, fontWeight: 600 }}
+              onClick={async () => {
+                await navigator.clipboard.writeText(splitRequest(data.branch, data.steps.length, formatDuration(data.minutes)));
+                setCopied(true);
+              }}
+            >
+              {copied ? 'Copied. Paste it into the agent’s session.' : 'Copy a request to split it'}
+            </button>
+          </div>
+        )}
 
         <HowItWorks />
         <RequestCard data={data} onOpen={open} />
@@ -119,24 +269,51 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
               {plan.decisions.map((d) => (
-                <DecisionCard key={d.id} d={d} steps={data.steps} value={state.settled?.[d.id]} onSettle={(v) => settle(d, v)} onShow={(key) => go({ name: 'review', projectId: data.projectId, branch: data.branch, decision: d.id, stepKey: key, preloaded: { data, state } })} onCi={() => {
-                  const failing = data.pr?.checks.find((c) => c.state === 'fail' && c.url);
-                  window.api.openExternal(failing?.url ?? data.pr!.url);
-                }} />
+                <DecisionCard
+                  key={d.id}
+                  d={d}
+                  steps={data.steps}
+                  value={state.settled?.[d.id]}
+                  onSettle={(v) => settle(d, v)}
+                  onShow={(key) => enter({ decision: d.id, stepKey: key })}
+                  onCi={() => {
+                    const failing = data.pr?.checks.find((c) => c.state === 'fail' && c.url);
+                    window.api.openExternal(failing?.url ?? data.pr!.url);
+                  }}
+                />
               ))}
             </div>
           )}
         </Phase>
 
         {plan.careful.length > 0 && (
-          <Phase n={2} title="Read closely" hint="Steps that need attention, or that you didn’t ask for. Read the code." meta={`${progress.carefulDone} of ${plural(plan.careful.length, 'step')} reviewed · about ${Math.max(1, Math.round((data.minutes * plan.careful.length) / Math.max(1, data.steps.length)))} min`}>
+          <Phase
+            n={2}
+            title="Read closely"
+            hint="Steps that need attention, or that you didn’t ask for. Read the code."
+            meta={`${progress.carefulDone} of ${plural(plan.careful.length, 'step')} reviewed · about ${minutesFor(plan.careful.length)} min`}
+            aside={
+              <label style={{ fontSize: 13, color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                Order
+                <select className="field" value={state.order} onChange={(e) => patch({ type: 'order', order: e.target.value as ReviewOrder })} style={{ height: 32, fontSize: 13, padding: '0 8px' }}>
+                  {ORDERS.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            }
+          >
             <div className="card" style={{ overflow: 'hidden' }}>
               {carefulShown.map((s) => {
                 const done = isReviewed(s, state.reviewed);
+                const changed = since?.byStep[s.key];
                 return (
                   <button key={s.key} type="button" onClick={() => open(s)} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 14px', alignItems: 'center', width: '100%', padding: '14px 18px', border: 0, borderBottom: '1px solid var(--divider)', background: 'var(--surface)', cursor: 'pointer', font: 'inherit', textAlign: 'left', color: 'var(--text)' }}>
                     <span aria-hidden="true" style={{ flex: 'none', width: 12, height: 12, borderRadius: 999, ...(done ? { background: 'var(--accent)' } : { border: `2px solid ${s.risk === 'high' ? 'var(--high-fg)' : 'var(--med-fg)'}` }) }} />
                     <span style={{ flex: '1 1 360px', fontSize: 15, fontWeight: 500, overflowWrap: 'anywhere', color: done ? 'var(--muted)' : 'var(--text)' }}>{s.title}</span>
+                    {changed && changed !== 'same' && <span className="pill accent">{changed === 'new' ? 'New' : 'Changed'}</span>}
                     <RiskPill risk={s.risk} />
                     {s.outsideTask && (
                       <span className="pill medium" title={OUTSIDE_HINT}>
@@ -158,18 +335,20 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
         )}
 
         {plan.skim.length > 0 && (
-          <Phase n={plan.careful.length ? 3 : 2} title="Skim" hint="Low-risk steps, grouped by folder. A quick look is enough." meta={`${progress.skimDone} of ${plural(plan.skim.length, 'low-risk step')} reviewed`}>
+          <Phase n={plan.careful.length ? 3 : 2} title="Skim" hint="Low-risk steps, grouped by folder. Open a folder to see all of it on one page, then mark it reviewed in one go." meta={`${progress.skimDone} of ${plural(plan.skim.length, 'low-risk step')} reviewed · about ${minutesFor(plan.skim.length)} min`}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 12 }}>
               {plan.skimGroups.map((g) => {
                 const done = g.steps.filter((s) => isReviewed(s, state.reviewed)).length;
                 return (
                   <div key={g.name} className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <span className="mono" style={{ fontSize: 13.5, fontWeight: 600, overflowWrap: 'anywhere' }}>{g.name}</span>
+                    <span className="mono" style={{ fontSize: 13.5, fontWeight: 600, overflowWrap: 'anywhere' }}>
+                      {g.name}
+                    </span>
                     <span style={{ fontSize: 13, color: 'var(--muted)' }}>
                       {plural(g.steps.length, 'step')} · {plural(g.files, 'file')}
                     </span>
-                    <button type="button" className={`btn ${done === g.steps.length ? 'done' : ''}`} style={{ alignSelf: 'flex-start', marginTop: 4, height: 34, padding: '0 12px', fontSize: 13 }} onClick={() => open(firstOpen(g.steps))}>
-                      {done === g.steps.length ? 'Skimmed ✓' : done ? `Continue · ${done} of ${g.steps.length}` : 'Skim'}
+                    <button type="button" className={`btn ${done === g.steps.length ? 'done' : ''}`} style={{ alignSelf: 'flex-start', marginTop: 4, height: 34, padding: '0 12px', fontSize: 13 }} onClick={() => enter({ group: g.name })}>
+                      {done === g.steps.length ? 'Reviewed ✓' : done ? `Skim folder · ${done} of ${g.steps.length}` : 'Skim folder'}
                     </button>
                   </div>
                 );
@@ -183,6 +362,16 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
   );
 }
 
+/** What to ask an agent when its change is too big to review well. */
+function splitRequest(branch: string, steps: number, time: string) {
+  return [
+    `The change on ${branch} is too big to review well: ${steps} steps, about ${time} of reading.`,
+    'Split it into a stack of smaller branches, each one reviewable in under an hour and each building on the one before.',
+    'Keep the code as it is: move it into the smaller branches, don’t rewrite it.',
+    'Give each branch a commit message that says what it is for, and list the branches in order when you are done.',
+  ].join(' ');
+}
+
 /** A first-run explainer of the review flow. Dismissed once, for good. */
 function HowItWorks() {
   const [show, setShow] = usePref<boolean>('plan-how-it-works', true);
@@ -190,7 +379,7 @@ function HowItWorks() {
   const items = [
     ['Decide', 'Make the calls only you can make, like keeping or dropping work you didn’t ask for.'],
     ['Read closely', 'Go through the steps that need attention, with the agent’s reason next to each change.'],
-    ['Skim', 'Glance over the low-risk rest. Every changed line is in some step, so nothing is hidden.'],
+    ['Skim', 'Glance over the low-risk rest, a folder at a time. Every changed line is in some step, so nothing is hidden.'],
     ['Finish', 'Merge, post your review, or send your comments back to the agent.'],
   ];
   return (
@@ -226,13 +415,8 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
   );
   return (
     <section className="card" aria-label="The change" style={{ padding: '18px 20px', display: 'grid', gridTemplateColumns: 'minmax(110px, max-content) 1fr', gap: '14px 20px' }}>
-      {row(data.prompt || !data.pr ? 'You asked' : 'The PR says', <AskedFor data={data} clamp={360} />)}
-      {row(
-        'It did',
-        data.intent ?? (
-          <span className="muted">{data.walkthrough === 'skeleton' ? 'No walkthrough yet, so there is no summary: the steps are one per file.' : 'The walkthrough has no summary.'}</span>
-        )
-      )}
+      {row(askedLabel(data), <AskedFor data={data} clamp={240} />)}
+      {row('It did', data.intent ?? <span className="muted">{data.walkthrough === 'skeleton' ? 'No walkthrough yet, so there is no summary: the steps are one per file.' : 'The walkthrough has no summary.'}</span>)}
       {row(
         'It also did',
         outside.length ? (
@@ -252,7 +436,10 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
   );
 }
 
-function Phase({ n, title, hint, meta, children }: { n: number; title: string; hint: string; meta: string; children: React.ReactNode }) {
+/** "You asked" for a prompt, "The PR says" for a PR description: the same words on every screen. */
+export const askedLabel = (data: Pick<ReviewData, 'prompt' | 'pr'>) => (data.prompt || !data.pr ? 'You asked' : 'The PR says');
+
+function Phase({ n, title, hint, meta, aside, children }: { n: number; title: string; hint: string; meta: string; aside?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px 10px', flexWrap: 'wrap' }}>
@@ -260,7 +447,8 @@ function Phase({ n, title, hint, meta, children }: { n: number; title: string; h
           {n}
         </span>
         <h2 style={{ fontSize: 17 }}>{title}</h2>
-        <span style={{ fontSize: 13, color: 'var(--muted)' }}>{meta}</span>
+        <span style={{ fontSize: 13, color: 'var(--muted)', flex: 1 }}>{meta}</span>
+        {aside}
         <p style={{ flexBasis: '100%', paddingLeft: 36, fontSize: 13.5, color: 'var(--muted)' }}>{hint}</p>
       </div>
       {children}
@@ -337,7 +525,7 @@ function DecisionCard({ d, steps, value, onSettle, onShow, onCi }: { d: PlanDeci
         </div>
       ) : first ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-          <button type="button" className="btn primary" style={{ height: 36, fontSize: 13.5 }} onClick={() => onShow(first.key)}>
+          <button type="button" className="btn" style={{ height: 36, fontSize: 13.5 }} onClick={() => onShow(first.key)}>
             {single ? 'Look at the change →' : `Start at step ${first.index + 1} →`}
           </button>
           <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>You decide there, next to the code.</span>
@@ -349,7 +537,7 @@ function DecisionCard({ d, steps, value, onSettle, onShow, onCi }: { d: PlanDeci
               Open checks ↗
             </button>
           )}
-          <button type="button" className="btn primary" style={{ height: 36, fontSize: 13.5 }} onClick={() => onSettle('fine')}>
+          <button type="button" className="btn" style={{ height: 36, fontSize: 13.5 }} onClick={() => onSettle('fine')}>
             {labels.fine}
           </button>
           <button type="button" className="btn" style={{ height: 36, fontSize: 13.5 }} onClick={() => onSettle('fix')}>

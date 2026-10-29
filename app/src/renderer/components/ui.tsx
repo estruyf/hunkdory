@@ -98,7 +98,6 @@ export function RiskPill({ risk }: { risk: RiskLevel }) {
   return <span className={`pill ${risk}`}>{RISK_LABEL[risk]}</span>;
 }
 
-export const Later = () => <span className="later">Later</span>;
 
 export function Loading({ label }: { label: string }) {
   return (
@@ -236,4 +235,97 @@ export function usePref<T extends string | boolean>(key: string, initial: T): [T
       setValue(v);
     },
   ];
+}
+
+/** True while a media query matches, e.g. a window wide enough for a sidebar. */
+export function useMediaQuery(query: string) {
+  const [match, setMatch] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const on = () => setMatch(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, [query]);
+  return match;
+}
+
+/** Keys pressed outside a text field, with no modifier. Shift is allowed, so "?" works. */
+export function isPlainKey(e: KeyboardEvent) {
+  const t = e.target as HTMLElement;
+  return !e.metaKey && !e.ctrlKey && !e.altKey && !t.closest('input, textarea, select, [contenteditable]');
+}
+
+export type Shortcut = [key: string, what: string];
+
+/** Opens with "?", closes with Escape or a click outside. Lists every key the screen knows. */
+export function useShortcutSheet(keys: Shortcut[]) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && open) {
+        e.preventDefault();
+        setOpen(false);
+      } else if (e.key === '?' && isPlainKey(e)) {
+        e.preventDefault();
+        setOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+  const button = (
+    <button type="button" className="link" style={{ fontSize: 12.5, color: 'var(--muted)', display: 'inline-flex', gap: 6, alignItems: 'center' }} onClick={() => setOpen(true)}>
+      <span className="kbd">?</span> All shortcuts
+    </button>
+  );
+  const sheet = open ? (
+    <div role="presentation" onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(15, 23, 42, 0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" className="card" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 420, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 12, boxShadow: '0 12px 32px var(--panel-shadow)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 id="shortcuts-title" style={{ fontSize: 16 }}>Keyboard shortcuts</h2>
+          <button type="button" className="link" style={{ fontSize: 13 }} onClick={() => setOpen(false)} autoFocus>
+            Close
+          </button>
+        </div>
+        <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '8px 16px', fontSize: 14 }}>
+          {keys.map(([k, what]) => (
+            <div key={k} style={{ display: 'contents' }}>
+              <dt>
+                {k.split(' ').map((part) => (
+                  <span key={part} className="kbd" style={{ marginRight: 4 }}>
+                    {part}
+                  </span>
+                ))}
+              </dt>
+              <dd style={{ margin: 0, color: 'var(--text-body)' }}>{what}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  ) : null;
+  return { button, sheet, open };
+}
+
+/** A button that asks once more in place, instead of a system dialog. */
+export function ConfirmButton({ label, confirm, question, onConfirm, danger = true, className = 'btn lg', style }: { label: string; confirm: string; question: string; onConfirm: () => void; danger?: boolean; className?: string; style?: React.CSSProperties }) {
+  const [asking, setAsking] = useState(false);
+  if (!asking) {
+    return (
+      <button type="button" className={className} style={{ ...style, ...(danger ? { color: 'var(--high-fg)' } : {}) }} onClick={() => setAsking(true)}>
+        {label}
+      </button>
+    );
+  }
+  return (
+    <span role="alert" style={{ ...style, display: 'inline-flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', fontSize: 13.5 }}>
+      <span>{question}</span>
+      <button type="button" className="btn" style={{ height: 36, ...(danger ? { color: 'var(--high-fg)', borderColor: 'var(--high-border)' } : {}) }} onClick={onConfirm} autoFocus>
+        {confirm}
+      </button>
+      <button type="button" className="link" style={{ fontSize: 13.5 }} onClick={() => setAsking(false)}>
+        Cancel
+      </button>
+    </span>
+  );
 }

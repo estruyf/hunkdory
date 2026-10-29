@@ -68,9 +68,9 @@ export function StackBar({ data, go }: { data: ReviewData; go: Go }) {
   if (!data.stack) return null;
   const open = async (e: StackEntry) => {
     try {
-      // A PR outside your inbox gets picked, the same as "Review a branch".
+      // A PR outside your inbox gets picked, the same as "Review another branch".
       await window.api.trackBranch(data.projectId, e.branch);
-      go({ name: 'start', projectId: data.projectId, branch: e.branch });
+      go({ name: 'plan', projectId: data.projectId, branch: e.branch });
     } catch (err) {
       setError(cleanError(err));
     }
