@@ -159,28 +159,40 @@ export function forget(repo: string) {
 
 export interface LineComment {
   path: string;
+  /** The last line; with `startLine`, a range like "lines +166 to +189". */
   line: number;
   side: 'LEFT' | 'RIGHT';
+  startLine?: number;
+  startSide?: 'LEFT' | 'RIGHT';
   body: string;
 }
 
+/** A comment in the shape GitHub's review API takes. Pure. */
+export const apiComment = ({ startLine, startSide, ...c }: LineComment) => (startLine ? { ...c, start_line: startLine, start_side: startSide ?? c.side } : c);
+
 /**
  * Posts a review. Line comments land on their lines; if GitHub can't place one (the line isn't
- * part of the PR's diff, or the PR moved on), they all go into the review text instead, with their place.
+ * part of the PR's diff, or the PR moved on), it tries ranges as single lines, then puts them all
+ * in the review text instead, with their place.
  */
 export async function postReview(root: string, repo: string, pr: number, review: { commitId: string; body: string; event: GitHubEvent; comments: LineComment[] }): Promise<{ url: string | null; inline: boolean }> {
   const path = `repos/${repo}/pulls/${pr}/reviews`;
-  const send = (body: string, comments: LineComment[]) => ghApi('POST', path, root, { commit_id: review.commitId, body, event: review.event, comments });
-  try {
-    const res = await send(review.body, review.comments);
-    forget(repo);
-    return { url: res?.html_url ?? null, inline: true };
-  } catch (e) {
-    if ((e as { status?: number }).status !== 422 || !review.comments.length) throw e;
-    const res = await send(foldComments(review.body, review.comments), []);
-    forget(repo);
-    return { url: res?.html_url ?? null, inline: false };
+  const send = (body: string, comments: LineComment[]) => ghApi('POST', path, root, { commit_id: review.commitId, body, event: review.event, comments: comments.map(apiComment) });
+  // A range GitHub won't take may still fit as its last line.
+  const attempts = [review.comments];
+  if (review.comments.some((c) => c.startLine)) attempts.push(review.comments.map(({ startLine: _l, startSide: _s, ...c }) => c));
+  for (const comments of attempts) {
+    try {
+      const res = await send(review.body, comments);
+      forget(repo);
+      return { url: res?.html_url ?? null, inline: true };
+    } catch (e) {
+      if ((e as { status?: number }).status !== 422 || !review.comments.length) throw e;
+    }
   }
+  const res = await send(foldComments(review.body, review.comments), []);
+  forget(repo);
+  return { url: res?.html_url ?? null, inline: false };
 }
 
 /** Line comments as part of the review text. Pure. */

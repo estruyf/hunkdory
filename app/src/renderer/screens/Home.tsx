@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Loading, plural, sizeText, useAsync, usePref } from '../components/ui.tsx';
+import { Brand, Loading, plural, sizeText, useAsync, useInbox, usePref } from '../components/ui.tsx';
 import { checksText, checksTone } from '../components/github.tsx';
-import { formatDuration, suggestedOrder, timeAgo, tooBig } from '../../shared/order.ts';
+import { suggestedOrder, timeAgo, tooBig } from '../../shared/order.ts';
 import type { InboxItem, Project, ProjectScan, ReviewState } from '../../shared/types.ts';
 
 export function Home({ go, initialProject }: { go: Go; initialProject?: string }) {
   const projects = useAsync(() => window.api.listProjects(), []);
-  const inbox = useAsync(() => window.api.inbox(), []);
+  const inbox = useInbox();
+  const [showIgnored, setShowIgnored] = useState(false);
   const [filter, setFilter] = useState<string | null>(initialProject ?? null);
   const [query, setQuery] = useState('');
   const [order, setOrder] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
@@ -43,15 +44,24 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
     };
   }, []);
 
-  const all = inbox.value?.waiting ?? [];
+  const all = (inbox.value?.waiting ?? []).filter((w) => !w.ignored);
   const q = query.trim().toLowerCase();
-  const waiting = all.filter((w) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName}`.toLowerCase().includes(q)));
+  const shown = (w: InboxItem) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName}`.toLowerCase().includes(q));
+  const waiting = all.filter(shown);
+  const ignored = (inbox.value?.waiting ?? []).filter((w) => w.ignored && shown(w));
   const running = all.filter((w) => w.review?.status === 'sent-back');
   const unsent = waiting.filter((w) => w.review?.status !== 'sent-back');
   // The main process lists newest first.
   const ready = order === 'suggested' ? suggestedOrder(unsent) : unsent;
   const done = (inbox.value?.done ?? []).filter((d) => d.decision?.result !== 'running');
   const names = new Map(projects.value?.map((p) => [p.id, p.name]));
+
+  // The list changes right away; the scan after it brings in the size and flags of a branch you bring back.
+  const ignore = async (w: InboxItem, on: boolean) => {
+    inbox.patch((v) => ({ ...v, waiting: v.waiting.map((x) => (x.projectId === w.projectId && x.branch === w.branch ? { ...x, ignored: on } : x)) }));
+    await window.api.ignoreBranch(w.projectId, w.branch, on);
+    inbox.reload();
+  };
 
   return (
     <div className="page">
@@ -127,7 +137,7 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
               </div>
             )}
             {ready.map((w, i) => (
-              <InboxCard key={`${w.projectId}:${w.branch}`} item={w} go={go} first={i === 0} />
+              <InboxCard key={`${w.projectId}:${w.branch}`} item={w} go={go} first={i === 0} onIgnore={() => ignore(w, true)} />
             ))}
           </section>
 
@@ -153,6 +163,30 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
                   </div>
                 ))}
               </div>
+            </section>
+          )}
+
+          {ignored.length > 0 && (
+            <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button type="button" className="link" aria-expanded={showIgnored} onClick={() => setShowIgnored((x) => !x)} style={{ fontSize: 15, fontWeight: 600, textAlign: 'left', color: 'var(--text)' }}>
+                {showIgnored ? '▾' : '▸'} Ignored ({ignored.length})
+              </button>
+              {showIgnored && (
+                <div className="card" style={{ overflow: 'hidden' }}>
+                  {ignored.map((w) => (
+                    <div key={`${w.projectId}:${w.branch}`} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', padding: '10px 18px', borderBottom: '1px solid var(--divider)', fontSize: 14 }}>
+                      <span style={{ fontWeight: 500, flex: '1 1 260px' }}>{w.title}</span>
+                      <span style={{ color: 'var(--muted)', fontSize: 13 }}>
+                        {w.projectName}
+                        {w.pr && ` · PR #${w.pr.number}`}
+                      </span>
+                      <button type="button" className="btn" style={{ height: 32 }} onClick={() => ignore(w, false)}>
+                        Bring back
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
         </main>
@@ -234,14 +268,14 @@ function ProjectLink({ name, sub, count, active, strong, onClick, onSettings }: 
   );
 }
 
-function InboxCard({ item: w, go, first }: { item: InboxItem; go: Go; first: boolean }) {
+function InboxCard({ item: w, go, first, onIgnore }: { item: InboxItem; go: Go; first: boolean; onIgnore: () => void }) {
   const big = !w.error && tooBig(w);
   const inProgress = !!w.review && w.review.reviewedSteps > 0 && w.review.status === 'open';
   const tag = w.updatedSinceReview ? { text: 'Updated since your review', cls: 'medium' } : inProgress ? { text: 'In progress', cls: 'low' } : { text: 'New', cls: 'accent' };
   const open = () => go(inProgress ? { name: 'review', projectId: w.projectId, branch: w.branch } : { name: 'start', projectId: w.projectId, branch: w.branch });
   return (
-    <article className="card" style={{ padding: '18px 20px', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
-      <div style={{ flex: '1 1 360px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <article className="card" style={{ padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+      <div style={{ flex: '1 1 360px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{w.projectName}</span>
           <span className={`pill ${tag.cls}`} style={{ border: 0 }}>
@@ -274,41 +308,24 @@ function InboxCard({ item: w, go, first }: { item: InboxItem; go: Go; first: boo
             </span>
           )}
         </div>
-        <h2 className="clamp-2" title={w.title} style={{ fontSize: 17, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+        <h2 className="clamp-2" title={w.title} style={{ fontSize: 16, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
           {w.title}
         </h2>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', fontSize: 13, color: 'var(--muted)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 13, color: 'var(--muted)' }}>
           <span className="mono">{w.branch}</span>
-          <span>{w.agent}</span>
           {!w.error && <span>{sizeText(w.files, w.added, w.removed)}</span>}
           {w.updatedAt && <span>{timeAgo(w.updatedAt)}</span>}
+          {w.error && <span className="error">{w.error}</span>}
         </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 150 }}>
-        {w.error ? (
-          <span className="error" style={{ fontSize: 13, maxWidth: 260 }}>
-            {w.error}
-          </span>
-        ) : (
-          <>
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-              {inProgress ? `${w.review!.reviewedSteps} of ${plural(w.steps, 'step')} reviewed` : `${plural(w.steps, 'step')} · about ${formatDuration(w.minutes)}`}
-              {w.walkthrough === 'skeleton' && ' · no walkthrough'}
-              {w.walkthrough === 'reviewer' && ' · walkthrough by Reviewer'}
-            </span>
-            {/* The most important flag; the rest is one hover away. */}
-            {w.flags.length > 0 && (
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--med-fg)' }} title={w.flags.join('\n')}>
-                {w.flags[0]}
-                {w.flags.length > 1 && <span style={{ fontWeight: 400, color: 'var(--muted)' }}> +{w.flags.length - 1} more</span>}
-              </span>
-            )}
-          </>
-        )}
-      </div>
-      <button type="button" className={`btn ${first ? 'primary' : ''}`} onClick={open} disabled={!!w.error}>
-        {inProgress ? 'Continue review' : 'Start review'}
-      </button>
+      <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button type="button" className="btn" style={{ border: 0, color: 'var(--muted)' }} title="Take it out of your inbox, e.g. when someone else reviews it on GitHub. You can bring it back from Ignored." onClick={onIgnore}>
+          Ignore
+        </button>
+        <button type="button" className={`btn ${first ? 'primary' : ''}`} style={{ minWidth: 160 }} onClick={open} disabled={!!w.error}>
+          {inProgress ? 'Continue review' : 'Start review'}
+        </button>
+      </span>
     </article>
   );
 }

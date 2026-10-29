@@ -13,6 +13,7 @@ const methods: (keyof ReviewerApi)[] = [
   'checkGitHub',
   'listBranches',
   'trackBranch',
+  'ignoreBranch',
   'openExternal',
   'inbox',
   'loadReview',

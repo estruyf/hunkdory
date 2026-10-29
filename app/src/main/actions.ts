@@ -8,7 +8,7 @@ import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
 import { shellEnv, which } from './shellEnv.ts';
 import { DEFAULT_CONFIG_DIR } from './sessions/claude.ts';
-import type { Comment, DecisionRecord, FinishRequest, FinishResult, ReviewData, ReviewState, Step } from '../shared/types.ts';
+import type { Comment, DecisionRecord, FinishRequest, FinishResult, HunkView, ReviewData, ReviewState, Step } from '../shared/types.ts';
 
 const where = (c: Comment) => (c.path && c.line ? ` at ${c.path}:${c.line}${c.side === 'LEFT' ? ' (removed line)' : ''}` : '');
 
@@ -35,12 +35,34 @@ export function sendBackPrompt(data: Pick<ReviewData, 'steps'>, state: Pick<Revi
   return lines.join('\n');
 }
 
+/** Longest range a step comment covers on GitHub: enough to show where it is without quoting a whole new file. */
+const MAX_SPAN = 30;
+
 /**
- * Your review as a GitHub review: line comments on their lines, step comments and the note in the text.
- * With `inline` false (the PR moved on, or you reviewed uncommitted work) line comments go into the text too. Pure.
+ * Where a step comment goes on GitHub: the step's first block of changes, from its first changed line,
+ * the way review bots comment on a range. Added lines when it has them, else the removed ones. Pure.
+ */
+export function stepAnchor(step: Step, hunks: Record<string, HunkView>): Omit<gh.LineComment, 'body'> | null {
+  for (const id of step.hunkIds) {
+    const h = hunks[id];
+    if (!h || h.synthetic || h.untracked) continue;
+    const added = h.lines.flatMap((l) => (l.kind === 'add' && l.newN ? [l.newN] : []));
+    const side = added.length ? 'RIGHT' : 'LEFT';
+    const ns = added.length ? added : h.lines.flatMap((l) => (l.kind === 'del' && l.oldN ? [l.oldN] : []));
+    if (!ns.length) continue;
+    const first = Math.min(...ns);
+    const last = Math.min(Math.max(...ns), first + MAX_SPAN - 1);
+    return { path: h.path, line: last, side, ...(first < last ? { startLine: first, startSide: side } : {}) };
+  }
+  return null;
+}
+
+/**
+ * Your review as a GitHub review: line comments on their lines, step comments on the step's first changed lines,
+ * the note in the text. With `inline` false (the PR moved on, or you reviewed uncommitted work) they all go into the text. Pure.
  */
 export function githubReview(
-  data: Pick<ReviewData, 'steps'>,
+  data: Pick<ReviewData, 'steps'> & Partial<Pick<ReviewData, 'hunks'>>,
   state: Pick<ReviewState, 'comments'>,
   req: Pick<FinishRequest, 'note' | 'dropStepKeys'>,
   opts: { inline: boolean; copilot: boolean }
@@ -58,6 +80,13 @@ export function githubReview(
       else folded.push(`**\`${c.path}:${c.line}\`**${c.side === 'LEFT' ? ' (removed line)' : ''}\n${c.body.trim()}`);
     } else {
       const s = stepOf(c.stepKey);
+      const at = opts.inline && s && data.hunks ? stepAnchor(s, data.hunks) : null;
+      if (at) {
+        // The comment sits on one file; name the step's others so it still reads as about the whole step.
+        const others = s!.files.filter((f) => f !== at.path);
+        inline.push({ ...at, body: `**${label(s)}**${others.length ? ` (also ${others.map((f) => `\`${f}\``).join(', ')})` : ''}\n\n${c.body.trim()}` });
+        continue;
+      }
       folded.push(`**${label(s)}**${s?.files.length ? ` (${s.files.map((f) => `\`${f}\``).join(', ')})` : ''}\n${c.body.trim()}`);
     }
   }
@@ -143,7 +172,7 @@ export class Actions {
     const review = githubReview(data, state, req, { inline, copilot: toCopilot });
     const posted = await gh.postReview(project.path, repo, pr.number, { commitId: pr.headRefOid, body: review.body, event, comments: review.comments });
     const how = event === 'APPROVE' ? 'Approved' : event === 'REQUEST_CHANGES' ? 'Requested changes on' : 'Commented on';
-    const moved = review.comments.length && !posted.inline ? ' GitHub couldn’t place the line comments, so they are in the review text.' : !inline && comments.some((c) => c.path) ? ' The PR differs from what you reviewed, so line comments are in the review text.' : '';
+    const moved = review.comments.length && !posted.inline ? ' GitHub couldn’t place your comments on the code, so they are in the review text.' : !inline && comments.length ? ' The PR differs from what you reviewed, so your comments are in the review text.' : '';
     const message = toCopilot ? `Posted your review on PR #${pr.number} for Copilot. It picks it up on GitHub and pushes new commits.${moved}` : `${how} PR #${pr.number} on GitHub.${moved}`;
     const r = this.record(req, toCopilot ? 'sent-back' : 'reviewed', 'ok', message, summary, { github: { event, url: posted.url } });
     return { ok: true, message, review: r };

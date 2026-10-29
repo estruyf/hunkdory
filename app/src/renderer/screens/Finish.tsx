@@ -73,7 +73,7 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
           {
             id: 'github' as const,
             title: `Post your review on PR #${data.pr.number}`,
-            detail: `${comments.length ? `Your ${plural(comments.length, 'comment')} ${comments.length === 1 ? 'goes' : 'go'}` : 'Your review goes'} on GitHub${comments.some((c) => c.line) ? ', line comments on their lines' : ''}. The PR leaves your inbox until it changes.`,
+            detail: `${comments.length ? `Your ${plural(comments.length, 'comment')} ${comments.length === 1 ? 'goes' : 'go'} on GitHub, on the code ${comments.length === 1 ? "it's" : "they're"} about.` : 'Your review goes on GitHub.'} The PR leaves your inbox until it changes.`,
             submit: event === 'APPROVE' ? 'Approve on GitHub' : event === 'REQUEST_CHANGES' ? 'Request changes on GitHub' : 'Post review',
           },
         ]

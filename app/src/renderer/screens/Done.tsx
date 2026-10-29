@@ -1,14 +1,18 @@
 import type { Go } from '../App.tsx';
-import { useAsync } from '../components/ui.tsx';
+import { useEffect } from 'react';
+import { rememberReview, useInbox } from '../components/ui.tsx';
 import type { FinishResult } from '../../shared/types.ts';
 
 const HEADINGS = { merge: 'Merged', 'send-back': 'Sent back to Claude Code', discard: 'Discarded', github: 'Review posted on GitHub' } as const;
 
 export function Done({ go, projectId, branch, result }: { go: Go; projectId: string; branch: string; result: FinishResult }) {
-  const inbox = useAsync(() => window.api.inbox(), []);
+  const inbox = useInbox();
   const decision = result.review?.decision;
+  useEffect(() => {
+    if (result.review) rememberReview(result.review);
+  }, []);
   const kind = decision?.kind ?? 'merge';
-  const next = inbox.value?.waiting.find((w) => !(w.projectId === projectId && w.branch === branch) && w.review?.status !== 'sent-back' && !w.error);
+  const next = inbox.value?.waiting.find((w) => !(w.projectId === projectId && w.branch === branch) && w.review?.status !== 'sent-back' && !w.ignored && !w.error);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', padding: '96px 24px' }}>
@@ -70,12 +74,9 @@ export function Done({ go, projectId, branch, result }: { go: Go; projectId: str
           </section>
         )}
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        <div>
           <button type="button" className="btn lg" onClick={() => go({ name: 'home' })}>
             Back to inbox
-          </button>
-          <button type="button" className="btn lg" onClick={() => window.close()}>
-            Close window
           </button>
         </div>
       </div>

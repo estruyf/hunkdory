@@ -172,7 +172,8 @@ export class Projects {
     const root = project.path;
     const fmt = ['%(refname)', '%(refname:short)', '%(committerdate:iso-strict)', '%(authorname)', '%(subject)', `%(ahead-behind:${project.baseBranch})`].join('%00');
     const out = await g.git(['for-each-ref', '--sort=-committerdate', `--format=${fmt}`, 'refs/heads', 'refs/remotes'], root);
-    const inbox = new Set((await this.discover(project)).items.map((d) => d.branch.name));
+    const ignored = new Set(project.ignored ?? []);
+    const inbox = new Set((await this.discover(project)).items.map((d) => d.branch.name).filter((b) => !ignored.has(b)));
     const base = project.baseBranch.replace(/^[^/]+\//, '');
     const local = new Set<string>();
     const list: BranchChoice[] = [];
@@ -193,7 +194,19 @@ export class Projects {
     return list;
   }
 
+  ignoreBranch(projectId: string, branch: string, on: boolean) {
+    const project = this.store.project(projectId);
+    const rest = (project.ignored ?? []).filter((b) => b !== branch);
+    this.store.addProject({ ...project, ignored: on ? [...rest, branch] : rest });
+    // A scan that started before this would hand back the old list.
+    this.scanning = null;
+  }
+
   async trackBranch(projectId: string, branch: string): Promise<void> {
+    // Picking a branch you ignored brings it back.
+    const short = branch.replace(/^[^/]+\//, '');
+    const before = this.store.project(projectId);
+    if (before.ignored?.some((b) => b === branch || b === short)) this.store.addProject({ ...before, ignored: before.ignored.filter((b) => b !== branch && b !== short) });
     const project = this.store.project(projectId);
     // Watching every pull request, an open PR is in the inbox already, by its head branch name.
     if (project.watch.mode === 'pull-requests' && project.github) {
@@ -625,34 +638,54 @@ export class Projects {
     return data;
   }
 
-  async inbox(refresh = false): Promise<{ items: InboxItem[]; scans: ProjectScan[] }> {
-    const items: InboxItem[] = [];
-    const scans: ProjectScan[] = [];
+  private scanning: Promise<{ items: InboxItem[]; scans: ProjectScan[] }> | null = null;
+
+  /** Two screens asking at once share one scan. */
+  inbox(refresh = false): Promise<{ items: InboxItem[]; scans: ProjectScan[] }> {
+    if (this.scanning && !refresh) return this.scanning;
+    const run = this.scanInbox(refresh).finally(() => {
+      if (this.scanning === run) this.scanning = null;
+    });
+    this.scanning = run;
+    return run;
+  }
+
+  private async scanInbox(refresh: boolean): Promise<{ items: InboxItem[]; scans: ProjectScan[] }> {
     const listed = new Set<string>();
-    for (const project of this.store.projects()) {
-      let found: Discovered[];
-      try {
-        const res = await this.discover(project);
-        found = res.items;
-        scans.push(res.scan);
-      } catch (e) {
-        scans.push({ projectId: project.id, sessions: 0, branchesSeen: 0, gone: 0, upToDate: 0, waiting: 0, pullRequests: null, error: (e as Error).message });
-        continue;
-      }
-      // Review fixes on top of a PR and the like: their diff holds the other branch's changes too.
-      const unique = new Map(
-        await Promise.all(found.map(async (d) => [d.branch.name, new Set((await g.tryGit(['rev-list', '--max-count=500', `${d.branch.baseRef}..${d.branch.headRef}`], project.path))?.split('\n').filter(Boolean) ?? [])] as const))
-      );
-      const under = buildsOn(found.map((d) => ({ name: d.branch.name, headSha: d.branch.headSha })), unique);
-      for (const d of found) {
+    // Projects are read side by side: most of the time goes to waiting on git and gh.
+    const per = await Promise.all(this.store.projects().map((p) => this.projectInbox(p, refresh, listed)));
+    this.summaries.keepOnly(listed);
+    const items = per.flatMap((r) => r.items);
+    items.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+    return { items, scans: per.map((r) => r.scan) };
+  }
+
+  private async projectInbox(project: Project, refresh: boolean, listed: Set<string>): Promise<{ items: InboxItem[]; scan: ProjectScan }> {
+    let found: Discovered[];
+    let scan: ProjectScan;
+    try {
+      ({ items: found, scan } = await this.discover(project));
+    } catch (e) {
+      return { items: [], scan: { projectId: project.id, sessions: 0, branchesSeen: 0, gone: 0, upToDate: 0, waiting: 0, pullRequests: null, error: (e as Error).message } };
+    }
+    // Review fixes on top of a PR and the like: their diff holds the other branch's changes too.
+    const unique = new Map(
+      await Promise.all(found.map(async (d) => [d.branch.name, new Set((await g.tryGit(['rev-list', '--max-count=500', `${d.branch.baseRef}..${d.branch.headRef}`], project.path))?.split('\n').filter(Boolean) ?? [])] as const))
+    );
+    const under = buildsOn(found.map((d) => ({ name: d.branch.name, headSha: d.branch.headSha })), unique);
+    const ignored = new Set(project.ignored ?? []);
+    const items = await Promise.all(
+      found.map(async (d): Promise<InboxItem | null> => {
         const state = this.store.review(project.id, d.branch.name);
-        if (state?.status === 'discarded' || state?.status === 'merged') continue;
+        if (state?.status === 'discarded' || state?.status === 'merged') return null;
         // After you reviewed or sent it back, it only needs you again once it changed.
         const decidedOn = state?.decision?.headSha;
         const updatedSinceReview = !!decidedOn && decidedOn !== d.branch.headSha;
-        if (state?.status === 'reviewed' && !updatedSinceReview) continue;
+        if (state?.status === 'reviewed' && !updatedSinceReview) return null;
         const pr = d.branch.pr;
         const who = d.match ? `Claude Code${d.match.sessions.length > 1 ? ` · ${d.match.sessions.length} sessions` : ''}` : pr?.copilot ? 'GitHub Copilot' : pr ? `by ${pr.author}` : 'No agent session';
+        const id = `${project.id}::${d.branch.name}`;
+        listed.add(id);
         const base: InboxItem = {
           projectId: project.id,
           projectName: project.name,
@@ -676,10 +709,11 @@ export class Projects {
           })(),
           tracked: !!d.branch.tracked,
           review: state ? { status: state.status, reviewedSteps: Object.keys(state.reviewed).length } : null,
+          ignored: ignored.has(d.branch.name),
         };
+        // An ignored branch only needs a name in the list: skip the diff.
+        if (base.ignored) return base;
         try {
-          const id = `${project.id}::${d.branch.name}`;
-          listed.add(id);
           const prepared = await this.prepare(project, d);
           // The title can come from the PR or the session, which change without a commit.
           const key = `${prepared.key}:${createHash('sha1').update(JSON.stringify([pr?.title, d.match?.origin.title, d.match?.origin.firstPrompt])).digest('hex')}`;
@@ -688,15 +722,13 @@ export class Projects {
             sum = summarize(await this.reviewFor(project, d, { refresh, lines: false, prepared }));
             this.summaries.set(id, key, sum);
           }
-          items.push({ ...base, ...sum, title: base.title === d.branch.name ? sum.title : base.title, agent: sum.author && !d.match && !pr ? `by ${sum.author}` : base.agent });
+          return { ...base, ...sum, title: base.title === d.branch.name ? sum.title : base.title, agent: sum.author && !d.match && !pr ? `by ${sum.author}` : base.agent };
         } catch (e) {
-          items.push({ ...base, error: (e as Error).message });
+          return { ...base, error: (e as Error).message };
         }
-      }
-    }
-    this.summaries.keepOnly(listed);
-    items.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-    return { items, scans };
+      })
+    );
+    return { items: items.filter((x): x is InboxItem => !!x), scan };
   }
 }
 

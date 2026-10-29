@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sinceLastRound } from '../src/shared/rounds.ts';
 import { ignoreWhitespace, languageFor, splitRows } from '../src/shared/diff.ts';
-import { githubReview } from '../src/main/actions.ts';
-import type { DecisionRecord, DiffLine, Step } from '../src/shared/types.ts';
+import { githubReview, stepAnchor } from '../src/main/actions.ts';
+import { apiComment } from '../src/main/github.ts';
+import type { DecisionRecord, DiffLine, HunkView, Step } from '../src/shared/types.ts';
 
 const step = (key: string, hunkIds: string[], index = 0): Step => ({ key, index, title: key, why: '', checks: [], risk: 'low', outsideTask: false, source: 'chapter', hunkIds, files: [`${key}.ts`], added: 1, removed: 0 });
 const decision = (hunkIds?: string[]): DecisionRecord => ({ kind: 'send-back', note: '', dropStepKeys: [], at: '2026-10-28T10:00:00Z', result: 'ok', message: '', hunkIds });
@@ -60,4 +61,33 @@ test('a GitHub review puts line comments on lines and the rest in the text', () 
   const folded = githubReview({ steps }, { comments }, { note: '', dropStepKeys: [] }, { inline: false, copilot: true });
   assert.deepEqual(folded.comments, []);
   assert.match(folded.body, /^@copilot Please address this review\.\n\n\*\*`src\/auth\.ts:4`\*\*\nKeep it at an hour/);
+});
+
+const hunk = (id: string, path: string, lines: DiffLine[], extra: Partial<HunkView> = {}): HunkView => ({
+  id, path, oldPath: null, status: 'modified', untracked: false, synthetic: null, bucket: 'narrated', level: 'none', risks: [],
+  added: lines.filter((l) => l.kind === 'add').length, removed: lines.filter((l) => l.kind === 'del').length, rangeLabel: '', lines, note: null, ...extra,
+});
+const add = (n: number): DiffLine => ({ kind: 'add', oldN: null, newN: n, text: '' });
+const del = (n: number): DiffLine => ({ kind: 'del', oldN: n, newN: null, text: '' });
+
+test('a step comment goes on the step\'s first changed lines, as a range', () => {
+  const s = { ...step('overview', ['a', 'b']), files: ['src/a.ts', 'src/b.ts'] };
+  const hunks = { a: hunk('a', 'src/a.ts', [add(166), add(167), del(117), add(168)]), b: hunk('b', 'src/b.ts', [add(3)]) };
+  const comments = [{ id: '1', stepKey: 'overview', hunkId: null, line: null, body: 'Not sure: does * catch it?', createdAt: '' }];
+  const out = githubReview({ steps: [s], hunks }, { comments }, { note: '', dropStepKeys: [] }, { inline: true, copilot: false });
+  assert.deepEqual(out.comments, [{ path: 'src/a.ts', line: 168, side: 'RIGHT', startLine: 166, startSide: 'RIGHT', body: '**Step 1: overview** (also `src/b.ts`)\n\nNot sure: does * catch it?' }]);
+  assert.doesNotMatch(out.body, /Not sure/);
+  assert.deepEqual(apiComment(out.comments[0]), { path: 'src/a.ts', line: 168, side: 'RIGHT', start_line: 166, start_side: 'RIGHT', body: out.comments[0].body });
+
+  // Reviewed work GitHub doesn't have: in the text, as before.
+  const folded = githubReview({ steps: [s], hunks }, { comments }, { note: '', dropStepKeys: [] }, { inline: false, copilot: false });
+  assert.deepEqual(folded.comments, []);
+  assert.match(folded.body, /\*\*Step 1: overview\*\* \(`src\/a\.ts`, `src\/b\.ts`\)\nNot sure/);
+});
+
+test('a step anchor skips files GitHub has no lines for, caps long blocks, and uses removed lines when nothing was added', () => {
+  const big = Array.from({ length: 200 }, (_, i) => add(i + 1));
+  assert.deepEqual(stepAnchor(step('s', ['u', 'n']), { u: hunk('u', 'new.ts', [add(1)], { untracked: true }), n: hunk('n', 'big.ts', big) }), { path: 'big.ts', line: 30, side: 'RIGHT', startLine: 1, startSide: 'RIGHT' });
+  assert.deepEqual(stepAnchor(step('s', ['d']), { d: hunk('d', 'gone.ts', [del(7)]) }), { path: 'gone.ts', line: 7, side: 'LEFT' });
+  assert.equal(stepAnchor(step('s', ['x']), {}), null);
 });

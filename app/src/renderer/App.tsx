@@ -8,6 +8,7 @@ import { Finish } from './screens/Finish.tsx';
 import { Done } from './screens/Done.tsx';
 import { PickBranch } from './screens/PickBranch.tsx';
 import { PlanScreen } from './screens/Plan.tsx';
+import { rememberReview } from './components/ui.tsx';
 import type { FinishResult, ReviewData, ReviewState } from '../shared/types.ts';
 
 export type Route =
@@ -38,7 +39,10 @@ export function App() {
       setHasProjects(ps.length > 0);
       setNav({ stack: [ps.length ? { name: 'home' } : { name: 'welcome' }], at: 0 });
     });
-    return window.events.onReviewStateChanged((r) => latest.current.set(`${r.projectId}::${r.branch}`, r));
+    return window.events.onReviewStateChanged((r) => {
+      latest.current.set(`${r.projectId}::${r.branch}`, r);
+      rememberReview(r);
+    });
   }, []);
 
   const go: Go = (r) => {

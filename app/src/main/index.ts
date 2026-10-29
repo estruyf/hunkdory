@@ -123,6 +123,7 @@ const api: ReviewerApi = {
   checkGitHub: (path) => projects.checkGitHub(path),
   listBranches: (projectId) => projects.listBranches(projectId),
   trackBranch: (projectId, branch) => projects.trackBranch(projectId, branch),
+  ignoreBranch: async (projectId, branch, on) => projects.ignoreBranch(projectId, branch, on),
   openExternal: async (url) => {
     // Only links Reviewer shows itself, like a pull request on GitHub.
     if (/^https:\/\//.test(url)) await shell.openExternal(url);

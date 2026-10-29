@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { RiskLevel } from '../../shared/types.ts';
+import type { ReviewerApi, ReviewState, RiskLevel } from '../../shared/types.ts';
 import type { Go } from '../App.tsx';
 import { RISK_LABEL } from '../../shared/order.ts';
 
@@ -118,6 +118,60 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
     };
   }, [...deps, tick]);
   return { ...state, reload: () => setTick((t) => t + 1) };
+}
+
+type Inbox = Awaited<ReturnType<ReviewerApi['inbox']>>;
+
+// The inbox as last seen. A scan takes seconds, so going back to the inbox shows this while a new one runs.
+let lastInbox: Inbox | undefined;
+const inboxListeners = new Set<(v: Inbox) => void>();
+
+function setLastInbox(v: Inbox) {
+  lastInbox = v;
+  for (const fn of inboxListeners) fn(v);
+}
+
+/** Puts a review's newest state on the remembered inbox, so its card is right before the next scan is in. */
+export function rememberReview(r: ReviewState) {
+  const v = lastInbox;
+  const i = v?.waiting.findIndex((w) => w.projectId === r.projectId && w.branch === r.branch) ?? -1;
+  if (!v || i < 0) return;
+  const finished = r.status === 'merged' || r.status === 'discarded' || r.status === 'reviewed';
+  const waiting = finished ? v.waiting.filter((_, j) => j !== i) : v.waiting.map((w, j) => (j === i ? { ...w, review: { status: r.status, reviewedSteps: Object.keys(r.reviewed).length } } : w));
+  setLastInbox({ ...v, waiting });
+}
+
+/** The inbox: the remembered one right away, then a fresh scan. `patch` changes it in place, e.g. right after you ignore a branch. */
+export function useInbox() {
+  const [value, setValue] = useState(lastInbox);
+  const [state, setState] = useState<{ error?: string; loading: boolean }>({ loading: true });
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    inboxListeners.add(setValue);
+    return () => void inboxListeners.delete(setValue);
+  }, []);
+  useEffect(() => {
+    let live = true;
+    setState({ loading: true });
+    window.api.inbox().then(
+      (v) => {
+        // A scan that started before a change you made since is out of date.
+        if (!live) return;
+        setLastInbox(v);
+        setState({ loading: false });
+      },
+      (e: Error) => live && setState({ error: cleanError(e), loading: false })
+    );
+    return () => {
+      live = false;
+    };
+  }, [tick]);
+  return {
+    value,
+    ...state,
+    reload: () => setTick((t) => t + 1),
+    patch: (fn: (v: Inbox) => Inbox) => lastInbox && setLastInbox(fn(lastInbox)),
+  };
 }
 
 /** IPC errors arrive as "Error invoking remote method 'api:x': Error: message". */

@@ -16,6 +16,8 @@ export interface Project {
   github: string | null;
   /** Branches you picked with "Review a branch". They stay in the inbox whatever the watch rule. */
   tracked?: string[];
+  /** Branches you ignored, e.g. because someone else reviews them on GitHub. They stay out of "Waiting for you" until you bring them back. */
+  ignored?: string[];
   /**
    * Whether Reviewer may have Claude Code write a walkthrough when a branch opens without one.
    * Unset until you answer: until then nothing is sent to Claude unless you click "Write one".
@@ -366,6 +368,8 @@ export interface InboxItem {
   review: { status: ReviewState['status']; reviewedSteps: number } | null;
   /** Another inbox branch this one starts from: its changes show up in this review too. */
   buildsOn: { branch: string; pr: number | null } | null;
+  /** You ignored it. Its size, steps and flags aren't worked out. */
+  ignored: boolean;
   error?: string;
 }
 
@@ -442,6 +446,8 @@ export interface ReviewerApi {
   checkGitHub(path: string): Promise<string>;
   listBranches(projectId: string): Promise<BranchChoice[]>;
   trackBranch(projectId: string, branch: string): Promise<void>;
+  /** Takes a branch out of the inbox, or (`on` false) brings it back. */
+  ignoreBranch(projectId: string, branch: string, on: boolean): Promise<void>;
   openExternal(url: string): Promise<void>;
   inbox(opts?: { refresh?: boolean }): Promise<{ waiting: InboxItem[]; done: ReviewState[]; scans: ProjectScan[] }>;
   loadReview(projectId: string, branch: string, opts?: { refresh?: boolean }): Promise<{ data: ReviewData; state: ReviewState }>;
