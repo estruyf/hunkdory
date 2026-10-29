@@ -61,7 +61,7 @@ test('a fresh question gets the branch, the step and the question, and must not 
 
 test('the agent that wrote the branch is told which step, not given the whole context again', () => {
   const p = askPrompt(input({ by: 'session-copy' }));
-  assert.match(p, /^I'm reviewing your changes on this branch in Reviewer, one step at a time\. I have a question about step 4 "Longer token expiry" \(src\/auth\/token\.js\)\./);
+  assert.match(p, /^I'm reviewing your changes on this branch in Hunkdory, one step at a time\. I have a question about step 4 "Longer token expiry" \(src\/auth\/token\.js\)\./);
   assert.doesNotMatch(p, /Pull request #7|git diff abc123/);
   assert.match(p, /this is only a question/);
 });

@@ -3,6 +3,8 @@ import type { ReviewState, ReviewerApi, WalkthroughJob } from '../shared/types.t
 declare global {
   interface Window {
     api: ReviewerApi;
+    /** The window frame: which platform draws it, and full screen changes. */
+    frame: { platform: string; onFullScreen(fn: (on: boolean) => void): () => void };
     events: {
       onReviewsChanged(fn: () => void): () => void;
       onWalkthroughChanged(fn: (job: WalkthroughJob) => void): () => void;

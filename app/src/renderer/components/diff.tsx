@@ -48,7 +48,7 @@ interface Props {
   /** Shown instead of the diff until opened, e.g. for a change you already reviewed. */
   collapsed?: string | null;
   badge?: ReactNode;
-  /** Who wrote the hunk's note: the branch's agent, or Reviewer when it wrote the walkthrough itself. */
+  /** Who wrote the hunk's note: the branch's agent, or Hunkdory when it wrote the walkthrough itself. */
   noteBy?: 'agent' | 'reviewer';
 }
 
@@ -203,7 +203,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
   const bar = (children: ReactNode) => <div className="diff-bar">{children}</div>;
   return (
     <section className="card" style={{ overflow: 'hidden' }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 16px', background: '#FAFBFC', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 16px', background: 'var(--bar-bg)', borderBottom: '1px solid var(--border)' }}>
         <PathLabel path={hunk.path} />
         <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {badge}
@@ -222,7 +222,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
             <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" />
           </svg>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 13.5, lineHeight: 1.55, color: 'var(--text-body)', minWidth: 0 }}>
-            <span className="label-sm">{noteBy === 'reviewer' ? 'Reviewer’s note' : 'Note from the agent'}</span>
+            <span className="label-sm">{noteBy === 'reviewer' ? 'Hunkdory’s note' : 'Note from the agent'}</span>
             <Markdown text={hunk.note} />
           </div>
         </div>
@@ -308,7 +308,9 @@ function LineComment({ comment, onSave }: { comment: Comment; onSave: (body: str
     );
   return (
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13.5, lineHeight: 1.5 }}>
-      <span style={{ flex: 1, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{comment.body}</span>
+      <div style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+        <Markdown text={comment.body} />
+      </div>
       <button type="button" className="link" style={{ fontSize: 12.5 }} onClick={() => setEdit(true)}>
         Edit
       </button>

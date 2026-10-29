@@ -8,6 +8,7 @@ import { Finish } from './screens/Finish.tsx';
 import { Done } from './screens/Done.tsx';
 import { PickBranch } from './screens/PickBranch.tsx';
 import { PlanScreen } from './screens/Plan.tsx';
+import { Settings } from './screens/Settings.tsx';
 import { rememberReview } from './components/ui.tsx';
 import type { FinishResult, ReviewData, ReviewState } from '../shared/types.ts';
 
@@ -15,6 +16,7 @@ export type Route =
   | { name: 'welcome' }
   | { name: 'connect'; path?: string; projectId?: string }
   | { name: 'pick'; projectId?: string }
+  | { name: 'settings' }
   // `projectId` opens the inbox on that project.
   | { name: 'home'; projectId?: string }
   | { name: 'start'; projectId: string; branch: string }
@@ -95,6 +97,8 @@ export function App() {
       return <Connect key={route.projectId ?? 'new'} go={go} initialPath={route.path} projectId={route.projectId} back={hasProjects ? { name: 'home' } : { name: 'welcome' }} />;
     case 'pick':
       return <PickBranch go={go} initialProject={route.projectId} />;
+    case 'settings':
+      return <Settings go={go} />;
     case 'home':
       return <Home key={route.projectId ?? 'all'} go={go} initialProject={route.projectId} />;
     case 'start':

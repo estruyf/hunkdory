@@ -108,7 +108,7 @@ test('generated walkthroughs are kept per branch, outside the repo', () => {
   assert.equal(store.read('p2', 'feature/a'), null);
 });
 
-test("hunks Reviewer's walkthrough misses are labelled as such, not blamed on an agent", () => {
+test("hunks Hunkdory's walkthrough misses are labelled as such, not blamed on an agent", () => {
   const { dir } = buildFixture();
   const wt = normalizeWalkthrough({ intent: 'Retries', chapters: [{ title: 'Retry helper', why: 'Sync failed on flaky networks.', hunks: ['src/retry.js'] }] });
   const { byId: _b, ...r } = verify({ cwd: dir, walkthrough: wt, base: undefined, head: undefined });
@@ -116,5 +116,5 @@ test("hunks Reviewer's walkthrough misses are labelled as such, not blamed on an
   assert.equal(steps[0].source, 'chapter');
   const missed = steps.filter((s) => s.source === 'unnarrated');
   assert.ok(missed.length > 0);
-  for (const s of missed) assert.match(s.why, /walkthrough Reviewer wrote doesn't cover/);
+  for (const s of missed) assert.match(s.why, /walkthrough Hunkdory wrote doesn't cover/);
 });

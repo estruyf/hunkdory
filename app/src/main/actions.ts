@@ -16,7 +16,7 @@ const where = (c: Comment) => (c.path && c.line ? ` at ${c.path}:${c.line}${c.si
 export function sendBackPrompt(data: Pick<ReviewData, 'steps'>, state: Pick<ReviewState, 'comments'>, req: Pick<FinishRequest, 'note' | 'dropStepKeys'>, wtvCommand: string): string {
   const stepOf = (key: string) => data.steps.find((s) => s.key === key);
   const label = (s: Step | undefined) => (s ? `Step ${s.index + 1} "${s.title}" (${s.files.join(', ') || 'no files'})` : 'A step that no longer exists');
-  const lines = ['I reviewed your changes on this branch in Reviewer. Please address the feedback below.', ''];
+  const lines = ['I reviewed your changes on this branch in Hunkdory. Please address the feedback below.', ''];
   if (state.comments.length) {
     lines.push('Comments:');
     for (const c of state.comments) lines.push(`- ${label(stepOf(c.stepKey))}${where(c)}: ${c.body.trim()}`);
@@ -93,11 +93,11 @@ export function githubReview(
   parts.push(...folded);
   const drops = req.dropStepKeys.map(stepOf).filter((s): s is Step => !!s);
   if (drops.length) parts.push(['Please drop these changes, they are outside the task:', ...drops.map((s) => `- ${label(s)} (${s.files.map((f) => `\`${f}\``).join(', ')})`)].join('\n'));
-  parts.push('<sub>Reviewed step by step with Reviewer.</sub>');
+  parts.push('<sub>Reviewed step by step with Hunkdory.</sub>');
   return { body: parts.join('\n\n'), comments: inline };
 }
 
-/** The description of a pull request Reviewer opens for a branch you approved. Pure. */
+/** The description of a pull request Hunkdory opens for a branch you approved. Pure. */
 export function prDescription(data: Pick<ReviewData, 'steps' | 'intent' | 'prompt'>, state: Pick<ReviewState, 'comments'>, note: string): string {
   const stepOf = (key: string) => data.steps.find((s) => s.key === key);
   const parts: string[] = [];
@@ -114,7 +114,7 @@ export function prDescription(data: Pick<ReviewData, 'steps' | 'intent' | 'promp
       })].join('\n')
     );
   }
-  parts.push('<sub>Reviewed step by step with Reviewer.</sub>');
+  parts.push('<sub>Reviewed step by step with Hunkdory.</sub>');
   return parts.join('\n\n');
 }
 
@@ -174,7 +174,7 @@ export class Actions {
     const how = event === 'APPROVE' ? 'Approved' : event === 'REQUEST_CHANGES' ? 'Requested changes on' : 'Commented on';
     const moved = review.comments.length && !posted.inline ? ' GitHub couldn’t place your comments on the code, so they are in the review text.' : !inline && comments.length ? ' The PR differs from what you reviewed, so your comments are in the review text.' : '';
     const message = toCopilot ? `Posted your review on PR #${pr.number} for Copilot. It picks it up on GitHub and pushes new commits.${moved}` : `${how} PR #${pr.number} on GitHub.${moved}`;
-    const r = this.record(req, toCopilot ? 'sent-back' : 'reviewed', 'ok', message, summary, { github: { event, url: posted.url } });
+    const r = this.record(req, toCopilot ? 'sent-back' : 'reviewed', 'ok', message, summary, { github: { event, url: posted.url, prUrl: pr.url } });
     return { ok: true, message, review: r };
   }
 
@@ -197,7 +197,7 @@ export class Actions {
     const method = await gh.mergePullRequest(project.path, repo, pr.number, pr.headRefOid, pr.title);
     const how = method === 'merge' ? 'Merged' : method === 'squash' ? 'Squashed and merged' : 'Rebased and merged';
     const message = `${approved ? 'Approved and m' : 'M'}${how.slice(1)} PR #${pr.number} into ${pr.baseRefName}.${approved ? '' : ' GitHub doesn’t let you approve your own PR, so it was merged without an approval.'}`;
-    const r = this.record(req, 'merged', 'ok', message, summary, { github: { event: approved ? 'APPROVE' : 'COMMENT', url } });
+    const r = this.record(req, 'merged', 'ok', message, summary, { github: { event: approved ? 'APPROVE' : 'COMMENT', url, prUrl: pr.url } });
     return { ok: true, message, review: r };
   }
 
@@ -217,7 +217,7 @@ export class Actions {
       draft: req.openPr!.draft,
     });
     const message = `Pushed ${req.branch} and opened ${req.openPr!.draft ? 'draft ' : ''}PR #${pr.number} into ${base}.`;
-    const r = this.record(req, 'reviewed', 'ok', message, summary, { github: { event: 'APPROVE', url: pr.url } });
+    const r = this.record(req, 'reviewed', 'ok', message, summary, { github: { event: 'APPROVE', url: pr.url, prUrl: pr.url } });
     return { ok: true, message, review: r };
   }
 
@@ -227,7 +227,7 @@ export class Actions {
     if (!req.commitFirst) return { ok: false, needsCommit: d.branch.dirtyFiles, message: `${d.branch.dirtyFiles} file(s) on this branch aren't committed yet.` };
     const wt = d.branch.checkout.path;
     await g.git(['add', '-A', '--', '.', ':(exclude).review'], wt);
-    await g.git(['commit', '-m', data.title, '-m', 'Committed by Reviewer before finishing the review.'], wt);
+    await g.git(['commit', '-m', data.title, '-m', 'Committed by Hunkdory before finishing the review.'], wt);
     return null;
   }
 
@@ -246,7 +246,7 @@ export class Actions {
       if (!req.commitFirst) return { ok: false, needsCommit: d.branch.dirtyFiles, message: `${d.branch.dirtyFiles} file(s) on this branch aren't committed yet. They are not part of a merge.` };
       const wt = d.branch.checkout.path;
       await g.git(['add', '-A', '--', '.', ':(exclude).review'], wt);
-      await g.git(['commit', '-m', data.title, '-m', 'Committed by Reviewer before merging.'], wt);
+      await g.git(['commit', '-m', data.title, '-m', 'Committed by Hunkdory before merging.'], wt);
     }
 
     try {
@@ -314,7 +314,7 @@ export class Actions {
     if (req.deleteBranch) {
       const { project, d } = await this.projects.find(req.projectId, req.branch);
       if (d.branch.pr || d.branch.headRef !== req.branch || !(await g.refExists(project.path, `refs/heads/${req.branch}`))) {
-        throw new Error(`${req.branch} isn't a local branch, so Reviewer won't delete it. Discard without deleting.`);
+        throw new Error(`${req.branch} isn't a local branch, so Hunkdory won't delete it. Discard without deleting.`);
       }
       if (d.branch.checkout.kind === 'main') throw new Error(`Your main folder has ${req.branch} checked out, so it can't be deleted. Switch branches first.`);
       if (d.branch.checkout.kind === 'worktree') await g.git(['worktree', 'remove', '--force', d.branch.checkout.path], project.path);

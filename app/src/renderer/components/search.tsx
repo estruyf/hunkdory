@@ -1,4 +1,4 @@
-// Search the branch's code from a review: "where is this used?" without leaving Reviewer.
+// Search the branch's code from a review: "where is this used?" without leaving Hunkdory.
 // Opens with / or Cmd+F, filled in with the text you selected, like a name in a question.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeSearchResult, ReviewData } from '../../shared/types.ts';
@@ -139,7 +139,7 @@ function SearchPanel({ data, query, setQuery, onClose, onShowStep }: { data: Rev
       onKeyDown={(e) => {
         if (e.key === 'Escape') onClose();
       }}
-      style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(620px, 92vw)', background: 'var(--surface)', borderLeft: '1px solid var(--border)', boxShadow: '-12px 0 32px rgba(15, 23, 42, 0.12)', zIndex: 30, display: 'flex', flexDirection: 'column' }}
+      style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(620px, 92vw)', background: 'var(--surface)', borderLeft: '1px solid var(--border)', boxShadow: '-12px 0 32px var(--panel-shadow)', zIndex: 30, display: 'flex', flexDirection: 'column' }}
     >
       <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid var(--divider)', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
@@ -222,7 +222,7 @@ function MatchRow({ data, match, query, changed, onShowStep }: { data: ReviewDat
           {context.lines.map((l, i) => {
             const n = context.from + i;
             return (
-              <div key={n} style={{ display: 'flex', gap: 12, background: n === match.line ? '#fef3c7' : undefined }}>
+              <div key={n} style={{ display: 'flex', gap: 12, background: n === match.line ? 'var(--line-hit)' : undefined }}>
                 <span style={{ width: 36, flex: 'none', textAlign: 'right', color: 'var(--muted)' }}>{n}</span>
                 <span style={{ whiteSpace: 'pre' }}>{l}</span>
               </div>

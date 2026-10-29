@@ -9,9 +9,9 @@ import { createInterface } from 'node:readline';
 export const READ_GIT = ['Bash(git diff:*)', 'Bash(git show:*)', 'Bash(git log:*)', 'Bash(git grep:*)', 'Bash(git ls-tree:*)', 'Bash(git cat-file:*)', 'Bash(git status:*)'];
 
 /**
- * For runs Reviewer starts on its own, in code it is reviewing:
+ * For runs Hunkdory starts on its own, in code it is reviewing:
  * ignore the branch's .claude settings and MCP servers (they could run hooks or tools from that code),
- * and don't save the run as a session, so Reviewer never mistakes it for the agent that made the branch.
+ * and don't save the run as a session, so Hunkdory never mistakes it for the agent that made the branch.
  */
 export const ISOLATED = ['--setting-sources', 'user', '--strict-mcp-config', '--no-session-persistence'];
 

@@ -71,7 +71,7 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
       make({
         key: uniqueKey(`out:${path}`),
         title: `Not in the walkthrough: ${path}`,
-        why: source === 'reviewer' ? `This file changed in ${ids.length} place${ids.length > 1 ? 's' : ''} that the walkthrough Reviewer wrote doesn't cover.` : `The agent ${what}, but the walkthrough doesn't explain it.`,
+        why: source === 'reviewer' ? `This file changed in ${ids.length} place${ids.length > 1 ? 's' : ''} that the walkthrough Hunkdory wrote doesn't cover.` : `The agent ${what}, but the walkthrough doesn't explain it.`,
         checks: ['Did you ask for this? If not, drop it before merging.', ...labels.map((l) => `wtv flags: ${l}.`)],
         outsideTask: true,
         minRisk: 'medium',

@@ -1,10 +1,10 @@
-// Open pull requests through the GitHub CLI. The only network use in Reviewer, and only for
+// Open pull requests through the GitHub CLI. The only network use in Hunkdory, and only for
 // projects where you linked the GitHub remote.
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { shellEnv, which } from './shellEnv.ts';
 import * as g from './git.ts';
-import type { CheckItem, GitHubEvent, PullRequest } from '../shared/types.ts';
+import type { CheckItem, GitHubEvent, PrReview, PullRequest } from '../shared/types.ts';
 
 const run = promisify(execFile);
 
@@ -85,38 +85,68 @@ export async function checkRepo(root: string): Promise<string> {
 
 const cache = new Map<string, { at: number; prs: PullRequest[] }>();
 
-export async function openPullRequests(root: string, repo: string, maxAgeMs = 60_000): Promise<PullRequest[]> {
-  const hit = cache.get(repo);
-  if (hit && Date.now() - hit.at < maxAgeMs) return hit.prs;
-  const fields = 'number,title,headRefName,headRefOid,baseRefName,author,isDraft,url,body,updatedAt,isCrossRepository,statusCheckRollup';
-  const raw = JSON.parse(await gh(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', fields], root)) as {
-    number: number;
-    title: string;
-    headRefName: string;
-    headRefOid: string;
-    baseRefName: string;
-    author: { login: string; is_bot?: boolean } | null;
-    isDraft: boolean;
-    url: string;
-    body: string;
-    updatedAt: string;
-    statusCheckRollup: Rollup[] | null;
-  }[];
-  const prs = raw.map((p) => ({
+/** One PR as `gh pr list --json` gives it. */
+export interface RawPullRequest {
+  number: number;
+  title: string;
+  headRefName: string;
+  headRefOid: string;
+  baseRefName: string;
+  author: { login: string; is_bot?: boolean } | null;
+  isDraft: boolean;
+  url: string;
+  body: string;
+  updatedAt: string;
+  statusCheckRollup: Rollup[] | null;
+  assignees?: { login: string }[] | null;
+  // Users and bots by login; a team has its slug (as `slug` or `login`, depending on the gh version) and organization.
+  reviewRequests?: { __typename?: string; login?: string; slug?: string; name?: string; organization?: { login?: string } }[] | null;
+  latestReviews?: { author: { login: string } | null; state: string }[] | null;
+}
+
+const REVIEW_STATES = new Set<string>(['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED']);
+
+/** Maps gh's JSON onto a PullRequest. Pure, so it can be tested. */
+export function toPullRequest(p: RawPullRequest): PullRequest {
+  const login = p.author?.login ?? '';
+  return {
     number: p.number,
     title: p.title,
     headRefName: p.headRefName,
     headRefOid: p.headRefOid,
     baseRefName: p.baseRefName,
-    author: p.author?.login ?? 'unknown',
-    isBot: !!p.author?.is_bot || /\[bot\]$|^copilot/i.test(p.author?.login ?? ''),
+    author: login || 'unknown',
+    isBot: !!p.author?.is_bot || /\[bot\]$|^copilot/i.test(login),
     isDraft: p.isDraft,
     url: p.url,
     body: p.body ?? '',
     updatedAt: p.updatedAt,
-    copilot: isCopilot(p.author?.login ?? ''),
+    copilot: isCopilot(login),
     checks: parseChecks(p.statusCheckRollup),
-  }));
+    assignees: (p.assignees ?? []).map((a) => a.login).filter(Boolean),
+    requestedReviewers: (p.reviewRequests ?? []).map(reviewerName).filter((x): x is string => !!x),
+    // Dismissed and pending reviews say nothing about where the PR stands.
+    reviews: (p.latestReviews ?? []).filter((r) => r.author?.login && REVIEW_STATES.has(r.state)).map((r) => ({ login: r.author!.login, state: r.state as PrReview['state'] })),
+  };
+}
+
+function reviewerName(r: NonNullable<RawPullRequest['reviewRequests']>[number]): string | null {
+  if (r.__typename === 'Team') {
+    const slug = r.slug ?? r.login ?? r.name;
+    if (!slug) return null;
+    const org = r.organization?.login;
+    return org && !slug.includes('/') ? `${org}/${slug}` : slug;
+  }
+  return r.login ?? null;
+}
+
+export async function openPullRequests(root: string, repo: string, maxAgeMs = 60_000): Promise<PullRequest[]> {
+  const hit = cache.get(repo);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.prs;
+  // The people fields cost about 0.3 to 0.5 s on a repo with 35 open PRs (latestReviews brings each review's body along).
+  const fields = 'number,title,headRefName,headRefOid,baseRefName,author,isDraft,url,body,updatedAt,isCrossRepository,statusCheckRollup,assignees,reviewRequests,latestReviews';
+  const raw = JSON.parse(await gh(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', fields], root)) as RawPullRequest[];
+  const prs = raw.map(toPullRequest);
   cache.set(repo, { at: Date.now(), prs });
   return prs;
 }
@@ -152,7 +182,7 @@ export async function fetchPullRequests(root: string, repo: string, prs: PullReq
   await run('git', ['fetch', '--no-tags', '--quiet', remote, ...specs], { cwd: root, env, maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
 }
 
-/** Forget cached pull requests, after Reviewer changed one. */
+/** Forget cached pull requests, after Hunkdory changed one. */
 export function forget(repo: string) {
   cache.delete(repo);
 }
@@ -204,10 +234,10 @@ export function foldComments(body: string, comments: LineComment[]): string {
 const MARK = '<!-- reviewer:walkthrough -->';
 const DATA = /<!-- reviewer:data:([A-Za-z0-9+/=]+) -->/;
 
-/** A walkthrough as a PR comment people can read, with the data for other Reviewers hidden at the end. Pure. */
+/** A walkthrough as a PR comment people can read, with the data for other Hunkdory users hidden at the end. Pure. */
 export function walkthroughComment(wt: { title?: string; intent?: string; chapters: { title: string; why?: string; risk?: string; checks?: string[]; outsideTask?: boolean; files?: string[] }[] }, data: unknown): string {
   const n = wt.chapters.length;
-  const lines = [MARK, '## Review walkthrough', '', wt.intent ?? '', '', `<details><summary>${n} step${n === 1 ? '' : 's'}, written by Reviewer from the diff</summary>`, ''];
+  const lines = [MARK, '## Review walkthrough', '', wt.intent ?? '', '', `<details><summary>${n} step${n === 1 ? '' : 's'}, written by Hunkdory from the diff</summary>`, ''];
   wt.chapters.forEach((c, i) => {
     lines.push(`### ${i + 1}. ${c.title}${c.outsideTask ? ' (outside the task)' : ''}`, '', c.why ?? '');
     if (c.risk) lines.push('', `**Risk:** ${c.risk}`);
@@ -219,7 +249,7 @@ export function walkthroughComment(wt: { title?: string; intent?: string; chapte
   return lines.join('\n');
 }
 
-/** The walkthrough data in a comment Reviewer posted, if it is one. Pure. */
+/** The walkthrough data in a comment Hunkdory posted, if it is one. Pure. */
 export function readWalkthroughComment(body: string): unknown | null {
   if (!body.includes(MARK)) return null;
   const m = body.match(DATA);
@@ -231,7 +261,7 @@ export function readWalkthroughComment(body: string): unknown | null {
   }
 }
 
-/** The newest walkthrough a Reviewer posted on the PR. */
+/** The newest walkthrough a Hunkdory app posted on the PR. */
 export async function sharedWalkthrough(root: string, repo: string, pr: number): Promise<{ id: number; url: string; by: string; data: unknown } | null> {
   const comments = (await ghApi('GET', `repos/${repo}/issues/${pr}/comments?per_page=100`, root)) as { id: number; html_url: string; body: string; user: { login: string } }[];
   for (const c of [...comments].reverse()) {
@@ -241,7 +271,7 @@ export async function sharedWalkthrough(root: string, repo: string, pr: number):
   return null;
 }
 
-/** Posts the walkthrough, or updates the comment Reviewer posted before. */
+/** Posts the walkthrough, or updates the comment Hunkdory posted before. */
 export async function shareWalkthrough(root: string, repo: string, pr: number, body: string, existingId: number | null): Promise<string> {
   const res = existingId
     ? await ghApi('PATCH', `repos/${repo}/issues/comments/${existingId}`, root, { body })

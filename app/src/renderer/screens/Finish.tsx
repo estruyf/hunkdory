@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Go } from '../App.tsx';
 import { Brand, Crumbs, LoadingPage, Stat, cleanError, plural, reviewCrumbs, useAsync } from '../components/ui.tsx';
 import { ReviewError } from './Review.tsx';
+import { Markdown } from '../components/markdown.tsx';
 import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, defaultDrops, openItems } from '../../shared/plan.ts';
 import type { Decision, GitHubEvent, ReviewData, ReviewState } from '../../shared/types.ts';
@@ -65,7 +66,7 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
         ? `Approves pull request #${data.pr.number} on GitHub${comments.length ? ` with your ${plural(comments.length, 'comment')}` : ''} and merges it into ${data.pr.baseRefName}.`
         : canOpenPr && openPr
           ? `Pushes ${data.branch} and opens a pull request into ${base}, with your comments in the description. Nothing is merged yet.`
-          : `Merge into ${base} as it is. Your comments stay in Reviewer.`,
+          : `Merge into ${base} as it is. Your comments stay in Hunkdory.`,
       submit: data.pr ? 'Approve & merge' : canOpenPr && openPr ? 'Approve & open PR' : 'Approve & merge',
     },
     ...(data.pr
@@ -151,7 +152,9 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
                 {stepLabel(c.stepKey)}
                 {c.path && c.line ? <span className="mono"> · {c.path}:{c.line}</span> : null}
               </span>
-              <span style={{ fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{c.body}</span>
+              <div style={{ fontSize: 14, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+                <Markdown text={c.body} />
+              </div>
             </div>
           ))}
           {outside.map((s) => (
@@ -263,7 +266,7 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
         {needsCommit !== null && (
           <div className="notice" role="alert" style={{ flexDirection: 'column', gap: 10 }}>
             <span>
-              <strong>{plural(needsCommit, 'file')} on this branch {needsCommit === 1 ? "isn't" : "aren't"} committed yet.</strong> {opening ? 'A pull request' : 'A merge'} only takes commits. Reviewer can commit them for you first, with "{data.title}" as the message. The <span className="mono">.review</span> folder stays out of the commit.
+              <strong>{plural(needsCommit, 'file')} on this branch {needsCommit === 1 ? "isn't" : "aren't"} committed yet.</strong> {opening ? 'A pull request' : 'A merge'} only takes commits. Hunkdory can commit them for you first, with "{data.title}" as the message. The <span className="mono">.review</span> folder stays out of the commit.
             </span>
             <span>
               <button type="button" className="btn primary" disabled={busy} onClick={() => submit(true)}>

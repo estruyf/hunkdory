@@ -3,7 +3,7 @@ import type { ReviewData, WalkthroughJob } from '../../shared/types.ts';
 import { cleanError } from './ui.tsx';
 
 /**
- * Follows Reviewer writing a walkthrough for one branch. With `auto`, starts it as soon as a branch
+ * Follows Hunkdory writing a walkthrough for one branch. With `auto`, starts it as soon as a branch
  * without a walkthrough opens, if the project allows it; the main process checks that, and runs it once per diff.
  */
 export function useWalkthroughJob(data: ReviewData | undefined, opts: { auto?: boolean; onDone?: () => void } = {}) {
@@ -55,7 +55,7 @@ function useTick(on: boolean) {
   }, [on]);
 }
 
-/** Where the walkthrough on this page came from, and Reviewer writing one when there is none. */
+/** Where the walkthrough on this page came from, and Hunkdory writing one when there is none. */
 export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType<typeof useWalkthroughJob> }) {
   const { job } = w;
   const [sharing, setSharing] = useState<'idle' | 'busy' | string>('idle');
@@ -78,7 +78,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
   );
 
   if (running) {
-    const what = data.walkthrough === 'reviewer' ? 'Rewriting the walkthrough' : 'Reviewer is writing a walkthrough for this branch';
+    const what = data.walkthrough === 'reviewer' ? 'Rewriting the walkthrough' : 'Hunkdory is writing a walkthrough for this branch';
     return row(
       'notice info',
       <>
@@ -113,7 +113,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
     return row(
       'notice info',
       <span>
-        <strong>Reviewer wrote this walkthrough</strong> from {from}
+        <strong>Hunkdory wrote this walkthrough</strong> from {from}
         {shared && !sharing.startsWith('https://') ? <>, and {shared.by} shared it on the PR</> : null}. The reasons are its reading of the change, not the author's own.
         {sharedUrl && (
           <>
@@ -143,7 +143,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
       'notice info',
       <span>
         <strong>No walkthrough on this branch.</strong> The steps below are one per file, without reasons. Claude Code can write one: it reads the diff, the commits and the agent session, and like any Claude Code run that goes to
-        Anthropic. Should Reviewer do that for every branch in {data.projectName} that opens without one? You can change this in the project's settings.
+        Anthropic. Should Hunkdory do that for every branch in {data.projectName} that opens without one? You can change this in the project's settings.
       </span>,
       <span style={{ display: 'flex', gap: 14 }}>
         {action('Yes, for this project', () => answer(true))}
@@ -156,7 +156,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
     'notice',
     <span>
       <strong>No walkthrough on this branch.</strong> The steps below are one per file, without reasons.{' '}
-      {failed ? <>Reviewer couldn't write one: {failed}</> : job?.status === 'cancelled' ? 'You stopped Reviewer writing one.' : ''}
+      {failed ? <>Hunkdory couldn't write one: {failed}</> : job?.status === 'cancelled' ? 'You stopped Hunkdory writing one.' : ''}
     </span>,
     action(failed ? 'Try again' : 'Write one', w.write)
   );

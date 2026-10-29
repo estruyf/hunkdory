@@ -3,21 +3,42 @@ import type { ReviewerApi, ReviewState, RiskLevel } from '../../shared/types.ts'
 import type { Go } from '../App.tsx';
 import { RISK_LABEL } from '../../shared/order.ts';
 
+/** The Hunkdory app icon: three diff lines and a check on a blue tile. */
 export function Logo({ size = 26 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="11" cy="11" r="7" />
-      <path d="M21 21l-4.3-4.3" />
-      <path d="M8 11l2 2 4-4" />
+    <svg width={size} height={size} viewBox="100 100 824 824" aria-hidden="true">
+      <rect x="100" y="100" width="824" height="824" rx="185" fill="#3451d1" />
+      <rect x="232" y="290" width="300" height="80" rx="40" fill="#FF8E85" />
+      <rect x="232" y="412" width="470" height="80" rx="40" fill="#7BE3A6" />
+      <rect x="232" y="534" width="390" height="80" rx="40" fill="#7BE3A6" />
+      <rect x="232" y="656" width="230" height="80" rx="40" fill="#fff" fillOpacity="0.28" />
+      <path d="M548 700 L642 794 L812 594" fill="none" stroke="#fff" strokeWidth="80" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-export function Brand({ onClick }: { onClick: () => void }) {
+/** The gear on project settings and on the app's own Settings. */
+export function GearIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+    </svg>
+  );
+}
+
+/** The logo and name at the left of every top bar. Without `onClick` (on Welcome) there's nowhere to go back to. */
+export function Brand({ onClick }: { onClick?: () => void }) {
+  const inner = (
+    <>
+      <Logo />
+      <span>Hunkdory</span>
+    </>
+  );
+  if (!onClick) return <span className="brand" style={{ cursor: 'default' }}>{inner}</span>;
   return (
     <button type="button" className="brand" onClick={onClick}>
-      <Logo />
-      <span>Reviewer</span>
+      {inner}
     </button>
   );
 }
@@ -32,12 +53,13 @@ export interface Crumb {
 /** Where you are. Every part but the last takes you there. */
 export function Crumbs({ items }: { items: Crumb[] }) {
   return (
-    <nav aria-label="Breadcrumb" style={{ minWidth: 0 }}>
+    <nav aria-label="Breadcrumb" style={{ minWidth: 0, overflow: 'hidden' }}>
       <ol className="crumbs">
         {items.map((c, i) => {
           const last = i === items.length - 1;
           return (
-            <li key={i} style={{ flex: `0 ${c.shrink ? 1 : 0} auto` }}>
+            // The long crumb gives way first but keeps a few letters; then the others; where you are never does.
+            <li key={i} style={{ flex: `0 ${c.shrink ? 1 : last ? 0 : 0.001} auto`, minWidth: c.shrink ? '4em' : 0 }}>
               {i > 0 && <span aria-hidden="true" className="crumb-sep">›</span>}
               {c.onClick && !last ? (
                 <button type="button" className="crumb" title={c.label} onClick={c.onClick}>
@@ -59,8 +81,18 @@ export function Crumbs({ items }: { items: Crumb[] }) {
 /** The first crumbs of every review screen: the inbox, then the project's own inbox. */
 export const reviewCrumbs = (go: Go, data: { projectId: string; projectName: string }): Crumb[] => [
   { label: 'Inbox', onClick: () => go({ name: 'home' }) },
-  { label: data.projectName, onClick: () => go({ name: 'home', projectId: data.projectId }) },
+  { label: renamed.get(data.projectId) ?? data.projectName, onClick: () => go({ name: 'home', projectId: data.projectId }) },
 ];
+
+// Projects renamed while the app runs. Screens you go back to may hold review data from before.
+const renamed = new Map<string, string>();
+
+/** A project got a new name: show it on the remembered inbox and in review crumbs before anything reloads. */
+export function rememberProjectName(projectId: string, name: string) {
+  renamed.set(projectId, name);
+  const v = lastInbox;
+  if (v) setLastInbox({ ...v, waiting: v.waiting.map((w) => (w.projectId === projectId ? { ...w, projectName: name } : w)) });
+}
 
 export function RiskPill({ risk }: { risk: RiskLevel }) {
   return <span className={`pill ${risk}`}>{RISK_LABEL[risk]}</span>;
@@ -90,7 +122,7 @@ export function LoadingPage({ onHome, label, detail }: { onHome: () => void; lab
     <div className="page">
       <header className="topbar">
         <Brand onClick={onHome} />
-        {detail && <span className="mono" style={{ fontSize: 13, color: 'var(--muted)' }}>{detail}</span>}
+        {detail && <span className="mono topbar-sub" style={{ fontSize: 13 }}>{detail}</span>}
       </header>
       <div role="status" aria-live="polite" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: '12vh', opacity: visible ? 1 : 0, transition: 'opacity .2s' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 15, color: 'var(--muted)' }}>

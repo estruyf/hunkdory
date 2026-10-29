@@ -20,7 +20,7 @@ export function StartReview({ go, projectId, branch }: { go: Go; projectId: stri
   const [error, setError] = useState<string | null>(null);
   const [skipSeen, setSkipSeen] = useState(true);
   const [copied, setCopied] = useState(false);
-  // Opening a branch without a walkthrough has Reviewer write one; the steps update when it's ready.
+  // Opening a branch without a walkthrough has Hunkdory write one; the steps update when it's ready.
   const w = useWalkthroughJob(loaded.value?.data, { auto: true, onDone: loaded.reload });
 
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
@@ -114,7 +114,7 @@ export function StartReview({ go, projectId, branch }: { go: Go; projectId: stri
             <div className="notice" role="note" style={{ flexDirection: 'column', gap: 8 }}>
               <span>
                 <strong>Too big for one sitting.</strong> {plural(data.steps.length, 'step')}, about {formatDuration(data.minutes)} of reading. Smaller branches get a better review: ask the agent to split it, in a session that can
-                use git. Or review it over several sittings: Reviewer keeps your place.
+                use git. Or review it over several sittings: Hunkdory keeps your place.
               </span>
               <span>
                 <button

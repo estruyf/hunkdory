@@ -1,15 +1,28 @@
 // Review state in one JSON file. Small, readable, and written atomically.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import type { Project, ReviewState } from '../shared/types.ts';
+import { basename, dirname } from 'node:path';
+import type { AppSettings, Project, ReviewState } from '../shared/types.ts';
 
 interface Data {
   version: 1;
   projects: Project[];
   reviews: Record<string, ReviewState>;
+  /** Missing in stores from before there were settings. */
+  settings?: Partial<AppSettings>;
 }
 
+const DEFAULT_SETTINGS: AppSettings = { theme: 'system' };
+
 const empty = (): Data => ({ version: 1, projects: [], reviews: {} });
+
+/** A project's name: what you typed, trimmed, or the folder's name when that's empty. Two projects may share one. */
+export const projectName = (name: string | undefined, root: string) => name?.trim() || basename(root);
+
+/**
+ * The project under a new name; `undefined` keeps the one it has. Reviews, ignored and tracked branches
+ * hang off the id, so nothing else changes.
+ */
+export const withProjectName = (p: Project, name: string | undefined): Project => (name === undefined ? p : { ...p, name: projectName(name, p.path) });
 
 export const reviewId = (projectId: string, branch: string) => `${projectId}::${branch}`;
 
@@ -41,6 +54,16 @@ export class Store {
     const tmp = `${this.file}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(this.data, null, 2)}\n`);
     renameSync(tmp, this.file);
+  }
+
+  settings(): AppSettings {
+    return { ...DEFAULT_SETTINGS, ...this.data.settings };
+  }
+
+  updateSettings(patch: Partial<AppSettings>): AppSettings {
+    this.data.settings = { ...this.data.settings, ...patch };
+    this.save();
+    return this.settings();
   }
 
   projects(): Project[] {

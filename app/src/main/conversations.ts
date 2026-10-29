@@ -57,8 +57,8 @@ export function askPrompt(a: AskInput): string {
   if (a.by !== 'fresh') {
     const lines = [
       a.kind === 'question'
-        ? `I'm reviewing your changes on this branch in Reviewer, one step at a time. I have a question about ${stepName}.`
-        : `I'm reviewing your changes on this branch in Reviewer. On ${stepName}, please make this change.`,
+        ? `I'm reviewing your changes on this branch in Hunkdory, one step at a time. I have a question about ${stepName}.`
+        : `I'm reviewing your changes on this branch in Hunkdory. On ${stepName}, please make this change.`,
       '',
       'This is the part of the diff I am looking at:',
       diff,
@@ -182,13 +182,13 @@ export class Conversations {
     for (const run of this.runs.values()) run.kill();
   }
 
-  /** Exchanges that were running when Reviewer quit can't finish any more. */
+  /** Exchanges that were running when Hunkdory quit can't finish any more. */
   settleStale() {
     for (const r of this.store.reviews()) {
       if (!r.exchanges?.some((e) => e.status === 'running')) continue;
       this.store.updateReview(r.projectId, r.branch, (r) => {
         for (const e of r.exchanges ?? []) {
-          if (e.status === 'running') Object.assign(e, { status: 'failed', error: 'Reviewer closed before Claude finished.', activity: null });
+          if (e.status === 'running') Object.assign(e, { status: 'failed', error: 'Hunkdory closed before Claude finished.', activity: null });
         }
       });
     }

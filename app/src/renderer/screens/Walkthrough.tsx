@@ -9,6 +9,7 @@ import { OUTSIDE_HINT, isReviewed } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, isCareful, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
 import type { ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 import { AskPanel } from '../components/ask.tsx';
+import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import { AgentTests, AskedFor, CommentBox, whyFallback } from './Review.tsx';
 
@@ -158,11 +159,11 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
       : '';
 
   const header = (
-    <header className="topbar" style={{ position: 'static', gap: '12px 20px', padding: '12px 24px', borderBottomColor: 'var(--divider)' }}>
+    <header className="topbar" style={{ borderBottomColor: 'var(--divider)' }}>
       <Brand onClick={() => go({ name: 'home' })} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '1 1 280px', minWidth: 0 }}>
         <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: toPlan, shrink: true }, { label: here }]} />
-        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+        <span className="topbar-sub">
           {data.pr ? `PR #${data.pr.number} · ` : ''}
           {data.stack ? `part ${data.stack.prs.findIndex((p) => p.current) + 1} of ${data.stack.prs.length} in a stack · ` : ''}
           {sizeText(data.files, data.added, data.removed)}
@@ -373,10 +374,10 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
             <section className="notice info" style={{ flexDirection: 'column', gap: 6 }}>
               <strong>What you said here last time</strong>
               {earlier.map((c) => (
-                <span key={c.id} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                  {c.path && c.line ? <span className="mono" style={{ fontSize: 12.5 }}>{`${c.path}:${c.line} `}</span> : null}
-                  {c.body}
-                </span>
+                <div key={c.id} style={{ overflowWrap: 'anywhere' }}>
+                  {c.path && c.line ? <span className="mono" style={{ fontSize: 12.5 }}>{`${c.path}:${c.line}`}</span> : null}
+                  <Markdown text={c.body} />
+                </div>
               ))}
             </section>
           )}

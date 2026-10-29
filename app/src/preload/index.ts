@@ -28,11 +28,22 @@ const methods: (keyof ReviewerApi)[] = [
   'fileLines',
   'searchCode',
   'shareWalkthrough',
+  'settings',
+  'setTheme',
+  'appInfo',
 ];
 
 const api = Object.fromEntries(methods.map((m) => [m, (...args: unknown[]) => ipcRenderer.invoke(`api:${m}`, ...args)])) as unknown as ReviewerApi;
 
 contextBridge.exposeInMainWorld('api', api);
+contextBridge.exposeInMainWorld('frame', {
+  platform: process.platform,
+  onFullScreen(fn: (on: boolean) => void) {
+    const listener = (_e: unknown, on: boolean) => fn(on);
+    ipcRenderer.on('full-screen', listener);
+    return () => ipcRenderer.removeListener('full-screen', listener);
+  },
+});
 contextBridge.exposeInMainWorld('events', {
   onReviewsChanged(fn: () => void) {
     const listener = () => fn();

@@ -1,5 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, Tray } from 'electron';
+import { release } from 'node:os';
 import { join, resolve } from 'node:path';
+import { existsSync, renameSync } from 'node:fs';
 import { Store } from './store.ts';
 import { Projects } from './projects.ts';
 import { Summaries } from './summaries.ts';
@@ -8,12 +10,30 @@ import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
 import { addToStepComment, removeFromStepComments } from '../shared/comments.ts';
-import type { ReviewerApi, ReviewPatch, ReviewState } from '../shared/types.ts';
+import type { ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/types.ts';
+
+// The app icon. Packaged builds take icon.icns from resources/; this covers the dock and window in dev.
+const ICON = join(__dirname, '../../resources/icon.png');
+
+// The window's colour before the page draws: --bg in styles.css, light or dark.
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#0f1115' : '#F6F7F9');
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 
+// The app used to be called Reviewer, then briefly hunkdory: move the old data folder over once, so your
+// projects and reviews stay. On a case-insensitive volume (the macOS default) "hunkdory" already is the
+// current folder, so existsSync(current) skips the move.
+if (!process.env.REVIEWER_USER_DATA) {
+  const current = app.getPath('userData');
+  const legacy = ['Reviewer', 'hunkdory'].map((n) => join(app.getPath('appData'), n)).find((p) => p !== current && existsSync(p));
+  try {
+    if (legacy && !existsSync(current)) renameSync(legacy, current);
+  } catch (e) {
+    console.error('Could not move the old data folder:', e);
+  }
+}
 // Lets tests and demo runs use a throwaway store instead of your real reviews.
 if (process.env.REVIEWER_USER_DATA) app.setPath('userData', process.env.REVIEWER_USER_DATA);
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -60,7 +80,7 @@ function settleStaleRuns() {
     if (!alive) {
       store.updateReview(r.projectId, r.branch, (x) => {
         x.decision!.result = 'ok';
-        x.decision!.message = 'The agent run finished while Reviewer was closed.';
+        x.decision!.message = 'The agent run finished while Hunkdory was closed.';
       });
     }
   }
@@ -108,7 +128,17 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
   }
 }
 
+const THEMES: Theme[] = ['system', 'light', 'dark'];
+
 const api: ReviewerApi = {
+  settings: async () => store.settings(),
+  setTheme: async (theme) => {
+    if (!THEMES.includes(theme)) throw new Error(`Unknown theme ${theme}`);
+    // themeSource drives prefers-color-scheme in the page, so the CSS, scrollbars and form controls follow.
+    nativeTheme.themeSource = theme;
+    return store.updateSettings({ theme });
+  },
+  appInfo: async () => ({ version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, os: `${process.platform === 'darwin' ? `macOS ${process.getSystemVersion()}` : `${process.platform} ${release()}`} (${process.arch})` }),
   listProjects: async () => store.projects(),
   checkFolder: (path) => projects.checkFolder(path),
   chooseFolder: async () => {
@@ -125,11 +155,11 @@ const api: ReviewerApi = {
   trackBranch: (projectId, branch) => projects.trackBranch(projectId, branch),
   ignoreBranch: async (projectId, branch, on) => projects.ignoreBranch(projectId, branch, on),
   openExternal: async (url) => {
-    // Only links Reviewer shows itself, like a pull request on GitHub.
+    // Only links Hunkdory shows itself, like a pull request on GitHub.
     if (/^https:\/\//.test(url)) await shell.openExternal(url);
   },
   inbox: async (opts) => {
-    const { items: waiting, scans } = await projects.inbox(opts?.refresh);
+    const { items: waiting, scans, me } = await projects.inbox(opts?.refresh);
     const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
     const done = store
       .reviews()
@@ -143,7 +173,7 @@ const api: ReviewerApi = {
       }
     }
     done.sort((a, b) => b.decision!.at.localeCompare(a.decision!.at));
-    return { waiting, done, scans };
+    return { waiting, done, scans, me };
   },
   loadReview: async (projectId, branch, opts) => {
     const data = await projects.review(projectId, branch, opts?.refresh);
@@ -190,8 +220,11 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    title: 'Reviewer',
-    backgroundColor: '#F6F7F9',
+    title: 'Hunkdory',
+    // On a Mac the app draws its own top bar: the traffic lights sit inside it, centred on its first row.
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 20, y: 26 } } : {}),
+    backgroundColor: windowBackground(),
+    icon: ICON,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -200,6 +233,9 @@ function createWindow() {
     },
   });
   win.once('ready-to-show', () => win?.show());
+  // Full screen hides the traffic lights, so the top bar can drop the room it keeps for them.
+  win.on('enter-full-screen', () => win?.webContents.send('full-screen', true));
+  win.on('leave-full-screen', () => win?.webContents.send('full-screen', false));
   // Back and forward like a browser: mouse buttons arrive as app commands on Windows and Linux, swipes on a Mac trackpad.
   win.on('app-command', (_e, cmd) => {
     if (cmd === 'browser-backward' || cmd === 'browser-forward') win?.webContents.send('navigate', cmd === 'browser-backward' ? 'back' : 'forward');
@@ -207,7 +243,7 @@ function createWindow() {
   win.on('swipe', (_e, dir) => {
     if (dir === 'left' || dir === 'right') win?.webContents.send('navigate', dir === 'left' ? 'back' : 'forward');
   });
-  // Closing the window keeps Reviewer in the menu bar. Quit from the tray or with Cmd+Q.
+  // Closing the window keeps Hunkdory in the menu bar. Quit from the tray or with Cmd+Q.
   win.on('close', (e) => {
     if (quitting) return;
     e.preventDefault();
@@ -232,12 +268,12 @@ function showWindow() {
 
 function createTray() {
   tray = new Tray(trayIcon());
-  tray.setToolTip('Reviewer');
+  tray.setToolTip('Hunkdory');
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Open Reviewer', click: showWindow },
+      { label: 'Open Hunkdory', click: showWindow },
       { type: 'separator' },
-      { label: 'Quit Reviewer', click: () => app.quit() },
+      { label: 'Quit Hunkdory', click: () => app.quit() },
     ])
   );
 }
@@ -251,6 +287,10 @@ app.on('before-quit', () => {
 });
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') app.dock?.setIcon(ICON);
+  // Before the window opens, so a dark theme never flashes white first.
+  nativeTheme.themeSource = store.settings().theme;
+  nativeTheme.on('updated', () => win?.setBackgroundColor(windowBackground()));
   settleStaleRuns();
   conversations.settleStale();
   registerIpc();

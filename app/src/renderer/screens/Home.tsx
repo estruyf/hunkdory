@@ -1,27 +1,21 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Loading, plural, sizeText, useAsync, useInbox, usePref } from '../components/ui.tsx';
+import { Brand, GearIcon, Loading, plural, sizeText, useAsync, useInbox, usePref } from '../components/ui.tsx';
 import { checksText, checksTone } from '../components/github.tsx';
 import { suggestedOrder, timeAgo, tooBig } from '../../shared/order.ts';
+import { githubLink } from '../../shared/decisions.ts';
+import { hidesLocal, matchesPeople, peopleLine, peopleOptions, type PeopleFilter } from '../../shared/people.ts';
 import type { InboxItem, Project, ProjectScan, ReviewState } from '../../shared/types.ts';
 
 export function Home({ go, initialProject }: { go: Go; initialProject?: string }) {
   const projects = useAsync(() => window.api.listProjects(), []);
   const inbox = useInbox();
-  const [showIgnored, setShowIgnored] = useState(false);
+  // Always opens on Waiting for you, even when it's empty and another tab isn't.
+  const [tab, setTab] = useState<Tab>('waiting');
   const [filter, setFilter] = useState<string | null>(initialProject ?? null);
   const [query, setQuery] = useState('');
   const [order, setOrder] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
-  // The project list stays in view under the header while the inbox scrolls; it needs the header's height for that.
-  const headerRef = useRef<HTMLElement>(null);
-  const [headerHeight, setHeaderHeight] = useState(68);
-  useLayoutEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setHeaderHeight(el.offsetHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const [people, setPeople] = usePref<PeopleFilter>('inbox-people', 'anyone');
 
   // Agents keep working while you look at the inbox: refresh when the window comes back,
   // at most every 30 seconds.
@@ -44,17 +38,28 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
     };
   }, []);
 
-  const all = (inbox.value?.waiting ?? []).filter((w) => !w.ignored);
+  const me = inbox.value?.me ?? null;
+  const everyone = peopleOptions((inbox.value?.waiting ?? []).filter((w) => !w.ignored), me);
+  // The People filter narrows every list built from inbox items, the project counts included.
+  const all = (inbox.value?.waiting ?? []).filter((w) => !w.ignored && matchesPeople(w, people, me));
   const q = query.trim().toLowerCase();
-  const shown = (w: InboxItem) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName}`.toLowerCase().includes(q));
+  const shown = (w: InboxItem) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName}`.toLowerCase().includes(q)) && matchesPeople(w, people, me);
   const waiting = all.filter(shown);
   const ignored = (inbox.value?.waiting ?? []).filter((w) => w.ignored && shown(w));
-  const running = all.filter((w) => w.review?.status === 'sent-back');
+  const running = waiting.filter((w) => w.review?.status === 'sent-back');
   const unsent = waiting.filter((w) => w.review?.status !== 'sent-back');
   // The main process lists newest first.
   const ready = order === 'suggested' ? suggestedOrder(unsent) : unsent;
-  const done = (inbox.value?.done ?? []).filter((d) => d.decision?.result !== 'running');
   const names = new Map(projects.value?.map((p) => [p.id, p.name]));
+  const done = (inbox.value?.done ?? []).filter(
+    (d) => d.decision?.result !== 'running' && (!filter || d.projectId === filter) && (!q || `${d.title} ${d.branch} ${names.get(d.projectId) ?? ''}`.toLowerCase().includes(q))
+  );
+  const tabs: { id: Tab; label: string; count: number }[] = [
+    { id: 'waiting', label: 'Waiting for you', count: ready.length },
+    { id: 'sent', label: 'Sent back', count: running.length },
+    { id: 'reviewed', label: 'Reviewed this week', count: done.length },
+    { id: 'ignored', label: 'Ignored', count: ignored.length },
+  ];
 
   // The list changes right away; the scan after it brings in the size and flags of a branch you bring back.
   const ignore = async (w: InboxItem, on: boolean) => {
@@ -65,7 +70,7 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
 
   return (
     <div className="page">
-      <header className="topbar" ref={headerRef}>
+      <header className="topbar">
         <Brand onClick={() => inbox.reload()} />
         <label htmlFor="search" className="sr-only">
           Search reviews
@@ -76,10 +81,14 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
           {inbox.loading && inbox.value && <span className="spinner" />}
           Watching {plural(projects.value?.length ?? 0, 'project')}
         </span>
+        <button type="button" className="icon-btn" aria-label="Settings" title="Settings" onClick={() => go({ name: 'settings' })} style={{ width: 34, height: 34, opacity: 1, flex: 'none' }}>
+          <GearIcon size={18} />
+        </button>
       </header>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 20, padding: '20px 24px' }}>
-        <nav aria-label="Projects" style={{ flex: '1 1 240px', maxWidth: 280, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: headerHeight + 20, maxHeight: `calc(100vh - ${headerHeight + 40}px)`, overflowY: 'auto' }}>
+        {/* The project list stays in view under the header while the inbox scrolls. */}
+        <nav aria-label="Projects" style={{ flex: '1 1 240px', maxWidth: 280, display: 'flex', flexDirection: 'column', gap: 6, position: 'sticky', top: 'calc(var(--topbar-h) + 20px)', maxHeight: 'calc(100vh - var(--topbar-h) - 40px)', overflowY: 'auto' }}>
           <h2 className="label" style={{ marginBottom: 6 }}>
             Projects
           </h2>
@@ -100,14 +109,18 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
           </button>
         </nav>
 
-        <main style={{ flex: '999 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: 22, letterSpacing: '-0.01em' }}>Waiting for you</h1>
-              <span style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        <main style={{ flex: '999 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <h1 className="sr-only">Inbox</h1>
+          <Tabs tabs={tabs} current={tab} onChange={setTab} />
+          {inbox.error && <p className="error">{inbox.error}</p>}
+
+          <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {tab === 'waiting' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
                 <label className="sr-only" htmlFor="inbox-order">
                   Order
                 </label>
+                <PeopleSelect value={people} onChange={setPeople} everyone={everyone} />
                 <select id="inbox-order" className="field" value={order} onChange={(e) => setOrder(e.target.value as 'suggested' | 'newest')} style={{ height: 34, fontSize: 13, padding: '0 8px' }}>
                   <option value="suggested">What to review first</option>
                   <option value="newest">Newest first</option>
@@ -115,14 +128,17 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
                 <button type="button" className="btn" style={{ height: 34 }} onClick={() => go({ name: 'pick', projectId: filter ?? undefined })}>
                   Review a branch…
                 </button>
-              </span>
-            </div>
+              </div>
+            )}
             {!inbox.value && inbox.loading && <Loading label="Checking agent branches…" />}
-            {inbox.error && <p className="error">{inbox.error}</p>}
-            {inbox.value && ready.length === 0 && (
-              <div className="card" style={{ padding: '18px 20px', fontSize: 14, color: 'var(--muted)', lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {q ? (
-                  'Nothing matches.'
+
+            {tab === 'waiting' && inbox.value && ready.length === 0 && (
+              <div className="card" style={emptyCard}>
+                {q || people !== 'anyone' ? (
+                  <>
+                    <span>Nothing matches.</span>
+                    {hidesLocal(people) && <span>{hidesLocal(people)}</span>}
+                  </>
                 ) : (
                   <>
                     <span>Nothing waiting.</span>
@@ -136,61 +152,84 @@ export function Home({ go, initialProject }: { go: Go; initialProject?: string }
                 )}
               </div>
             )}
-            {ready.map((w, i) => (
-              <InboxCard key={`${w.projectId}:${w.branch}`} item={w} go={go} first={i === 0} onIgnore={() => ignore(w, true)} />
-            ))}
-          </section>
+            {tab === 'waiting' && ready.map((w, i) => <InboxCard key={`${w.projectId}:${w.branch}`} item={w} me={me} go={go} first={i === 0} onIgnore={() => ignore(w, true)} />)}
 
-          {running.length > 0 && (
-            <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <h2 style={{ fontSize: 15 }}>Sent back to the agent</h2>
-              {running.map((w) => (
-                <RunningRow key={`${w.projectId}:${w.branch}`} item={w} state={inbox.value!.done.find((d) => d.projectId === w.projectId && d.branch === w.branch)} go={go} />
-              ))}
-            </section>
-          )}
+            {(tab === 'sent' || tab === 'ignored') && people !== 'anyone' && (
+              <p style={{ fontSize: 13, color: 'var(--muted)' }}>
+                Only {peopleLabel(people).toLowerCase()}, from the People filter on Waiting for you.{' '}
+                <button type="button" className="link" style={{ fontSize: 13 }} onClick={() => setPeople('anyone')}>
+                  Show anyone
+                </button>
+              </p>
+            )}
+            {tab === 'sent' && inbox.value && running.length === 0 && <div className="card" style={emptyCard}>{q ? 'Nothing matches.' : 'Nothing is with an agent right now. Reviews you send back show here while the agent works on them.'}</div>}
+            {tab === 'sent' &&
+              running.map((w) => <RunningRow key={`${w.projectId}:${w.branch}`} item={w} state={inbox.value!.done.find((d) => d.projectId === w.projectId && d.branch === w.branch)} go={go} />)}
 
-          {done.length > 0 && (
-            <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <h2 style={{ fontSize: 15 }}>Reviewed this week</h2>
+            {tab === 'reviewed' && inbox.value && done.length === 0 && <div className="card" style={emptyCard}>{q ? 'Nothing matches.' : 'Nothing reviewed in the last seven days.'}</div>}
+            {tab === 'reviewed' && done.length > 0 && (
               <div className="card" style={{ overflow: 'hidden' }}>
                 {done.map((d) => (
                   <div key={d.id} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--divider)', fontSize: 14 }}>
                     <span style={{ fontWeight: 500, flex: '1 1 260px' }}>{d.title}</span>
                     <span style={{ color: 'var(--muted)', fontSize: 13 }}>{names.get(d.projectId) ?? ''}</span>
                     <ResultPill state={d} />
+                    <GitHubLink url={githubLink(d.decision)} />
                     <span style={{ color: 'var(--muted)', fontSize: 13, width: 80, textAlign: 'right' }}>{timeAgo(d.decision!.at)}</span>
                   </div>
                 ))}
               </div>
-            </section>
-          )}
+            )}
 
-          {ignored.length > 0 && (
-            <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <button type="button" className="link" aria-expanded={showIgnored} onClick={() => setShowIgnored((x) => !x)} style={{ fontSize: 15, fontWeight: 600, textAlign: 'left', color: 'var(--text)' }}>
-                {showIgnored ? '▾' : '▸'} Ignored ({ignored.length})
-              </button>
-              {showIgnored && (
-                <div className="card" style={{ overflow: 'hidden' }}>
-                  {ignored.map((w) => (
-                    <div key={`${w.projectId}:${w.branch}`} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', padding: '10px 18px', borderBottom: '1px solid var(--divider)', fontSize: 14 }}>
-                      <span style={{ fontWeight: 500, flex: '1 1 260px' }}>{w.title}</span>
-                      <span style={{ color: 'var(--muted)', fontSize: 13 }}>
-                        {w.projectName}
-                        {w.pr && ` · PR #${w.pr.number}`}
-                      </span>
-                      <button type="button" className="btn" style={{ height: 32 }} onClick={() => ignore(w, false)}>
-                        Bring back
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
+            {tab === 'ignored' && inbox.value && ignored.length === 0 && <div className="card" style={emptyCard}>{q ? 'Nothing matches.' : 'Nothing ignored. Ignore takes a branch out of Waiting for you, e.g. when someone else reviews it on GitHub.'}</div>}
+            {tab === 'ignored' && ignored.length > 0 && (
+              <div className="card" style={{ overflow: 'hidden' }}>
+                {ignored.map((w) => (
+                  <div key={`${w.projectId}:${w.branch}`} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', padding: '10px 18px', borderBottom: '1px solid var(--divider)', fontSize: 14 }}>
+                    <span style={{ fontWeight: 500, flex: '1 1 260px' }}>{w.title}</span>
+                    <span style={{ color: 'var(--muted)', fontSize: 13 }}>
+                      {w.projectName}
+                      {w.pr && ` · PR #${w.pr.number}`}
+                    </span>
+                    <button type="button" className="btn" style={{ height: 32 }} onClick={() => ignore(w, false)}>
+                      Bring back
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </main>
       </div>
+    </div>
+  );
+}
+
+type Tab = 'waiting' | 'sent' | 'reviewed' | 'ignored';
+
+const emptyCard: React.CSSProperties = { padding: '18px 20px', fontSize: 14, color: 'var(--muted)', lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: 8 };
+
+/** The inbox's lists as tabs. Arrow keys, Home and End move between them, like any tab list. */
+function Tabs({ tabs, current, onChange }: { tabs: { id: Tab; label: string; count: number }[]; current: Tab; onChange: (t: Tab) => void }) {
+  const onKey = (e: React.KeyboardEvent) => {
+    const i = tabs.findIndex((t) => t.id === current);
+    const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    const next = tabs[(to + tabs.length) % tabs.length];
+    onChange(next.id);
+    document.getElementById(`tab-${next.id}`)?.focus();
+  };
+  return (
+    <div role="tablist" aria-label="Inbox" className="tabs" onKeyDown={onKey}>
+      {tabs.map((t) => (
+        <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={t.id === current} aria-controls={`panel-${t.id}`} tabIndex={t.id === current ? 0 : -1} className="tab" onClick={() => onChange(t.id)}>
+          {t.label}
+          <span className={`pill ${t.id === current ? 'accent' : 'neutral'}`} style={{ border: 0 }}>
+            {t.count}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -258,17 +297,15 @@ function ProjectLink({ name, sub, count, active, strong, onClick, onSettings }: 
     </button>
     {onSettings && (
       <button type="button" aria-label={`Settings for ${name}`} title="Project settings" onClick={onSettings} className="icon-btn" style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)' }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
-        </svg>
+        <GearIcon />
       </button>
     )}
     </div>
   );
 }
 
-function InboxCard({ item: w, go, first, onIgnore }: { item: InboxItem; go: Go; first: boolean; onIgnore: () => void }) {
+function InboxCard({ item: w, me, go, first, onIgnore }: { item: InboxItem; me: string | null; go: Go; first: boolean; onIgnore: () => void }) {
+  const who = peopleLine(w, me);
   const big = !w.error && tooBig(w);
   const inProgress = !!w.review && w.review.reviewedSteps > 0 && w.review.status === 'open';
   const tag = w.updatedSinceReview ? { text: 'Updated since your review', cls: 'medium' } : inProgress ? { text: 'In progress', cls: 'low' } : { text: 'New', cls: 'accent' };
@@ -317,6 +354,7 @@ function InboxCard({ item: w, go, first, onIgnore }: { item: InboxItem; go: Go; 
           {w.updatedAt && <span>{timeAgo(w.updatedAt)}</span>}
           {w.error && <span className="error">{w.error}</span>}
         </div>
+        {who && <p style={{ fontSize: 13, color: 'var(--muted)', overflowWrap: 'anywhere' }}>{who}</p>}
       </div>
       <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <button type="button" className="btn" style={{ border: 0, color: 'var(--muted)' }} title="Take it out of your inbox, e.g. when someone else reviews it on GitHub. You can bring it back from Ignored." onClick={onIgnore}>
@@ -346,6 +384,56 @@ function RunningRow({ item: w, state, go }: { item: InboxItem; state?: ReviewSta
         </button>
       )}
     </div>
+  );
+}
+
+const ROLE_LABEL = { assigned: 'Assigned to', requested: 'Review requested from', opened: 'Opened by' } as const;
+
+/** "Assigned to me", "Opened by alice": the filter as words. */
+function peopleLabel(f: PeopleFilter) {
+  if (f === 'anyone') return 'Anyone';
+  const [role, ...who] = f.split(':') as [keyof typeof ROLE_LABEL, ...string[]];
+  const name = who.join(':');
+  return `${ROLE_LABEL[role]} ${name === 'me' ? 'me' : name}`;
+}
+
+/** Anyone, or one person in one role. Each group has Me first, then everyone on the inbox's items. */
+function PeopleSelect({ value, onChange, everyone }: { value: PeopleFilter; onChange: (v: PeopleFilter) => void; everyone: Record<keyof typeof ROLE_LABEL, string[]> }) {
+  const roles = Object.keys(ROLE_LABEL) as (keyof typeof ROLE_LABEL)[];
+  // A remembered person who isn't on any item today still shows, so the select never looks unfiltered.
+  const known = value === 'anyone' || value.endsWith(':me') || roles.some((r) => everyone[r].some((p) => `${r}:${p}` === value));
+  return (
+    <>
+      <label className="sr-only" htmlFor="inbox-people">
+        People
+      </label>
+      <select id="inbox-people" className="field" value={value} onChange={(e) => onChange(e.target.value as PeopleFilter)} style={{ height: 34, fontSize: 13, padding: '0 8px', maxWidth: 260 }}>
+        <option value="anyone">Anyone</option>
+        {!known && <option value={value}>{peopleLabel(value)}</option>}
+        {roles.map((r) => (
+          <optgroup key={r} label={`${ROLE_LABEL[r]}…`}>
+            {['me', ...everyone[r]].map((p) => (
+              <option key={p} value={`${r}:${p}`}>
+                {peopleLabel(`${r}:${p}`)}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </>
+  );
+}
+
+/** Where the decision went on GitHub. Keeps its width when there's none, so the dates line up. */
+function GitHubLink({ url }: { url: string | null }) {
+  return (
+    <span style={{ width: 128, display: 'flex', justifyContent: 'flex-end' }}>
+      {url && (
+        <button type="button" className="pill neutral" style={{ border: 0, cursor: 'pointer', font: 'inherit', fontSize: 12, fontWeight: 600 }} title={url} onClick={() => window.api.openExternal(url)}>
+          View on GitHub ↗
+        </button>
+      )}
+    </span>
   );
 }
 

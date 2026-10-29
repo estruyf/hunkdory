@@ -1,5 +1,5 @@
-// Reviewer writes a walkthrough itself for branches that don't have one, with a headless Claude Code run.
-// The result is kept in Reviewer's own data folder, never in the repository.
+// Hunkdory writes a walkthrough itself for branches that don't have one, with a headless Claude Code run.
+// The result is kept in Hunkdory's own data folder, never in the repository.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,7 +10,7 @@ import type { Projects } from './projects.ts';
 import { shellEnv, which } from './shellEnv.ts';
 import type { HunkView, ReviewData, WalkthroughJob } from '../shared/types.ts';
 
-/** Walkthroughs Reviewer wrote, one JSON file per branch. */
+/** Walkthroughs Hunkdory wrote, one JSON file per branch. */
 export class GeneratedWalkthroughs {
   private dir: string;
 
@@ -256,7 +256,7 @@ export class Writer {
   }
 
   /**
-   * A teammate's Reviewer may have shared a walkthrough on the PR already. If it was written for
+   * A teammate's Hunkdory may have shared a walkthrough on the PR already. If it was written for
    * this base and still covers every change, use it instead of writing a new one.
    */
   private async useShared(key: string, projectId: string, branch: string, baseSha: string): Promise<boolean> {
@@ -278,12 +278,12 @@ export class Writer {
     return true;
   }
 
-  /** Posts Reviewer's walkthrough on the PR, so teammates' Reviewers use it instead of writing their own. */
+  /** Posts Hunkdory's walkthrough on the PR, so teammates' Hunkdory apps use it instead of writing their own. */
   async share(projectId: string, branch: string): Promise<{ url: string }> {
     const data = await this.projects.review(projectId, branch);
-    if (data.walkthrough !== 'reviewer') throw new Error('Only a walkthrough Reviewer wrote can be shared from here.');
+    if (data.walkthrough !== 'reviewer') throw new Error('Only a walkthrough Hunkdory wrote can be shared from here.');
     const text = this.generated.read(projectId, branch);
-    if (!text) throw new Error('Reviewer has no walkthrough for this branch yet.');
+    if (!text) throw new Error('Hunkdory has no walkthrough for this branch yet.');
     const { shared: _s, ...wt } = JSON.parse(text);
     const { project, pr, repo } = await this.projects.pullRequest(projectId, branch);
     const chapters = data.steps.filter((s) => s.source === 'chapter').map((s) => ({ title: s.title, why: s.why, checks: s.checks, outsideTask: s.outsideTask, files: s.files }));

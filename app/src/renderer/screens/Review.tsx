@@ -72,7 +72,7 @@ export function AgentTests({ data }: { data: ReviewData }) {
 export function whyFallback(step: Step, data: ReviewData) {
   if (step.source === 'skeleton') return 'No walkthrough on this branch, so there is no explanation. This step shows every change to this file.';
   if (data.walkthrough === 'agent') return 'The agent didn’t explain this step.';
-  if (data.walkthrough === 'reviewer') return 'Reviewer’s walkthrough has no explanation for this step.';
+  if (data.walkthrough === 'reviewer') return 'Hunkdory’s walkthrough has no explanation for this step.';
   return '';
 }
 

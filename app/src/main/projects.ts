@@ -7,11 +7,12 @@ import { Worker } from 'node:worker_threads';
 import createWtvWorker from './wtv-worker.ts?nodeWorker';
 import type { WtvJob, WtvOutput } from './wtv-worker.ts';
 import * as g from './git.ts';
+import { pathKey } from './paths.ts';
 import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './sessions/claude.ts';
 import * as gh from './github.ts';
 import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, withCheckoutFallback, type BranchSessions } from './match.ts';
 import { attention, buildSteps, estimateMinutes } from './steps.ts';
-import type { Store } from './store.ts';
+import { projectName, withProjectName, type Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
 import type { Summaries, Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
@@ -101,16 +102,18 @@ export class Projects {
   }
 
   foundOnThisMac(): FoundFolder[] {
-    const known = new Set(this.store.projects().map((p) => p.path));
+    // Saved paths come from git, session folders from wherever the agent ran: compare them as folders, not strings.
+    const known = new Set(this.store.projects().map((p) => pathKey(p.path)));
     const byPath = new Map<string, FoundFolder & { at: number }>();
     for (const f of scanSessionFolders()) {
       // Worktree sessions count towards their repo.
       const path = f.cwd.replace(/\/\.claude\/worktrees\/[^/]+.*$/, '');
-      if (known.has(path) || !existsSync(join(path, '.git'))) continue;
-      const prev = byPath.get(path);
-      byPath.set(path, {
+      const key = pathKey(path);
+      if (known.has(key) || !existsSync(join(path, '.git'))) continue;
+      const prev = byPath.get(key);
+      byPath.set(key, {
         name: basename(path),
-        path,
+        path: prev?.path ?? path,
         sessions: (prev?.sessions ?? 0) + f.sessions,
         at: Math.max(prev?.at ?? 0, f.lastActive),
         lastActive: new Date(Math.max(prev?.at ?? 0, f.lastActive)).toISOString(),
@@ -132,12 +135,13 @@ export class Projects {
   }
 
   async addProject(input: ProjectInput): Promise<Project> {
+    // Reviews, ignored and tracked branches hang off the id, so the name is free to change later.
     const check = await this.checkFolder(input.path);
     if (!check.root) throw new Error(check.error ?? 'Not a git repository');
     await this.validate(check.root, input);
     const project: Project = {
       id: randomUUID(),
-      name: basename(check.root),
+      name: projectName(input.name, check.root),
       path: check.root,
       baseBranch: input.baseBranch,
       remote: check.remote,
@@ -153,10 +157,12 @@ export class Projects {
   async updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project> {
     const project = this.store.project(id);
     await this.validate(project.path, input);
-    const updated: Project = { ...project, baseBranch: input.baseBranch, watch: input.watch, github: input.github, writeWalkthroughs: input.writeWalkthroughs ?? project.writeWalkthroughs, remote: await g.remoteUrl(project.path) };
+    const updated: Project = { ...withProjectName(project, input.name), baseBranch: input.baseBranch, watch: input.watch, github: input.github, writeWalkthroughs: input.writeWalkthroughs ?? project.writeWalkthroughs, remote: await g.remoteUrl(project.path) };
     this.store.addProject(updated);
-    // Bases and watch rules change what every review looks like.
+    // Bases and watch rules change what every review looks like, and the name is on every one.
     for (const k of [...this.cache.keys()]) if (k.startsWith(`${id}::`)) this.cache.delete(k);
+    // A scan that started before this would hand back the old name.
+    this.scanning = null;
     return updated;
   }
 
@@ -372,7 +378,7 @@ export class Projects {
     return best ?? { ref: candidates.find(Boolean)!, ahead: 0 };
   }
 
-  /** The branch's own walkthrough wins. Without one, the walkthrough Reviewer wrote, if any. */
+  /** The branch's own walkthrough wins. Without one, the walkthrough Hunkdory wrote, if any. */
   private async readWalkthrough(d: Discovered, root: string, baseSha: string): Promise<{ value: unknown | null; text: string; source: Exclude<WalkthroughSource, 'skeleton'>; error?: string }> {
     let text: string | null = null;
     if (d.branch.checkout.kind !== 'none') {
@@ -383,7 +389,7 @@ export class Projects {
     }
     const source = text ? 'agent' : 'reviewer';
     if (!text) {
-      // Reviewer's own walkthrough only counts for the base it was written against: a new base is a different diff.
+      // Hunkdory's own walkthrough only counts for the base it was written against: a new base is a different diff.
       const mine = this.generated.read(d.branch.projectId, d.branch.name);
       try {
         if (mine && JSON.parse(mine).base === baseSha) text = mine;
@@ -392,10 +398,10 @@ export class Projects {
     if (!text) return { value: null, text: '', source };
     try {
       const value = JSON.parse(text);
-      if (!Array.isArray(value?.chapters)) return { value: null, text, source, error: 'The walkthrough has no "chapters" list, so Reviewer split the change by file.' };
+      if (!Array.isArray(value?.chapters)) return { value: null, text, source, error: 'The walkthrough has no "chapters" list, so Hunkdory split the change by file.' };
       return { value, text, source };
     } catch (e) {
-      return { value: null, text, source, error: `The walkthrough isn't valid JSON (${(e as Error).message}), so Reviewer split the change by file.` };
+      return { value: null, text, source, error: `The walkthrough isn't valid JSON (${(e as Error).message}), so Hunkdory split the change by file.` };
     }
   }
 
@@ -441,7 +447,7 @@ export class Projects {
     return this.locate(project, d);
   }
 
-  /** The PR stack this branch is in, with the branch name Reviewer opens each PR's review by. */
+  /** The PR stack this branch is in, with the branch name Hunkdory opens each PR's review by. */
   private async stack(project: Project, d: Discovered): Promise<ReviewData['stack']> {
     const pr = d.branch.pr;
     if (!pr || !project.github) return null;
@@ -461,7 +467,7 @@ export class Projects {
     return { base: st.base, prs: entries };
   }
 
-  /** Part of a file on one side of the diff: the base, or the branch as Reviewer shows it (checkout or ref). */
+  /** Part of a file on one side of the diff: the base, or the branch as Hunkdory shows it (checkout or ref). */
   async fileLines(projectId: string, branch: string, path: string, side: 'old' | 'new', from: number, to: number): Promise<{ lines: string[]; total: number }> {
     const { project, d } = await this.find(projectId, branch);
     const at = await this.locate(project, d);
@@ -483,7 +489,7 @@ export class Projects {
   }
 
   /**
-   * Every place some text appears in the branch as Reviewer shows it: the whole repo, not only the diff.
+   * Every place some text appears in the branch as Hunkdory shows it: the whole repo, not only the diff.
    * Plain text, not a pattern. All lower case matches any case.
    */
   async searchCode(projectId: string, branch: string, query: string): Promise<CodeSearchResult> {
@@ -588,7 +594,7 @@ export class Projects {
     const promptTitle = firstLine && firstLine.length > 90 ? `${firstLine.slice(0, 87)}…` : firstLine;
     const wtTitle = (wt.value as { title?: unknown } | null)?.title;
     const shortTitle = typeof wtTitle === 'string' && wtTitle.trim() ? wtTitle.trim() : null;
-    // A title the author gave wins. Reviewer's own comes after the PR, session and commit-free fallbacks;
+    // A title the author gave wins. Hunkdory's own comes after the PR, session and commit-free fallbacks;
     // its one-sentence intent is too long for a title, so that's a last resort.
     const authorTitle = source === 'agent' ? (shortTitle ?? intent) : null;
     const reviewerTitle = source === 'reviewer' ? shortTitle : null;
@@ -638,10 +644,10 @@ export class Projects {
     return data;
   }
 
-  private scanning: Promise<{ items: InboxItem[]; scans: ProjectScan[] }> | null = null;
+  private scanning: Promise<{ items: InboxItem[]; scans: ProjectScan[]; me: string | null }> | null = null;
 
   /** Two screens asking at once share one scan. */
-  inbox(refresh = false): Promise<{ items: InboxItem[]; scans: ProjectScan[] }> {
+  inbox(refresh = false): Promise<{ items: InboxItem[]; scans: ProjectScan[]; me: string | null }> {
     if (this.scanning && !refresh) return this.scanning;
     const run = this.scanInbox(refresh).finally(() => {
       if (this.scanning === run) this.scanning = null;
@@ -650,19 +656,24 @@ export class Projects {
     return run;
   }
 
-  private async scanInbox(refresh: boolean): Promise<{ items: InboxItem[]; scans: ProjectScan[] }> {
+  private async scanInbox(refresh: boolean): Promise<{ items: InboxItem[]; scans: ProjectScan[]; me: string | null }> {
     const listed = new Set<string>();
+    // Who "you" are on GitHub, for the People filter. Asked once per run, alongside the scan.
+    const linked = this.store.projects().find((p) => p.github);
+    const me = linked ? gh.login(linked.path).catch(() => null) : Promise.resolve(null);
     // Projects are read side by side: most of the time goes to waiting on git and gh.
-    const per = await Promise.all(this.store.projects().map((p) => this.projectInbox(p, refresh, listed)));
+    const per = await Promise.all(this.store.projects().map((p) => this.projectInbox(p, refresh, listed, me)));
     this.summaries.keepOnly(listed);
     const items = per.flatMap((r) => r.items);
     items.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-    return { items, scans: per.map((r) => r.scan) };
+    return { items, scans: per.map((r) => r.scan), me: await me };
   }
 
-  private async projectInbox(project: Project, refresh: boolean, listed: Set<string>): Promise<{ items: InboxItem[]; scan: ProjectScan }> {
+  private async projectInbox(project: Project, refresh: boolean, listed: Set<string>, me: Promise<string | null>): Promise<{ items: InboxItem[]; scan: ProjectScan }> {
     let found: Discovered[];
     let scan: ProjectScan;
+    // You, as this repo's commits know you: local branches are matched on email first, then name.
+    const gitUser = Promise.all([g.tryGit(['config', 'user.email'], project.path), g.tryGit(['config', 'user.name'], project.path)]).then(([email, name]) => ({ email: email?.trim().toLowerCase() || null, name: name?.trim() || null }));
     try {
       ({ items: found, scan } = await this.discover(project));
     } catch (e) {
@@ -686,6 +697,12 @@ export class Projects {
         const who = d.match ? `Claude Code${d.match.sessions.length > 1 ? ` · ${d.match.sessions.length} sessions` : ''}` : pr?.copilot ? 'GitHub Copilot' : pr ? `by ${pr.author}` : 'No agent session';
         const id = `${project.id}::${d.branch.name}`;
         listed.add(id);
+        // A local branch is "opened" by whoever made its newest commit; one git call also gives its date.
+        const [authorName, authorEmail, committed] = pr ? [] : ((await g.tryGit(['log', '-1', '--format=%an%x00%ae%x00%cI', d.branch.headRef], project.path))?.trim().split('\0') ?? []);
+        const you = await gitUser;
+        const prAuthor = pr && pr.author !== 'unknown' ? pr.author : null;
+        const openedBy = pr ? prAuthor : authorName || null;
+        const openedByYou = pr ? !!prAuthor && prAuthor === (await me) : (!!you.email && authorEmail?.toLowerCase() === you.email) || (!!you.name && authorName === you.name);
         const base: InboxItem = {
           projectId: project.id,
           projectName: project.name,
@@ -698,9 +715,11 @@ export class Projects {
           steps: 0,
           minutes: 0,
           flags: [],
-          updatedAt: pr?.updatedAt ?? d.match?.lastSeen ?? ((await g.tryGit(['log', '-1', '--format=%cI', d.branch.headRef], project.path))?.trim() || null),
+          updatedAt: pr?.updatedAt ?? d.match?.lastSeen ?? (committed || null),
           walkthrough: 'skeleton',
-          pr: pr ? { number: pr.number, isDraft: pr.isDraft, url: pr.url } : null,
+          pr: pr ? { number: pr.number, isDraft: pr.isDraft, url: pr.url, author: prAuthor, assignees: pr.assignees, requestedReviewers: pr.requestedReviewers, reviews: pr.reviews } : null,
+          openedBy,
+          openedByYou,
           checks: pr?.checks ?? [],
           updatedSinceReview,
           buildsOn: (() => {

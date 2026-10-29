@@ -1,121 +1,379 @@
 {
   "version": 1,
-  "title": "A faster, more compact inbox, Ignore, and step comments on the code",
-  "intent": "Four inbox fixes: Done loses its Close window button, going back to the inbox shows the last list at once instead of a multi-second spinner, inbox cards drop the agent line and the progress/flag column, and you can ignore a review someone else picks up on GitHub. Step comments posted to GitHub now sit on the step's code as a line range, like review bots do, instead of in the review text.",
-  "base": "dec7ab2abec030d93de1c9ccbfbe8d3a9ed72980",
+  "title": "Hunkdory: the rename, settings, inbox tabs and PR people",
+  "intent": "Carry out docs/plans/2026-10-29-settings-tabs-people.md on top of the uncommitted rename from Reviewer: capitalise the brand, keep the header one height, add a Settings page with themes, turn Home into tabs, link reviewed rows to GitHub, show who's on a PR with a People filter, rename projects, and offer repos found on this Mac when adding one.",
+  "base": "5330ac3e5d61e8eb0f71aa5d01d881151f11b0bb",
   "chapters": [
     {
-      "title": "Done has no Close window button",
-      "why": "The window hides to the tray anyway; Back to inbox is the only way on.",
-      "hunks": [
-        "h:f7dc451f1e",
-        "h:87a46b4aa5"
-      ]
-    },
-    {
-      "title": "The inbox shows the last list right away",
-      "why": "Home remounted with no value and showed 'Checking agent branches…' for the whole scan. useInbox keeps the last result in the renderer, shows it at once and refreshes behind the header spinner. Review state changes (and Done's result) are applied to that remembered list, so a card's tag and button are right before the scan lands; finished reviews drop out.",
-      "risk": "Until the new scan lands, cards can be a few seconds stale, e.g. new commits on a branch.",
+      "title": "The app is called Hunkdory",
+      "why": "Every sentence, prompt, commit message, error and GitHub comment that names the app says Hunkdory, and so do productName, the window title, <title>, the tray and the Brand. Identifiers keep their old values so existing data and other people's PR comments still match: the package name, REVIEWER_USER_DATA, refs/reviewer/pr, the reviewer:walkthrough marker and generatedBy.tool 'reviewer'. Code comments follow the new name too.",
       "checks": [
-        "A scan that started before a change (an ignore) is dropped, not shown over it."
+        "Strings compared with === 'reviewer' (the walkthrough source) are unchanged."
       ],
       "hunks": [
-        "h:47a625b41e",
-        "h:0c9f399981",
-        "h:982ba39cbf",
-        "h:1cad41b5b5",
-        "h:48ae197803",
-        "h:0bda8c2b20",
-        "h:11fb25df0d",
-        "h:94e747892f",
-        "h:9d4a40f33f"
+        "h:5a16a11e9a",
+        "h:5a16a11e9a-1",
+        "h:d752d71927",
+        "h:7a1c8afbf2",
+        "h:988ca28ea7",
+        "h:98186d900f",
+        "h:988ca28ea7-1",
+        "h:80731315d8",
+        "h:990ff0aa44",
+        "h:2b9dfc52ad",
+        "h:91500af42a",
+        "h:d64af30bc2",
+        "h:9cbfc56c6f",
+        "h:4db79a5496",
+        "h:d5519dc474",
+        "h:debd1b8b5f",
+        "h:3868b55b67",
+        "h:f733c2e967",
+        "h:62a8452bfc",
+        "h:f4a4e2a6d9",
+        "h:725e97b5b8",
+        "h:c472d7ecb8",
+        "h:aac2bc15fb",
+        "h:fd03ab0270",
+        "h:089cd6d352",
+        "h:107b14b45d",
+        "h:52151ad88b",
+        "h:efc7bc28a6",
+        "h:5fc59c0b56",
+        "h:be6c45bdfd",
+        "h:cbbc5ecf86",
+        "h:47963c861d",
+        "h:2dfecf54d7",
+        "h:2980d0bc53",
+        "h:ef661f2741",
+        "h:3d1c3e66c6",
+        "h:c155a36ebb",
+        "h:9b326b1e7c",
+        "h:16cd31c2e1",
+        "h:3274e63b91",
+        "h:2ebd93e76e",
+        "h:847bd6b4de",
+        "h:b75c8fcbb0",
+        "h:75b8a372f3",
+        "h:bda388a1f4",
+        "h:4d27024c45",
+        "h:b1c18fc7d2",
+        "h:517ebe1dcf",
+        "h:fbd0a6d817",
+        "h:7c115a24a1",
+        "h:0e2a5b7aeb",
+        "h:61c35b4aba",
+        "h:9a6233b63e",
+        "h:230c1010ec",
+        "h:e10ab265c1",
+        "h:efe1fabc95",
+        "h:8257544e68",
+        "h:6a4b445c37",
+        "h:5c959e7f3e",
+        "h:c08b640670",
+        "h:1253051f45",
+        "h:ab628c5081",
+        "h:0c8120c180",
+        "h:e5fdd14013",
+        "h:d55f083b43",
+        "h:3f662d9286",
+        "h:e5c44b8d2f",
+        "h:ea16656021",
+        "h:82835a9c18",
+        "h:447d579ae1",
+        "h:daf367d56f",
+        "h:92518c2cb9",
+        "h:0ae83fca8a",
+        "h:e079a955f7",
+        "h:2febc74e74",
+        "h:224d9cc611"
       ]
     },
     {
-      "title": "The scan itself runs side by side and is shared",
-      "why": "Projects and the branches in each are now read with Promise.all instead of one after the other, and two callers asking at once (Home and Done) share one in-flight scan. Ignored branches skip the diff and summary entirely, but stay in the summary cache so bringing one back is cheap. The per-item logic is unchanged apart from that.",
-      "risk": "More git processes run at once on a project with many branches.",
+      "title": "The data folder moves with the name",
+      "why": "productName names the data folder, so it is now .../Hunkdory. The old Reviewer folder, or the lowercase hunkdory one from before the capital, is moved over once if the new one doesn't exist. On a case-insensitive volume (the macOS default) hunkdory and Hunkdory are the same folder, so nothing moves.",
+      "risk": "On a case-sensitive volume with both Reviewer and hunkdory present, Reviewer wins and hunkdory is left behind.",
       "hunks": [
-        "h:de5f6b67be",
-        "h:fb806f7736",
-        "h:4bfbfefa03",
-        "h:3a6a30c3c0",
-        "h:bef8c975dd",
-        "h:584cee1499",
-        "h:91e6b869e3",
-        "h:53fa7ad9b1",
-        "h:40c96fddc7",
-        "h:ab69b01a23",
-        "h:2ce639f455"
+        "h:5feb79afc8",
+        "h:76afc7d995"
       ]
     },
     {
-      "title": "Ignore a review, and bring it back",
-      "why": "Each card has Ignore. The branch goes on the project's ignored list in the store, leaves Waiting for you, the project counts and Done's Next up, and shows in a collapsed Ignored section with Bring back. Picking it again with Review a branch also brings it back, and the branch picker no longer calls an ignored branch 'In your inbox'. Ignoring resets the shared scan so the reload after it can't return the old list.",
+      "title": "A new app icon, in the dock, the tray and the brand",
+      "why": "The magnifier made way for three diff lines and a check on a blue tile: icon files in app/resources, the dock and window icon in dev, the tray template image redrawn with the same geometry, and the Logo component.",
+      "hunks": [
+        "h:db2ae91033",
+        "h:61a86646f7",
+        "h:830a6ba795",
+        "h:8934976cf1",
+        "h:2e00f79f72",
+        "h:00a850ceaf",
+        "h:9dfc920f99",
+        "h:4938345f07",
+        "h:a8875d1e0b",
+        "h:de9082814a",
+        "h:afea7c7439"
+      ]
+    },
+    {
+      "title": "The Mac window has no system title bar",
+      "why": "The window uses hiddenInset, so the traffic lights sit inside the app’s own top bar. The preload tells the renderer the platform and full-screen changes; main.tsx sets .mac and .full-screen on <html>, and the CSS makes the top bar draggable with room for the traffic lights. A drag strip covers the moment before the first screen draws.",
+      "hunks": [
+        "h:050adf17aa",
+        "h:e5d625ee97",
+        "h:2fa30ed330",
+        "h:4238a6c784",
+        "h:51c7dbc76c",
+        "h:e2b3b4ff02"
+      ]
+    },
+    {
+      "title": "The top bar is one height on every screen",
+      "why": "The header jumped between screens: Home had a 38px search field, review screens a second line, and Plan and Walkthrough their own padding. Now .topbar is var(--topbar-h) (64px) tall with nowrap and one padding, Plan and Walkthrough lose their overrides, and Welcome and Done get the same bar. The second line under review crumbs (.topbar-sub) and long crumbs cut off with an ellipsis instead of growing the bar. Home’s sticky project list uses the variable instead of measuring the header with a ResizeObserver.",
+      "risk": "Below 1100px the brand shows only the logo, the / hint leaves Search code and the gaps narrow, so the Walkthrough bar fits at the 960px minimum.",
       "checks": [
-        "It stays ignored when the PR gets new commits, until you bring it back."
+        "The review title crumb keeps 4em and gives way first; the current crumb never shrinks."
       ],
       "hunks": [
-        "h:48ed915386",
-        "h:51129a19ee",
-        "h:27098392ed",
-        "h:af32ebbc0e",
-        "h:16b398df91",
-        "h:68b462acaf",
-        "h:cc28e3fe1d",
-        "h:77c21e9820",
-        "h:30aa5ed619",
-        "h:6032da4858",
-        "h:aefdef7e00",
-        "h:211a678d1c",
-        "h:cbc8ffe5b4",
-        "h:df624b4dd1",
-        "h:d3d9abe9e8"
+        "h:d85e303c80",
+        "h:d64a85fc4f",
+        "h:288f2f8794",
+        "h:428ecc1208",
+        "h:55c4b6a668",
+        "h:82de4660fb",
+        "h:8b1ac931bb",
+        "h:3a6e193543",
+        "h:493f91a52a",
+        "h:98e1a7d447",
+        "h:0f575920e6",
+        "h:442f83bbb2",
+        "h:61d231db73",
+        "h:faba6abaaa",
+        "h:c1f48681ae",
+        "h:7c255f7b84",
+        "h:cba3b6c8b7",
+        "h:e13cac2356",
+        "h:4fb4c676cd",
+        "h:b7bcf1c31e",
+        "h:ec49bf83e2",
+        "h:b4d32047d9",
+        "h:15e53bc174",
+        "h:798e74532b",
+        "h:9e40d4cac8",
+        "h:e8b9afa5a9",
+        "h:7a1897178e"
       ]
     },
     {
-      "title": "Compact inbox cards",
-      "why": "Cards drop the agent line (Claude Code · n sessions · PR #) and the right column with step progress, walkthrough source and the first flag. The In progress tag and the PR pill already say most of it. Padding and gaps are smaller, a load error moves into the meta row, and the main button has a fixed width so Ignore lines up.",
-      "risk": "Flags like 'n changes outside your request' are no longer on the card; they still shape the suggested order and show on the plan.",
+      "title": "Settings: a page of its own",
+      "why": "A gear at the right of the Home header opens a new settings route, with Inbox › Settings crumbs, so back and forward work as on any screen. The gear icon moved out of ProjectLink into GearIcon so both use it. The page has the theme and an About card: \"Hunkdory 0.1.0\" from app.getVersion(), the Electron, Chromium and Node versions and the macOS version, with a Copy button for bug reports.",
       "hunks": [
-        "h:1c1301a9bb",
-        "h:ca3d1bbe60",
-        "h:e6453bb329",
-        "h:4541de05f5",
-        "h:a4177a5966",
-        "h:9111d7ec8c",
-        "h:2c0b60cc6a"
+        "h:3ee3834503",
+        "h:cc66b0f2de",
+        "h:28df0b9c9e",
+        "h:80f24bbe80",
+        "h:40323216ef",
+        "h:a0b3389e36",
+        "h:622deab8ea",
+        "h:b7cae05713",
+        "h:5aecc83ab2",
+        "h:6d8a172ddb",
+        "h:b6d3a2a745",
+        "h:5feff2f931",
+        "h:f03f65a656"
       ]
     },
     {
-      "title": "Step comments go on the code on GitHub",
-      "why": "A comment on a whole step had no line, so it went into the review text with the step's file list. stepAnchor now picks the step's first block of changes GitHub has (not untracked or synthetic) and posts the comment on it as a range, start_line to line, capped at 30 lines; a step that only removes code gets the removed lines. The step title stays on top, with the step's other files. If GitHub rejects a range, postReview tries each as its last line before folding everything into the text as before. Without hunks, or with inline off (the PR moved on), step comments still go in the text.",
-      "risk": "GitHub returns 422 for the whole review if any one comment can't be placed, so one bad anchor sends every comment through the fallbacks.",
+      "title": "The theme is kept in the main process and applied before the window opens",
+      "why": "Light, Dark or System (the default) is saved in store.json under settings, not in localStorage. On launch, nativeTheme.themeSource is set from it before createWindow, and the window background comes from nativeTheme.shouldUseDarkColors, so a dark theme never flashes white. setTheme applies it at once and saves it; the window background follows when macOS switches. themeSource drives prefers-color-scheme in the page.",
       "checks": [
-        "The Finish copy says comments go on the code only when there are comments."
+        "setTheme rejects anything but system, light or dark.",
+        "Older stores without settings read as System."
       ],
       "hunks": [
-        "h:7b788ee37d",
-        "h:4636a60abc",
-        "h:a680f0ab91",
-        "h:336c15bb09",
-        "h:bd7589bbb0",
-        "h:834d7147ce",
-        "h:c3e0e9e9d8",
-        "h:470a043515",
-        "h:0b6af32624",
-        "h:225b4e3f27",
-        "h:955d9a3951",
-        "h:b54697a96b",
-        "h:fdc84ddfc4"
+        "h:be7dae3916",
+        "h:fcafc0d3fa",
+        "h:25c3e0c99e",
+        "h:76bd2d5dc7"
       ]
     },
     {
-      "title": "Tests",
-      "why": "githubReview places a step comment as a range and still folds it with inline off; stepAnchor skips untracked files, caps long blocks, falls back to removed lines; apiComment maps to GitHub's field names.",
+      "title": "Dark colours",
+      "why": "styles.css gets a dark set of every variable (next to --topbar-h, which shares the hunk) under prefers-color-scheme: dark, plus color-scheme: light dark so scrollbars and form controls follow. Hard-coded colours became variables: button hover, the info notice border, diff line numbers, empty split cells, the diff bars, mark, the search hit line, shadows and the highlight.js tokens (GitHub dark in dark mode, readable on the added and removed backgrounds). Solid accent buttons and badges use --accent-fill with --on-accent, because the dark --accent is a light blue for links. The step badge on Plan uses --surface for its text, and the logo keeps its own blue.",
+      "risk": "Colours set inline in components outside these files would stay light; a scan found none left besides the logo.",
+      "checks": [
+        "Text measured at 4.5:1 or more on Home, Plan, Walkthrough (unified and side by side), Finish and Settings, in both themes."
+      ],
       "hunks": [
-        "h:cb383a3564",
-        "h:c4a2d5bc69"
+        "h:39f2cd2878",
+        "h:ebd7df28a7",
+        "h:d795eee655",
+        "h:8ece1689c0",
+        "h:dfa144fe4f",
+        "h:1ed60852fd",
+        "h:e57ffcc369",
+        "h:4e71e5283e",
+        "h:5bd58aa183",
+        "h:ffdeeaaf28",
+        "h:620d2f81f7",
+        "h:682cc7bd1f",
+        "h:ac822ec8fb",
+        "h:bd22fa1c7e",
+        "h:586afe3f10",
+        "h:a12c9fab7e",
+        "h:d21e811681",
+        "h:99347e5db3"
+      ]
+    },
+    {
+      "title": "Home as tabs",
+      "why": "Waiting for you, Sent back, Reviewed this week and Ignored were sections on one long page, with Ignored collapsed behind ▸. They are now tabs with counts (role tablist, tab and tabpanel; arrow keys, Home and End move and select). Search and the project filter now apply to every tab, so Sent back and Reviewed this week are filtered too (they were not before), and the counts are the lengths of the filtered lists. The order and Review a branch… sit at the top of the Waiting panel, under the tab row, so the row keeps its height on every tab. Home always opens on Waiting, even when it is empty and another tab is not. Selected and unselected tabs have the same weight, so switching tabs never nudges the others.",
+      "checks": [
+        "The project counts on the left are unchanged: everything not ignored, per project."
+      ],
+      "hunks": [
+        "h:2428539f3d",
+        "h:d67a121185",
+        "h:5a2241a5cc",
+        "h:c64b10b4a4",
+        "h:a737a02ce0",
+        "h:7d3ec0ac2a",
+        "h:850e82d9f0",
+        "h:8e7f8ef101",
+        "h:f2abb96919",
+        "h:d0a1facd90",
+        "h:17e9f42f6f",
+        "h:3683153a8a",
+        "h:750789c107",
+        "h:5d0162cb0a"
+      ]
+    },
+    {
+      "title": "Reviewed this week links to GitHub",
+      "why": "A row whose decision went to GitHub gets a View on GitHub ↗ pill, styled like the PR pill on inbox cards and opened with openExternal. githubLink (shared/decisions.ts) picks the review comment, or the pull request when the review URL is null (a merge that posted no review). For that fallback, record() now keeps prUrl on decision.github for posted reviews, GitHub merges and opened PRs. Older records without prUrl, and local merges and discards, show no link; the pill keeps its width so the dates still line up.",
+      "hunks": [
+        "h:31d4b05623",
+        "h:9e9b6585c6",
+        "h:70ff7d47cf",
+        "h:5e76e17862",
+        "h:fdb3f65f45",
+        "h:a162be8528",
+        "h:60a8a8527d",
+        "h:3f134c6d7b",
+        "h:1bec620e82"
+      ]
+    },
+    {
+      "title": "Who is on a pull request",
+      "why": "gh pr list now also asks for assignees, reviewRequests and latestReviews. toPullRequest (pure, so it is tested) maps them onto PullRequest: assignees and requested reviewers as logins, teams as org/team, and each reviewer's latest review when it is APPROVED, CHANGES_REQUESTED or COMMENTED (dismissed and pending ones say nothing). The inbox passes them through on InboxItem.pr with the author.",
+      "risk": "The extra fields cost about 0.3 to 0.5 s per gh pr list on the intranet repo (35 open PRs): median 1.93 s before, 2.41 s after, over six interleaved runs. latestReviews brings each review body along, about 75 KB here; gh --json cannot pick subfields.",
+      "checks": [
+        "A team request: gh has given the slug as slug and as login; both map, with the organization in front."
+      ],
+      "hunks": [
+        "h:0a874785d6",
+        "h:c1cccda2c5",
+        "h:e4c05de9e8",
+        "h:c68ee0f814",
+        "h:25fb3a0bca",
+        "h:14ba473df4",
+        "h:de0164d21a",
+        "h:3253eea961",
+        "h:1a94987e2a",
+        "h:3eae46c5bd"
+      ]
+    },
+    {
+      "title": "Who opened it, for PRs and local branches, and who you are",
+      "why": "Every inbox item now has openedBy: the PR author from GitHub, or for a local branch the author of its newest commit. That used to be dropped when a Claude Code session matched the branch, and the cached summaries would keep it dropped, so the scan reads it itself, in the git log call it already made for the date (now %an, %ae and %cI in one go, for every local branch). openedByYou compares with your gh login for PRs and with the repo's git user.email, then user.name, for local branches. The inbox also returns me, your gh login, asked once per run next to the scan; without a linked project or a signed-in gh it is null.",
+      "risk": "Local branches that match a session now cost one git log each; before, only the others did.",
+      "hunks": [
+        "h:88a7cd3623",
+        "h:01d1ca7747",
+        "h:7491591ac5",
+        "h:d7fb7779dd",
+        "h:bdae2f0999",
+        "h:73adc923cd",
+        "h:3551e541ea",
+        "h:f33e9fc55a",
+        "h:6d067e1069",
+        "h:6b31169655",
+        "h:83d7bf0c43",
+        "h:41330bea72",
+        "h:f76d203bd8",
+        "h:eda69c172c",
+        "h:24df0ce4ac"
+      ]
+    },
+    {
+      "title": "People on cards and the People filter",
+      "why": "Under the branch line a PR card reads like \"Opened by alice · Review: bob ✓ approved, carol (requested) · Assigned: dave\", text only, with empty parts left out and your login as \"you\"; a local card only says who opened it. Someone asked again after reviewing shows as requested, and review bots (copilot…, [bot], app/…) are left off the card. The People select next to the order has Anyone, then Assigned to…, Review requested from… and Opened by…, each with Me first and then everyone on the items; it is remembered with usePref. It narrows the Waiting, Sent back and Ignored lists and the project counts. Assigned and requested only match PRs, and the empty state says local branches are hidden. shared/people.ts holds the line, the matching and the options, with tests.",
+      "risk": "Reviewed this week lists your own decisions, so the People filter does not apply there. \"Review requested from me\" only sees requests to you, not to a team you are on.",
+      "hunks": [
+        "h:f9cefcf86d",
+        "h:7fe1c0cd55",
+        "h:18236b0b52",
+        "h:fe91cda5c2",
+        "h:1592091b95",
+        "h:4c40fc790d",
+        "h:066b36d579",
+        "h:b1a7c18d33"
+      ]
+    },
+    {
+      "title": "Rename a project",
+      "why": "Connect has a Name field at the top, for a new project (filled in with the folder name) and on an existing project's settings. ProjectInput gets an optional name; addProject and updateProject save it trimmed, an empty one falls back to the folder name, and leaving it out keeps the current one (projectName and withProjectName in store.ts, pure so they are tested; Projects itself cannot load under plain Node). Two projects may share a name. Reviews, ignored and tracked branches are keyed by the project id, which a rename keeps. The new name shows at once: Home re-reads the project list (the list and Reviewed this week), rememberProjectName patches the remembered inbox's cards and is used by review crumbs on screens you go back to, updateProject already clears that project's review cache, and it now drops an in-flight scan that would bring back the old name.",
+      "checks": [
+        "Stop watching … reads the saved name: Connect loads the project fresh each time it opens."
+      ],
+      "hunks": [
+        "h:04617c47cb",
+        "h:a7bec2a26c",
+        "h:53cad1af54",
+        "h:1bd7cf0104",
+        "h:4004e7cbf3",
+        "h:7b17ca8193",
+        "h:61b019cf2a",
+        "h:afbfd19739",
+        "h:654f9661ee",
+        "h:70344fd084",
+        "h:6b381c3a5d",
+        "h:498abd1cfb",
+        "h:071bd371bd",
+        "h:bf792d5265",
+        "h:1d56d7995b",
+        "h:35201f10ab",
+        "h:d8955bffec"
+      ]
+    },
+    {
+      "title": "Found on this Mac when adding a project",
+      "why": "The Found on this Mac list moved out of Welcome into components/found.tsx with an onPick(path) callback. Welcome still goes to Connect with the path; Connect shows the list above 1 Repository only while adding a new project with an empty folder, and picking a repo fills the folder, which runs the usual check (repo, base branch, remote) without leaving the page. The list is gone once a folder is filled in and back when it is cleared; a project's settings page never shows it. It shows the Loading row while it loads, and its empty line names your Claude Code config folders instead of only ~/.claude/projects.",
+      "hunks": [
+        "h:e1b7cd82f4",
+        "h:8298ff331a",
+        "h:c0084f2079",
+        "h:6ed81575ca",
+        "h:b84d23de4d"
+      ]
+    },
+    {
+      "title": "Connected repos stay out of the list",
+      "why": "foundOnThisMac compared saved project paths (from git) with session folders (wherever the agent ran) as plain strings. pathKey (main/paths.ts, tested) expands ~, resolves . and .., drops trailing slashes and follows symlinks, so /tmp/x and /private/tmp/x, or a path with a trailing slash, still count as the connected repo. Found folders are grouped by the same key, so one repo never lists twice.",
+      "hunks": [
+        "h:e89dfcf4fe",
+        "h:aa40c00f12",
+        "h:9f3ed16f26",
+        "h:fc40e2d348",
+        "h:42dbaaba9a",
+        "h:7aa930269f"
+      ]
+    },
+    {
+      "title": "The plan for this round",
+      "why": "The brief this work follows, kept in the repo.",
+      "hunks": [
+        "h:0611899c70"
       ]
     }
   ]

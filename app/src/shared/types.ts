@@ -12,14 +12,14 @@ export interface Project {
   baseBranch: string;
   remote: string | null;
   watch: Watch;
-  /** Set when you linked the GitHub remote: "owner/name". Reviewer only talks to GitHub (through gh) when this is set. */
+  /** Set when you linked the GitHub remote: "owner/name". Hunkdory only talks to GitHub (through gh) when this is set. */
   github: string | null;
   /** Branches you picked with "Review a branch". They stay in the inbox whatever the watch rule. */
   tracked?: string[];
   /** Branches you ignored, e.g. because someone else reviews them on GitHub. They stay out of "Waiting for you" until you bring them back. */
   ignored?: string[];
   /**
-   * Whether Reviewer may have Claude Code write a walkthrough when a branch opens without one.
+   * Whether Hunkdory may have Claude Code write a walkthrough when a branch opens without one.
    * Unset until you answer: until then nothing is sent to Claude unless you click "Write one".
    */
   writeWalkthroughs?: boolean;
@@ -55,6 +55,17 @@ export interface PullRequest {
   copilot: boolean;
   /** CI and other checks on the head commit, as GitHub reports them. */
   checks: CheckItem[];
+  /** Logins. */
+  assignees: string[];
+  /** Reviewers asked for and not yet heard from: logins, and teams as "org/team". */
+  requestedReviewers: string[];
+  /** Each reviewer's latest review. */
+  reviews: PrReview[];
+}
+
+export interface PrReview {
+  login: string;
+  state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED';
 }
 
 export interface CheckItem {
@@ -67,7 +78,7 @@ export interface CheckItem {
 export interface StackEntry {
   number: number;
   title: string;
-  /** The branch Reviewer knows this PR by, to open its review. */
+  /** The branch Hunkdory knows this PR by, to open its review. */
   branch: string;
   url: string;
   current: boolean;
@@ -174,7 +185,7 @@ export interface HunkView {
 
 export type WalkthroughSource = 'agent' | 'reviewer' | 'skeleton';
 
-/** Reviewer writing a walkthrough for a branch that has none. Lives in memory while the app runs. */
+/** Hunkdory writing a walkthrough for a branch that has none. Lives in memory while the app runs. */
 export interface WalkthroughJob {
   projectId: string;
   branch: string;
@@ -226,11 +237,11 @@ export interface ReviewData {
   baseSha: string;
   head: string;
   pr: PullRequest | null;
-  /** A local branch Reviewer may merge or delete. False for pull requests and remote-only branches. */
+  /** A local branch Hunkdory may merge or delete. False for pull requests and remote-only branches. */
   local: boolean;
   /** Who wrote the last commit, shown when no agent session is linked. */
   author: string | null;
-  /** Who wrote the walkthrough: the branch's author or agent, Reviewer itself, or nobody (wtv's one-step-per-file fallback). */
+  /** Who wrote the walkthrough: the branch's author or agent, Hunkdory itself, or nobody (wtv's one-step-per-file fallback). */
   walkthrough: WalkthroughSource;
   intent: string | null;
   title: string;
@@ -246,14 +257,14 @@ export interface ReviewData {
   ok: boolean;
   minutes: number;
   ask: AskAbility;
-  /** Which agent made the branch, when Reviewer can tell. */
+  /** Which agent made the branch, when Hunkdory can tell. */
   agent: 'claude-code' | 'copilot' | null;
   /** The commit under review, and whether uncommitted work is part of it. */
   headSha: string;
   dirty: boolean;
   /** Pull requests this one sits on and that sit on it, bottom first. Null when it isn't stacked. */
   stack: { base: string; prs: StackEntry[] } | null;
-  /** Where Reviewer's walkthrough came from when a teammate shared it on the PR. */
+  /** Where Hunkdory's walkthrough came from when a teammate shared it on the PR. */
   sharedWalkthrough: { url: string; by: string } | null;
   /** The linked GitHub repo ("owner/name"), or null when the project has none. */
   repo: string | null;
@@ -315,8 +326,11 @@ export interface DecisionRecord {
   /** The branch as you saw it when you decided, to tell what changed when it comes back. */
   headSha?: string;
   hunkIds?: string[];
-  /** For a review posted on GitHub. */
-  github?: { event: GitHubEvent; url: string | null };
+  /**
+   * For a review posted on GitHub. `url` is the review, null when nothing was posted (a merge with no
+   * comments); `prUrl` is the pull request itself. Records from before `prUrl` existed don't have it.
+   */
+  github?: { event: GitHubEvent; url: string | null; prUrl?: string };
 }
 
 export interface ReviewState {
@@ -360,7 +374,11 @@ export interface InboxItem {
   flags: string[];
   updatedAt: string | null;
   walkthrough: WalkthroughSource;
-  pr: { number: number; isDraft: boolean; url: string } | null;
+  pr: (Pick<PullRequest, 'number' | 'isDraft' | 'url' | 'assignees' | 'requestedReviewers' | 'reviews'> & { author: string | null }) | null;
+  /** Who opened it: the PR's author on GitHub, or for a local branch the author of its newest commit. */
+  openedBy: string | null;
+  /** You did: your gh login for a PR, your git user.email or user.name for a local branch. */
+  openedByYou: boolean;
   checks: CheckItem[];
   /** You reviewed or sent it back, and the branch changed since. */
   updatedSinceReview: boolean;
@@ -432,6 +450,23 @@ export interface FinishResult {
 }
 
 /** The API the preload script exposes on window.api. */
+/** How the app looks. System follows macOS; Light and Dark override it. */
+export type Theme = 'system' | 'light' | 'dark';
+
+/** App-wide settings, kept in the store next to your projects. */
+export interface AppSettings {
+  theme: Theme;
+}
+
+/** What to put in a bug report. */
+export interface AppInfo {
+  version: string;
+  electron: string;
+  chrome: string;
+  node: string;
+  os: string;
+}
+
 export interface ReviewerApi {
   listProjects(): Promise<Project[]>;
   checkFolder(path: string): Promise<RepoCheck>;
@@ -449,13 +484,14 @@ export interface ReviewerApi {
   /** Takes a branch out of the inbox, or (`on` false) brings it back. */
   ignoreBranch(projectId: string, branch: string, on: boolean): Promise<void>;
   openExternal(url: string): Promise<void>;
-  inbox(opts?: { refresh?: boolean }): Promise<{ waiting: InboxItem[]; done: ReviewState[]; scans: ProjectScan[] }>;
+  /** `me` is who gh is signed in as, null without GitHub. */
+  inbox(opts?: { refresh?: boolean }): Promise<{ waiting: InboxItem[]; done: ReviewState[]; scans: ProjectScan[]; me: string | null }>;
   loadReview(projectId: string, branch: string, opts?: { refresh?: boolean }): Promise<{ data: ReviewData; state: ReviewState }>;
   updateReview(projectId: string, branch: string, patch: ReviewPatch): Promise<ReviewState>;
   finish(req: FinishRequest): Promise<FinishResult>;
   openSessionFile(file: string): Promise<void>;
   walkthroughJob(projectId: string, branch: string): Promise<WalkthroughJob | null>;
-  /** Has Reviewer write a walkthrough. `auto` only starts for a branch without one, once per diff. */
+  /** Has Hunkdory write a walkthrough. `auto` only starts for a branch without one, once per diff. */
   writeWalkthrough(projectId: string, branch: string, opts?: { auto?: boolean }): Promise<WalkthroughJob | null>;
   cancelWalkthrough(projectId: string, branch: string): Promise<void>;
   /** Asks Claude about a step, or to change something there. Returns the review with the new exchange. */
@@ -464,12 +500,18 @@ export interface ReviewerApi {
   /** Lines `from`..`to` (1-based, inclusive) of a file on one side of the diff, for showing more context. */
   fileLines(projectId: string, branch: string, path: string, side: 'old' | 'new', from: number, to: number): Promise<{ lines: string[]; total: number }>;
   searchCode(projectId: string, branch: string, query: string): Promise<CodeSearchResult>;
-  /** Posts Reviewer's walkthrough on the pull request, or updates the one it posted before. */
+  /** Posts Hunkdory's walkthrough on the pull request, or updates the one it posted before. */
   shareWalkthrough(projectId: string, branch: string): Promise<{ url: string }>;
+  settings(): Promise<AppSettings>;
+  /** Applies the theme to the window right away and keeps it for the next launch. */
+  setTheme(theme: Theme): Promise<AppSettings>;
+  appInfo(): Promise<AppInfo>;
 }
 
 export interface ProjectInput {
   path: string;
+  /** What the app calls it. Trimmed; empty means the folder's name. Left out on update: keep the current one. */
+  name?: string;
   baseBranch: string;
   watch: Watch;
   github: string | null;

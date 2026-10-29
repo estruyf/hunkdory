@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { Go, Route } from '../App.tsx';
-import { Brand, Crumbs, Later, cleanError, plural } from '../components/ui.tsx';
+import { Brand, Crumbs, Later, cleanError, plural, rememberProjectName } from '../components/ui.tsx';
+import { FoundOnThisMac } from '../components/found.tsx';
 import type { Project, RepoCheck, Watch } from '../../shared/types.ts';
 
 /** Connect a new project, or change one you connected before (`projectId`). */
 export function Connect({ go, initialPath, projectId, back }: { go: Go; initialPath?: string; projectId?: string; back: Route }) {
   const [existing, setExisting] = useState<Project | null>(null);
   const [path, setPath] = useState(initialPath ?? '');
+  // null until you type: a new project takes the folder's name.
+  const [name, setName] = useState<string | null>(null);
   const [check, setCheck] = useState<RepoCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [base, setBase] = useState('');
@@ -26,6 +29,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       const p = ps.find((x) => x.id === projectId);
       if (!p) return;
       setExisting(p);
+      setName(p.name);
       setPath(p.path);
       setGithub(p.github ?? null);
       setWriteWalkthroughs(p.writeWalkthroughs);
@@ -80,8 +84,10 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
     setError(null);
     const w: Watch = watch === 'pattern' ? { mode: 'pattern', pattern } : watch === 'pull-requests' ? { mode: 'pull-requests' } : { mode: 'agent-sessions' };
     try {
-      if (existing) await window.api.updateProject(existing.id, { baseBranch: base, watch: w, github, writeWalkthroughs });
-      else await window.api.addProject({ path: check!.root!, baseBranch: base, watch: w, github, writeWalkthroughs });
+      if (existing) {
+        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs });
+        rememberProjectName(saved.id, saved.name);
+      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs });
       go({ name: 'home' });
     } catch (e) {
       setError(cleanError(e));
@@ -96,6 +102,8 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   };
 
   const ok = !!check?.isRepo;
+  // What an empty Name falls back to, like the main process does.
+  const folderName = (check?.root ?? existing?.path ?? path).replace(/\/+$/, '').split('/').pop() ?? '';
   const onGitHub = !!check?.remote?.startsWith('github.com/');
   const baseOptions = check ? [...new Set([base, check.baseBranch, ...check.branches].filter(Boolean) as string[])] : [];
 
@@ -113,10 +121,20 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
 
       <div style={{ width: '100%', maxWidth: 860, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <p style={{ margin: '0 0 8px', fontSize: 15, lineHeight: 1.6, color: 'var(--muted)' }}>
-          A project is one git repo on your machine. Reviewer connects it to two things: where the agent's changes live, and where the agent's reasoning lives.
+          A project is one git repo on your machine. Hunkdory connects it to two things: where the agent's changes live, and where the agent's reasoning lives.
         </p>
 
+        {/* Adding a project: the repos you work in with Claude Code, one click from filling in the folder. */}
+        {!projectId && !path.trim() && <FoundOnThisMac onPick={setPath} />}
+
         <Section n={1} title="Repository">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label htmlFor="project-name" style={{ fontSize: 13, fontWeight: 600 }}>
+              Name
+            </label>
+            <input id="project-name" className="field" value={name ?? folderName} onChange={(e) => setName(e.target.value)} placeholder={folderName || 'my-project'} style={{ maxWidth: 420 }} />
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>How the inbox and reviews show this project. Leave it empty to use the folder's name.</span>
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
             <label htmlFor="folder" style={{ fontSize: 13, fontWeight: 600, width: '100%' }}>
               Folder
@@ -187,7 +205,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
 
         <Section n={2} title="Agent sources">
           <p style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--muted)' }}>
-            Sessions hold your prompt and the agent's reasoning. Reviewer uses them to explain each change and split it into steps. Without a session it still works, with less context.
+            Sessions hold your prompt and the agent's reasoning. Hunkdory uses them to explain each change and split it into steps. Without a session it still works, with less context.
           </p>
           <Source
             name="Claude Code"
@@ -284,7 +302,7 @@ function Section({ n, title, children }: { n: number; title: string; children: R
   return (
     <section className="card" style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <span style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{n}</span>
+        <span style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--accent-fill)', color: 'var(--on-accent)', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{n}</span>
         <h2 style={{ fontSize: 16 }}>{title}</h2>
       </div>
       {children}

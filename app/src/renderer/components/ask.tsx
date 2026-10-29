@@ -77,7 +77,9 @@ export function AskPanel({
         <div key={e.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 14, borderBottom: '1px solid var(--divider)' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span className="label-sm">{e.kind === 'question' ? 'You asked' : 'You asked for a change'}</span>
-            <p style={{ fontSize: 14.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{e.text}</p>
+            <div style={{ fontSize: 14.5, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+              <Markdown text={e.text} />
+            </div>
           </div>
           {e.status === 'running' && (
             <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5, color: 'var(--muted)' }}>

@@ -70,11 +70,11 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
 
   return (
     <div className="page">
-      <header className="topbar" style={{ gap: '12px 20px', padding: '12px 24px' }}>
+      <header className="topbar">
         <Brand onClick={() => go({ name: 'home' })} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '1 1 320px', minWidth: 0 }}>
           <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, shrink: true }]} />
-          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          <span className="topbar-sub">
             <span className="mono">{data.branch}</span> → <span className="mono">{data.baseRef}</span>
             {data.pr ? ` · PR #${data.pr.number}` : ''}
             {data.stack ? ` · part ${data.stack.prs.findIndex((p) => p.current) + 1} of ${data.stack.prs.length} in a stack` : ''} · {sizeText(data.files, data.added, data.removed)}
@@ -98,7 +98,7 @@ function PlanView({ go, data, initialState }: { go: Go; data: ReviewData; initia
           <p style={{ fontSize: 15.5, lineHeight: 1.6, color: 'var(--muted)', maxWidth: 760 }}>
             {allDone
               ? 'You made every decision and looked at every step. Finish to merge, send it back, or post your review.'
-              : `Reviewer sorted the ${plural(data.steps.length, 'step')} for you. Start with what only you can decide. ${plan.skim.length ? 'The low-risk rest is grouped so you can skim it.' : ''}`}
+              : `Hunkdory sorted the ${plural(data.steps.length, 'step')} for you. Start with what only you can decide. ${plan.skim.length ? 'The low-risk rest is grouped so you can skim it.' : ''}`}
           </p>
           {data.stack && (
             <div style={{ paddingTop: 6 }}>
@@ -256,7 +256,7 @@ function Phase({ n, title, hint, meta, children }: { n: number; title: string; h
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px 10px', flexWrap: 'wrap' }}>
-        <span aria-hidden="true" style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--text)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span aria-hidden="true" style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--text)', color: 'var(--surface)', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {n}
         </span>
         <h2 style={{ fontSize: 17 }}>{title}</h2>
