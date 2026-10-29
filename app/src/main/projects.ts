@@ -12,7 +12,7 @@ import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './s
 import * as gh from './github.ts';
 import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, withCheckoutFallback, type BranchSessions } from './match.ts';
 import { attention, buildSteps, estimateMinutes } from './steps.ts';
-import { projectName, withProjectName, type Store } from './store.ts';
+import { projectName, toWatch, withProjectName, type Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
 import type { Summaries, Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
@@ -124,7 +124,7 @@ export class Projects {
 
   private async validate(root: string, input: Omit<ProjectInput, 'path'>) {
     if (!(await g.refExists(root, input.baseBranch))) throw new Error(`Base branch "${input.baseBranch}" not found`);
-    const w = input.watch;
+    const w = toWatch(input.watch);
     if (w.pattern !== null && !w.pattern.trim()) throw new Error('Enter a branch pattern, like claude/*');
     if (w.pullRequests && !input.github) throw new Error('Link the GitHub remote to review open pull requests.');
     if (!w.anyBranch && w.pattern === null && !w.pullRequests) throw new Error('Pick at least one kind of branch to review.');
@@ -147,7 +147,7 @@ export class Projects {
       path: check.root,
       baseBranch: input.baseBranch,
       remote: check.remote,
-      watch: input.watch,
+      watch: toWatch(input.watch),
       github: input.github,
       writeWalkthroughs: input.writeWalkthroughs,
       addedAt: new Date().toISOString(),
@@ -159,7 +159,7 @@ export class Projects {
   async updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project> {
     const project = this.store.project(id);
     await this.validate(project.path, input);
-    const updated: Project = { ...withProjectName(project, input.name), baseBranch: input.baseBranch, watch: input.watch, github: input.github, writeWalkthroughs: input.writeWalkthroughs ?? project.writeWalkthroughs, remote: await g.remoteUrl(project.path) };
+    const updated: Project = { ...withProjectName(project, input.name), baseBranch: input.baseBranch, watch: toWatch(input.watch), github: input.github, writeWalkthroughs: input.writeWalkthroughs ?? project.writeWalkthroughs, remote: await g.remoteUrl(project.path) };
     this.store.addProject(updated);
     // Bases and watch rules change what every review looks like, and the name is on every one.
     for (const k of [...this.cache.keys()]) if (k.startsWith(`${id}::`)) this.cache.delete(k);

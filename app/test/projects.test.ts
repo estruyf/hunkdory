@@ -56,6 +56,8 @@ test('watch rules from before you could combine them become the same rule as swi
   assert.deepEqual(toWatch({ mode: 'pull-requests' }), { anyBranch: false, pattern: null, pullRequests: true });
   assert.deepEqual(toWatch(undefined), { anyBranch: true, pattern: null, pullRequests: false });
   assert.deepEqual(toWatch({ agentSessions: true, pattern: null, pullRequests: true }), { anyBranch: true, pattern: null, pullRequests: true });
+  // Saved with a switch missing: the others still count.
+  assert.deepEqual(toWatch({ pattern: null, pullRequests: true }), { anyBranch: true, pattern: null, pullRequests: true });
   const mixed = { anyBranch: true, pattern: 'feat/*', pullRequests: true };
   assert.deepEqual(toWatch(mixed), mixed);
 });

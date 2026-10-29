@@ -426,7 +426,9 @@ export function Walkthrough({ go, data, initialState, stepKey, decision }: { go:
               <h2 style={{ fontSize: 16 }}>{cur.checks.length === 1 ? 'One question for you' : `${cur.checks.length === 2 ? 'Two' : cur.checks.length === 3 ? 'Three' : cur.checks.length} questions for you`}</h2>
               {cur.checks.map((q, i) => (
                 <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 16px', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 10 }}>
-                  <span style={{ flex: '1 1 360px', fontSize: 14.5, lineHeight: 1.5 }}>{q}</span>
+                  <div style={{ flex: '1 1 360px', fontSize: 14.5, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+                    <Markdown text={q} />
+                  </div>
                   <span role="group" aria-label="Your answer" style={{ display: 'flex', gap: 6 }}>
                     <button type="button" aria-pressed={answers[i] === 'yes'} className={`btn ${answers[i] === 'yes' ? 'done' : ''}`} style={{ height: 34, padding: '0 14px' }} onClick={() => answer(i, 'yes')}>
                       Looks right

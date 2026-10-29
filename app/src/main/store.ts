@@ -28,12 +28,12 @@ export const withProjectName = (p: Project, name: string | undefined): Project =
 export function toWatch(w: unknown): Watch {
   const o = (w ?? {}) as Record<string, unknown>;
   const pattern = typeof o.pattern === 'string' ? o.pattern : null;
-  if (typeof o.anyBranch === 'boolean') return { anyBranch: o.anyBranch, pattern, pullRequests: o.pullRequests === true };
-  // Branches an agent worked on, before every branch counted.
-  if (typeof o.agentSessions === 'boolean') return { anyBranch: o.agentSessions, pattern, pullRequests: o.pullRequests === true };
   if (o.mode === 'pattern') return { anyBranch: false, pattern: pattern ?? '', pullRequests: false };
   if (o.mode === 'pull-requests') return { anyBranch: false, pattern: null, pullRequests: true };
-  return { anyBranch: true, pattern: null, pullRequests: false };
+  if (o.mode === 'agent-sessions') return { anyBranch: true, pattern: null, pullRequests: false };
+  // The switches, or some of them: a missing one keeps its default. `agentSessions` is what any branch was called for a while.
+  const anyBranch = typeof o.anyBranch === 'boolean' ? o.anyBranch : typeof o.agentSessions === 'boolean' ? o.agentSessions : true;
+  return { anyBranch, pattern, pullRequests: o.pullRequests === true };
 }
 
 export const reviewId =(projectId: string, branch: string) => `${projectId}::${branch}`;
