@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
 import type { Go, Route } from '../App.tsx';
-import { Brand, ConfirmButton, Crumbs, cleanError, rememberProjectName } from '../components/ui.tsx';
+import { Crumbs, cleanError, rememberProjectName } from '../components/ui.tsx';
+import { ViewHeader } from '../components/ViewHeader.tsx';
+import { Button } from '../components/ui/Button.tsx';
+import { Checkbox } from '../components/ui/Checkbox.tsx';
+import { Dialog } from '../components/ui/Dialog.tsx';
+import { Notice } from '../components/ui/Notice.tsx';
+import { Pill } from '../components/ui/Pill.tsx';
+import { Radio, RadioGroup } from '../components/ui/Radio.tsx';
+import { SectionHeader } from '../components/ui/SectionHeader.tsx';
+import { Select } from '../components/ui/Select.tsx';
+import { FIELD, FIELD_LG } from '../components/ui/field.ts';
+import { matches } from '../lib/shortcuts.ts';
 import { FoundOnThisMac } from '../components/found.tsx';
 import type { Project, RepoCheck, Watch } from '../../shared/types.ts';
 
@@ -25,6 +36,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const [saving, setSaving] = useState(false);
   // New projects keep the details folded away: the defaults suit most repos.
   const [advanced, setAdvanced] = useState(!!projectId);
+  const [removing, setRemoving] = useState(false);
 
   // Editing: start from the saved settings.
   useEffect(() => {
@@ -124,202 +136,178 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
           ? 'Pick at least one thing to watch, under What needs a review.'
           : null;
 
+  // ⌘↵ connects the project or saves its settings.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!matches(e, 'connect.save') || blocked || saving) return;
+      e.preventDefault();
+      void save();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   return (
-    <div className="page">
-      <header className="topbar">
-        <Brand onClick={() => go(back)} />
-        <Crumbs
-          items={[
-            { label: back.name === 'home' ? 'Inbox' : 'Welcome', onClick: () => go(back) },
-            ...(existing ? [{ label: existing.name, onClick: () => go({ name: 'home', projectId: existing.id }) }, { label: 'Settings' }] : [{ label: 'Connect a project' }]),
-          ]}
-        />
-      </header>
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      <ViewHeader>
+        <div className="min-w-0 flex-1">
+          <Crumbs items={existing ? [{ label: existing.name, onClick: () => go({ name: 'home', projectId: existing.id }) }, { label: 'Settings' }] : [{ label: 'Connect a project' }]} />
+        </div>
+      </ViewHeader>
 
-      <div style={{ width: '100%', maxWidth: 860, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <p style={{ margin: '0 0 8px', fontSize: 15, lineHeight: 1.6, color: 'var(--muted)' }}>A project is one git repo on your machine. The defaults suit most repos: pick the folder, choose how steps get written, and connect.</p>
-
-        {/* Adding a project: the repos you work in with Claude Code, one click from filling in the folder. */}
-        {!projectId && !path.trim() && <FoundOnThisMac onPick={setPath} />}
-
-        <Section title="Repository">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-            <label htmlFor="folder" style={{ fontSize: 13, fontWeight: 600, width: '100%' }}>
-              Folder
-            </label>
-            <input id="folder" className="field mono" value={path} readOnly={!!existing} onChange={(e) => setPath(e.target.value)} placeholder="~/dev/my-project" style={{ flex: '1 1 300px', fontSize: 13.5, background: existing ? 'var(--bg)' : undefined }} />
-            {!existing && (
-              <button type="button" className="btn" onClick={choose}>
-                Choose…
-              </button>
-            )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 pt-7 pb-14">
+          <div className="flex flex-col gap-1.5">
+            <h1 className="text-hero font-semibold">{existing ? `${existing.name} settings` : 'Connect a project'}</h1>
+            <p className="text-body text-muted">A project is one git repo on your Mac. The defaults suit most repos: pick the folder, choose how steps get written, and connect.</p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
-            <Tile label="Git repo">
-              {checking ? (
-                <span className="muted">Checking…</span>
-              ) : !check ? (
-                <span className="muted">Pick a folder</span>
-              ) : ok ? (
-                <span style={{ color: 'var(--low-fg)' }}>Detected ✓</span>
-              ) : (
-                <span style={{ color: 'var(--high-fg)' }}>{check.error}</span>
+
+          {/* Adding a project: the repos you work in with Claude Code, one click from filling in the folder. */}
+          {!projectId && !path.trim() && <FoundOnThisMac onPick={setPath} primary={false} />}
+
+          <Section title="Repository">
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="folder" className="w-full text-ui font-semibold">
+                Folder
+              </label>
+              <input id="folder" className={`${FIELD_LG} min-w-0 flex-[1_1_300px] font-mono ${existing ? 'bg-sidebar' : ''}`} value={path} readOnly={!!existing} onChange={(e) => setPath(e.target.value)} placeholder="~/dev/my-project" />
+              {!existing && (
+                <Button size="lg" onClick={choose}>
+                  Choose…
+                </Button>
               )}
-            </Tile>
-            <Tile label="Base branch">
-              {ok ? (
-                <select aria-label="Base branch" value={base} onChange={(e) => setBase(e.target.value)} style={{ font: 'inherit', fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600, border: 0, background: 'transparent', padding: 0, maxWidth: '100%' }}>
-                  {!base && <option value="">Choose…</option>}
-                  {baseOptions.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="muted">–</span>
-              )}
-            </Tile>
-            <Tile label="Claude Code sessions">
-              <span style={{ color: check?.sessionCount ? 'var(--low-fg)' : undefined }}>{ok ? (check!.sessionCount ? `${check!.sessionCount} found` : 'None yet') : '–'}</span>
-            </Tile>
-            <Tile label="Remote">
-              <span className="mono" style={{ overflowWrap: 'anywhere', fontSize: 12.5 }}>
-                {check?.remote ?? '–'}
-              </span>
-            </Tile>
-          </div>
-          {ok && !check!.sessionCount && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sessions yet in ~/.claude or any ~/.claude-* folder. Reviews still work, with less context: no prompt and no agent reasons.</p>}
-        </Section>
-
-        <Section title="How should Hunkdory split changes into steps?">
-          <div role="radiogroup" aria-label="Walkthroughs" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <label className="option" data-on={writeWalkthroughs === true} style={{ cursor: 'pointer' }}>
-              <span className="choice">
-                <input type="radio" name="walkthroughs" checked={writeWalkthroughs === true} onChange={() => setWriteWalkthroughs(true)} />
-                <span>
-                  <strong>Let Claude write a walkthrough</strong> <span className="muted">(recommended)</span>
-                  <br />
-                  <span className="muted">Steps by intent, with a reason for each. For a branch that opens without one, Claude Code reads the diff, the commits and the session. Like any Claude Code run, that goes to Anthropic.</span>
-                </span>
-              </span>
-            </label>
-            <label className="option" data-on={writeWalkthroughs === false} style={{ cursor: 'pointer' }}>
-              <span className="choice">
-                <input type="radio" name="walkthroughs" checked={writeWalkthroughs === false} onChange={() => setWriteWalkthroughs(false)} />
-                <span>
-                  <strong>One step per file, fully offline</strong>
-                  <br />
-                  <span className="muted">Nothing is sent anywhere. You can still ask for a walkthrough on a branch when you want one.</span>
-                </span>
-              </span>
-            </label>
-          </div>
-          {writeWalkthroughs === undefined && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Not chosen yet: Hunkdory asks the first time a branch opens without a walkthrough.</p>}
-        </Section>
-
-        <section className="card" style={{ padding: '6px 22px' }}>
-          <button type="button" className="link" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>
-            <span>Advanced: name, GitHub, what needs a review</span>
-            <span style={{ color: 'var(--accent)', fontSize: 13.5, fontWeight: 500 }}>{advanced ? 'Hide' : 'Show'}</span>
-          </button>
-          {advanced && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '4px 0 20px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label htmlFor="project-name" style={{ fontSize: 13, fontWeight: 600 }}>
-                  Name
-                </label>
-                <input id="project-name" className="field" value={name ?? folderName} onChange={(e) => setName(e.target.value)} placeholder={folderName || 'my-project'} style={{ maxWidth: 420 }} />
-                <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>How the inbox and reviews show this project. Leave it empty to use the folder's name.</span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <h3 style={{ margin: 0, fontSize: 14 }}>GitHub</h3>
-                <label className={ok && onGitHub ? 'choice' : 'choice off'}>
-                  <input type="checkbox" checked={!!github} disabled={!ok || !onGitHub || linking} onChange={(e) => toggleGithub(e.target.checked)} />
-                  <span>
-                    <strong>Link the GitHub remote</strong>
-                    {github && <span className="pill low" style={{ marginLeft: 8 }}>{github}</span>}
-                    <br />
-                    <span className="muted">
-                      {linking
-                        ? 'Checking with the GitHub CLI…'
-                        : ok && !onGitHub
-                          ? 'The remote is not on GitHub.'
-                          : 'Uses your GitHub CLI sign-in to list open pull requests, including the ones GitHub Copilot opens. Nothing is posted until you finish a review.'}
-                    </span>
-                    {githubError && (
-                      <>
-                        <br />
-                        <span className="error" style={{ fontSize: 13 }}>
-                          {githubError}
-                        </span>
-                      </>
-                    )}
-                  </span>
-                </label>
-              </div>
-
-              <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <legend style={{ fontSize: 14, fontWeight: 700, padding: 0, marginBottom: 10 }}>What needs a review</legend>
-                <label className="choice">
-                  <input type="checkbox" checked={anyBranch} onChange={(e) => setAnyBranch(e.target.checked)} />
-                  <span>
-                    <strong>Any branch</strong> <span className="muted">(recommended)</span>
-                    <br />
-                    <span className="muted">Every local branch with commits on top of the base, from an agent or a person.</span>
-                  </span>
-                </label>
-                <label className="choice">
-                  <input type="checkbox" checked={usePattern} onChange={(e) => setUsePattern(e.target.checked)} />
-                  <span style={{ flex: 1 }}>
-                    <strong>Branches matching a pattern</strong>
-                    <br />
-                    {usePattern ? (
-                      <input aria-label="Branch pattern" className="field mono" value={pattern} onChange={(e) => setPattern(e.target.value)} style={{ marginTop: 6, height: 34, fontSize: 13, width: '100%', maxWidth: 360 }} />
-                    ) : (
-                      <span className="muted mono" style={{ fontSize: 13 }}>
-                        {pattern}
-                      </span>
-                    )}
-                  </span>
-                </label>
-                <label className={github ? 'choice' : 'choice off'}>
-                  <input type="checkbox" disabled={!github} checked={pullRequests} onChange={(e) => setPullRequests(e.target.checked)} />
-                  <span>
-                    <strong>Every open pull request</strong>
-                    <br />
-                    <span className="muted">{github ? 'From anyone, agents or people. Fetched into a private ref, your branches stay as they are.' : 'Link the GitHub remote above first.'}</span>
-                  </span>
-                </label>
-                <p style={{ fontSize: 13, color: 'var(--muted)' }}>Pick any mix: a branch more than one of them finds shows up once. You can always review another branch from the inbox.</p>
-              </fieldset>
             </div>
-          )}
-        </section>
+            <div className="grid grid-cols-4 gap-2">
+              <Tile label="Git repo">
+                {checking ? <span className="text-muted">Checking…</span> : !check ? <span className="text-muted">Pick a folder</span> : ok ? <span className="text-ok">Detected ✓</span> : <span className="text-error">{check.error}</span>}
+              </Tile>
+              <Tile label="Base branch">
+                {ok ? (
+                  <Select label="Base branch" value={base} onChange={setBase} placeholder="Choose…" options={baseOptions.map((b) => ({ value: b, label: b }))} className="max-w-full font-mono text-ui font-semibold" />
+                ) : (
+                  <span className="text-muted">–</span>
+                )}
+              </Tile>
+              <Tile label="Claude Code sessions">{ok ? <span className={check!.sessionCount ? 'text-ok' : 'text-muted'}>{check!.sessionCount ? `${check!.sessionCount} found` : 'None yet'}</span> : <span className="text-muted">–</span>}</Tile>
+              <Tile label="Remote">
+                <span className="font-mono text-meta break-all">{check?.remote ?? '–'}</span>
+              </Tile>
+            </div>
+            {ok && !check!.sessionCount && <p className="text-meta text-muted">No sessions yet in ~/.claude or any ~/.claude-* folder. Reviews still work, with less context: no prompt and no agent reasons.</p>}
+          </Section>
 
-        {error && <p className="error">{error}</p>}
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 10, paddingTop: 8 }}>
-          {existing && (
-            <ConfirmButton label="Remove project" question={`Stop watching ${existing.name}? Reviews stay saved; nothing in the repo changes.`} confirm="Remove" onConfirm={remove} style={{ marginRight: 'auto' }} />
-          )}
-          {blocked && ok && <span style={{ fontSize: 13, color: 'var(--muted)' }}>{blocked}</span>}
-          <button type="button" className="btn lg" onClick={() => go(back)}>
-            Cancel
-          </button>
-          <button type="button" className="btn lg primary" disabled={!!blocked || saving} title={blocked ?? undefined} onClick={save}>
-            {saving ? 'Saving…' : existing ? 'Save changes' : 'Connect and open inbox'}
-          </button>
+          <Section title="How should Hunkdory split changes into steps?">
+            <RadioGroup label="Walkthroughs" className="flex flex-col gap-2">
+              {[
+                { on: true, title: 'Let Claude write a walkthrough', note: '(recommended)', detail: 'Steps by intent, with a reason for each. For a branch that opens without one, Claude Code reads the diff, the commits and the session. Like any Claude Code run, that goes to Anthropic.' },
+                { on: false, title: 'One step per file, fully offline', note: '', detail: 'Nothing is sent anywhere. You can still ask for a walkthrough on a branch when you want one.' },
+              ].map((o) => (
+                <div key={String(o.on)} className={`rounded-xl border p-3.5 ${writeWalkthroughs === o.on ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'}`}>
+                  <Radio checked={writeWalkthroughs === o.on} tabbable={writeWalkthroughs === o.on || (writeWalkthroughs === undefined && o.on)} onSelect={() => setWriteWalkthroughs(o.on)}>
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-body font-semibold">
+                        {o.title} {o.note && <span className="font-normal text-muted">{o.note}</span>}
+                      </span>
+                      <span className="text-ui text-muted">{o.detail}</span>
+                    </span>
+                  </Radio>
+                </div>
+              ))}
+            </RadioGroup>
+            {writeWalkthroughs === undefined && <p className="text-meta text-muted">Not chosen yet: Hunkdory asks the first time a branch opens without a walkthrough.</p>}
+          </Section>
+
+          <section className="flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3">
+            <SectionHeader as="h2" toggle={{ expanded: advanced, onToggle: () => setAdvanced(!advanced) }}>
+              Advanced: name, GitHub, what needs a review
+            </SectionHeader>
+            {advanced && (
+              <div className="flex flex-col gap-5 pb-1">
+                <label className="flex flex-col gap-1 text-ui font-semibold">
+                  Name
+                  <input className={`${FIELD_LG} max-w-md font-normal`} value={name ?? folderName} onChange={(e) => setName(e.target.value)} placeholder={folderName || 'my-project'} />
+                  <span className="text-meta font-normal text-muted">How the sidebar and reviews show this project. Leave it empty to use the folder's name.</span>
+                </label>
+
+                <div className="flex flex-col gap-1.5">
+                  <SectionHeader as="h3">GitHub</SectionHeader>
+                  <Checkbox checked={!!github} disabled={!ok || !onGitHub || linking} onChange={toggleGithub}>
+                    Link the GitHub remote {github && <Pill tone="ok" className="ml-1.5">{github}</Pill>}
+                  </Checkbox>
+                  <span className="pl-6 text-meta text-muted">
+                    {linking ? 'Checking with the GitHub CLI…' : ok && !onGitHub ? 'The remote is not on GitHub.' : 'Uses your GitHub CLI sign-in to list open pull requests, including the ones GitHub Copilot opens. Nothing is posted until you finish a review.'}
+                  </span>
+                  {githubError && <Notice tone="error">{githubError}</Notice>}
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <SectionHeader as="h3">What needs a review</SectionHeader>
+                  <Checkbox checked={anyBranch} onChange={setAnyBranch}>
+                    Any branch <span className="text-muted">(recommended)</span>
+                  </Checkbox>
+                  <span className="-mt-1 pl-6 text-meta text-muted">Every local branch with commits on top of the base, from an agent or a person.</span>
+                  <Checkbox checked={usePattern} onChange={setUsePattern}>
+                    Branches matching a pattern
+                  </Checkbox>
+                  <div className="-mt-1 pl-6">
+                    {usePattern ? <input aria-label="Branch pattern" className={`${FIELD} w-full max-w-sm font-mono`} value={pattern} onChange={(e) => setPattern(e.target.value)} /> : <span className="font-mono text-meta text-muted">{pattern}</span>}
+                  </div>
+                  <Checkbox checked={pullRequests} disabled={!github} onChange={setPullRequests}>
+                    Every open pull request
+                  </Checkbox>
+                  <span className="-mt-1 pl-6 text-meta text-muted">{github ? 'From anyone, agents or people. Fetched into a private ref, your branches stay as they are.' : 'Link the GitHub remote above first.'}</span>
+                  <p className="text-meta text-muted">Pick any mix: a branch more than one of them finds shows up once. You can always review another branch from the sidebar.</p>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {error && <Notice tone="error">{error}</Notice>}
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+            {existing && (
+              <Button variant="danger" size="lg" className="mr-auto" onClick={() => setRemoving(true)}>
+                Remove project…
+              </Button>
+            )}
+            {blocked && ok && <span className="text-meta text-muted">{blocked}</span>}
+            <Button size="lg" onClick={() => go(back)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="lg" shortcut="connect.save" disabled={!!blocked || saving} aria-busy={saving} data-tooltip={blocked ?? undefined} onClick={save}>
+              {saving ? 'Saving…' : existing ? 'Save changes' : 'Connect and open the inbox'}
+            </Button>
+          </div>
         </div>
       </div>
+      {removing && existing && (
+        <Dialog
+          title={`Stop watching ${existing.name}?`}
+          width="sm"
+          role="alertdialog"
+          onClose={() => setRemoving(false)}
+          onSubmit={remove}
+          footer={
+            <>
+              <Button kbd="Esc" onClick={() => setRemoving(false)}>
+                Cancel
+              </Button>
+              <Button variant="danger" filled kbd="mod+enter" onClick={remove}>
+                Remove project
+              </Button>
+            </>
+          }
+        >
+          <p className="px-5 py-4 text-body text-muted">Your reviews stay saved, and nothing in the repo changes. You can connect it again any time.</p>
+        </Dialog>
+      )}
     </div>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="card" style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <h2 style={{ fontSize: 16 }}>{title}</h2>
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+      <h2 className="text-title font-semibold">{title}</h2>
       {children}
     </section>
   );
@@ -327,9 +315,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Tile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ padding: 12, background: 'var(--bg)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-      <span style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</span>
-      <span style={{ fontSize: 14, fontWeight: 600 }}>{children}</span>
+    <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-sidebar p-2.5">
+      <span className="text-meta text-faint">{label}</span>
+      <span className="text-ui font-semibold">{children}</span>
     </div>
   );
 }

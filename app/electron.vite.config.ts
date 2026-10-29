@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 const wtv = resolve(__dirname, '../tools/wtv/src');
 
@@ -11,6 +12,7 @@ export default defineConfig({
   },
   preload: {},
   renderer: {
-    plugins: [react()],
+    // Tailwind 4, as in Switchboard: the tokens and utilities live in src/renderer/styles.css.
+    plugins: [react(), tailwindcss()],
   },
 });

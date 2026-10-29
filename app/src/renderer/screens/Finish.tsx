@@ -1,6 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Crumbs, LoadingPage, cleanError, plural, reviewCrumbs, useAsync } from '../components/ui.tsx';
+import { Crumbs, LoadingPage, cleanError, isPlainKey, plural, reviewCrumbs, useAsync } from '../components/ui.tsx';
+import { ViewHeader } from '../components/ViewHeader.tsx';
+import { Button } from '../components/ui/Button.tsx';
+import { Checkbox } from '../components/ui/Checkbox.tsx';
+import { Kbd } from '../components/ui/Kbd.tsx';
+import { Notice } from '../components/ui/Notice.tsx';
+import { Radio, RadioGroup } from '../components/ui/Radio.tsx';
+import { SectionHeader } from '../components/ui/SectionHeader.tsx';
+import { FIELD, TEXTAREA } from '../components/ui/field.ts';
+import { matches } from '../lib/shortcuts.ts';
 import { ReviewError } from './Review.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { isReviewed } from '../../shared/order.ts';
@@ -16,7 +25,7 @@ const EVENTS: { id: GitHubEvent; title: string }[] = [
 export function Finish({ go, projectId, branch }: { go: Go; projectId: string; branch: string }) {
   const loaded = useAsync(() => window.api.loadReview(projectId, branch), [projectId, branch]);
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
-  if (!loaded.value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
+  if (!loaded.value) return <LoadingPage label="Reading the branch…" detail={branch} />;
   return <FinishForm go={go} data={loaded.value.data} state={loaded.value.state} />;
 }
 
@@ -125,27 +134,60 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
     setBusy(false);
   };
 
+  // 1 to 4 pick an option, ⌘↵ does it, Esc keeps reviewing: the registry's `finish.*` keys.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (matches(e, 'finish.submit')) {
+        if (busy || current.disabled) return;
+        e.preventDefault();
+        void submit(false);
+        return;
+      }
+      if (!isPlainKey(e)) return;
+      if (matches(e, 'finish.back')) {
+        e.preventDefault();
+        go({ name: 'plan', projectId: data.projectId, branch: data.branch });
+      } else if (matches(e, 'finish.pick')) {
+        const o = options[Number(e.key) - 1];
+        if (!o || o.disabled) return;
+        e.preventDefault();
+        choose(o.id);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const choose = (id: Decision) => {
+    setPick(id);
+    setNeedsCommit(null);
+    setError(null);
+    setConfirming(false);
+  };
+
+  const noteField = (label: string) => (
+    <label className="flex flex-col gap-1 text-ui font-semibold">
+      {label}
+      <textarea rows={2} className={`${TEXTAREA} font-normal`} placeholder="Anything else it should know" value={note} onChange={(e) => setNote(e.target.value)} />
+    </label>
+  );
+
   const optionBody = (id: Decision) => {
     if (id === 'merge' && canOpenPr)
       return (
         <>
-          <label className="choice">
-            <input type="checkbox" checked={openPr} onChange={(e) => setOpenPr(e.target.checked)} />
-            <span>
-              <strong>Open a pull request instead of merging here</strong>
-              <br />
-              <span className="muted">
-                Creates a PR from {data.branch} into {base} on GitHub, with your comments in the description.
-              </span>
-            </span>
-          </label>
+          <Checkbox checked={openPr} onChange={setOpenPr}>
+            Open a pull request instead of merging here
+          </Checkbox>
+          <span className="pl-6 text-meta text-muted">
+            Creates a PR from {data.branch} into {base} on GitHub, with your comments in the description.
+          </span>
           {openPr && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-              <input className="field" aria-label="Pull request title" value={prTitle} onChange={(e) => setPrTitle(e.target.value)} style={{ flex: '1 1 320px' }} />
-              <label className="choice" style={{ alignItems: 'center' }}>
-                <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} style={{ marginTop: 0 }} />
+            <div className="flex flex-wrap items-center gap-2.5 pl-6">
+              <input className={`${FIELD} min-w-0 flex-[1_1_320px]`} aria-label="Pull request title" value={prTitle} onChange={(e) => setPrTitle(e.target.value)} />
+              <Checkbox checked={draft} onChange={setDraft}>
                 Open as draft
-              </label>
+              </Checkbox>
             </div>
           )}
         </>
@@ -153,15 +195,14 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
     if (id === 'github')
       return (
         <>
-          <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-            <legend className="sr-only">Review type</legend>
+          <RadioGroup label="Review type" className="flex flex-wrap gap-4 text-ui">
             {EVENTS.map((e) => (
-              <label key={e.id} className="choice" style={{ alignItems: 'center', opacity: e.id === 'APPROVE' && data.prByYou ? 0.5 : undefined }} title={e.id === 'APPROVE' && data.prByYou ? 'GitHub doesn’t let you approve your own PR.' : undefined}>
-                <input type="radio" name="event" checked={event === e.id} disabled={e.id === 'APPROVE' && data.prByYou} onChange={() => setEvent(e.id)} style={{ marginTop: 0 }} />
+              <Radio key={e.id} checked={event === e.id} tabbable={event === e.id} disabled={e.id === 'APPROVE' && data.prByYou} onSelect={() => setEvent(e.id)}>
                 {e.title}
-              </label>
+              </Radio>
             ))}
-          </fieldset>
+          </RadioGroup>
+          {data.prByYou && <span className="text-meta text-muted">GitHub doesn’t let you approve your own PR.</span>}
           {noteField('Review summary (optional)')}
         </>
       );
@@ -169,159 +210,155 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
       return (
         <>
           {outside.map((s) => (
-            <label key={s.key} className="choice" style={{ alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                checked={drop.has(s.key)}
-                onChange={(e) => {
-                  const next = new Set(drop);
-                  if (e.target.checked) next.add(s.key);
-                  else next.delete(s.key);
-                  setDrop(next);
-                }}
-                style={{ marginTop: 0 }}
-              />
-              <span>
-                Drop step {s.index + 1} ({s.title}): you didn’t ask for it
-              </span>
-            </label>
+            <Checkbox
+              key={s.key}
+              checked={drop.has(s.key)}
+              onChange={(on) => {
+                const next = new Set(drop);
+                if (on) next.add(s.key);
+                else next.delete(s.key);
+                setDrop(next);
+              }}
+            >
+              Drop step {s.index + 1} ({s.title}): you didn’t ask for it
+            </Checkbox>
           ))}
           {noteField(`Note to ${agent === 'copilot' ? 'Copilot' : 'the agent'} (optional)`)}
         </>
       );
     if (id === 'discard' && data.local)
       return (
-        <label className="choice">
-          <input
-            type="checkbox"
-            checked={deleteBranch}
-            onChange={(e) => {
-              setDeleteBranch(e.target.checked);
-              setConfirming(false);
-            }}
-          />
-          <span>Also delete the branch and its worktree</span>
-        </label>
+        <Checkbox
+          checked={deleteBranch}
+          onChange={(on) => {
+            setDeleteBranch(on);
+            setConfirming(false);
+          }}
+        >
+          Also delete the branch and its worktree
+        </Checkbox>
       );
     return null;
   };
-  const noteField = (label: string) => (
-    <>
-      <label htmlFor="note" style={{ fontSize: 13, fontWeight: 600 }}>
-        {label}
-      </label>
-      <textarea id="note" rows={2} className="textarea" placeholder="Anything else it should know" value={note} onChange={(e) => setNote(e.target.value)} />
-    </>
-  );
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <Brand onClick={() => go({ name: 'home' })} />
-        <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: () => go({ name: 'plan', projectId: data.projectId, branch: data.branch }), shrink: true }, { label: 'Finish' }]} />
-      </header>
-
-      <div style={{ width: '100%', maxWidth: 860, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <h1 style={{ fontSize: 26, letterSpacing: '-0.015em', overflowWrap: 'anywhere' }}>{data.title}</h1>
-          <p style={{ fontSize: 14, color: 'var(--muted)' }}>
-            {[`${reviewed} of ${plural(data.steps.length, 'step')} reviewed`, plural(comments.length, 'comment'), dropping.length ? `${plural(dropping.length, 'step')} to drop` : null, minutes ? plural(minutes, 'minute') : null].filter(Boolean).join(' · ')}
-          </p>
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      <ViewHeader>
+        <div className="min-w-0 flex-1">
+          <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: () => go({ name: 'plan', projectId: data.projectId, branch: data.branch }), shrink: true }, { label: 'Finish' }]} />
         </div>
+      </ViewHeader>
 
-        {/* The decision first: it's what this page is for. Each option holds its own settings. */}
-        <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <legend className="label" style={{ padding: 0, marginBottom: 10 }}>
-            What do you want to do?
-          </legend>
-          {options.map((o) => {
-            const on = pick === o.id;
-            const body = on && !o.disabled ? optionBody(o.id) : null;
-            return (
-              <div key={o.id} className="option" data-on={on} style={o.disabled ? { opacity: 0.6 } : undefined}>
-                <label className="choice" style={{ gap: 12, cursor: o.disabled ? 'default' : 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="decision"
-                    disabled={!!o.disabled}
-                    checked={on}
-                    onChange={() => {
-                      setPick(o.id);
-                      setNeedsCommit(null);
-                      setError(null);
-                      setConfirming(false);
-                    }}
-                  />
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    <span style={{ fontSize: 15, fontWeight: 600 }}>{o.title}</span>
-                    <span style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--muted)' }}>{o.disabled ?? o.detail}</span>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 pt-7 pb-14">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-hero font-semibold break-words">{data.title}</h1>
+            <p className="text-meta text-faint">
+              {[`${reviewed} of ${plural(data.steps.length, 'step')} reviewed`, plural(comments.length, 'comment'), dropping.length ? `${plural(dropping.length, 'step')} to drop` : null, minutes ? plural(minutes, 'minute') : null].filter(Boolean).join(' · ')}
+            </p>
+          </div>
+
+          {/* The decision first: it's what this page is for. Each option holds its own settings. */}
+          <section className="flex flex-col gap-2">
+            <SectionHeader as="h2">What do you want to do?</SectionHeader>
+            <RadioGroup label="What do you want to do?" className="flex flex-col gap-2">
+              {options.map((o, i) => {
+                const on = pick === o.id;
+                const body = on && !o.disabled ? optionBody(o.id) : null;
+                return (
+                  <div key={o.id} className={`flex flex-col gap-2.5 rounded-xl border p-3.5 ${on ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'} ${o.disabled ? 'opacity-60' : ''}`}>
+                    <div className="flex items-start gap-3">
+                      <Radio checked={on} tabbable={on} disabled={!!o.disabled} onSelect={() => choose(o.id)} className="flex-1">
+                        <span className="flex flex-col gap-0.5">
+                          <span className="text-body font-semibold">{o.title}</span>
+                          <span className="text-ui text-muted">{o.disabled ?? o.detail}</span>
+                        </span>
+                      </Radio>
+                      <Kbd keys={String(i + 1)} />
+                    </div>
+                    {body && <div className="flex flex-col gap-2.5 pl-6">{body}</div>}
+                  </div>
+                );
+              })}
+            </RadioGroup>
+          </section>
+
+          <section className="flex flex-col gap-2.5 rounded-xl border border-border p-3.5">
+            <div className="flex items-center justify-between">
+              <span className="text-body font-semibold">{comments.length ? `Your ${plural(comments.length, 'comment')}` : 'No comments'}</span>
+              {comments.length > 0 && (
+                <Button variant="quiet" size="sm" aria-expanded={showComments} onClick={() => setShowComments(!showComments)}>
+                  {showComments ? 'Hide' : 'Show'}
+                </Button>
+              )}
+            </div>
+            {showComments &&
+              comments.map((c) => (
+                <div key={c.id} className="flex flex-col gap-1 rounded-lg bg-code px-3 py-2.5">
+                  <span className="text-meta break-words text-faint">
+                    {stepLabel(c.stepKey)}
+                    {c.path && c.line ? <span className="font-mono"> · {c.path}:{c.line}</span> : null}
                   </span>
-                </label>
-                {body && <div className="option-body">{body}</div>}
-              </div>
-            );
-          })}
-        </fieldset>
-
-        <section className="card" style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <button type="button" className="link" aria-expanded={showComments} disabled={!comments.length} onClick={() => setShowComments(!showComments)} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600, color: comments.length ? 'var(--text)' : 'var(--muted)' }}>
-            <span>{comments.length ? `Your ${plural(comments.length, 'comment')}` : 'No comments'}</span>
-            {comments.length > 0 && <span style={{ color: 'var(--accent)', fontWeight: 500 }}>{showComments ? 'Hide' : 'Show'}</span>}
-          </button>
-          {showComments &&
-            comments.map((c) => (
-              <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '12px 14px', background: 'var(--bg)', borderRadius: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', overflowWrap: 'anywhere' }}>
-                  {stepLabel(c.stepKey)}
-                  {c.path && c.line ? <span className="mono"> · {c.path}:{c.line}</span> : null}
-                </span>
-                <div style={{ fontSize: 14, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
-                  <Markdown text={c.body} />
+                  <div className="text-body break-words select-text">
+                    <Markdown text={c.body} />
+                  </div>
                 </div>
-              </div>
-            ))}
-        </section>
+              ))}
+          </section>
 
-        {needsCommit !== null && (
-          <div className="notice" role="alert" style={{ flexDirection: 'column', gap: 10 }}>
-            <span>
-              <strong>{plural(needsCommit, 'file')} on this branch {needsCommit === 1 ? "isn't" : "aren't"} committed yet.</strong> {opening ? 'A pull request' : 'A merge'} only takes commits. Hunkdory can commit them for you first, with "{data.title}" as the message. The <span className="mono">.review</span> folder stays out of the commit.
-            </span>
-            <span>
-              <button type="button" className="btn primary" disabled={busy} onClick={() => submit(true)}>
-                Commit {plural(needsCommit, 'file')} and {opening ? 'open the PR' : 'merge'}
-              </button>
-            </span>
-          </div>
-        )}
-        {error && <p className="error">{error}</p>}
+          {needsCommit !== null && (
+            <Notice
+              tone="caution"
+              role="alert"
+              actions={
+                <Button variant="primary" disabled={busy} onClick={() => submit(true)}>
+                  Commit {plural(needsCommit, 'file')} and {opening ? 'open the PR' : 'merge'}
+                </Button>
+              }
+            >
+              <strong className="font-semibold">
+                {plural(needsCommit, 'file')} on this branch {needsCommit === 1 ? "isn't" : "aren't"} committed yet.
+              </strong>{' '}
+              {opening ? 'A pull request' : 'A merge'} only takes commits. Hunkdory can commit them for you first, with "{data.title}" as the message. The <span className="font-mono">.review</span> folder stays out of the commit.
+            </Notice>
+          )}
+          {error && <Notice tone="error">{error}</Notice>}
 
-        {/* What's still open sits next to the button it holds back. */}
-        {(guarded || (confirming && risky)) && (
-          <div className="notice" role={confirming ? 'alert' : undefined} style={{ flexDirection: 'column', gap: 6 }}>
-            {guarded ? (
-              <>
-                <strong>{confirming ? 'Merge with these still open?' : 'Not done yet'}</strong>
-                <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {unfinished.map((u) => (
-                    <li key={u}>{u}</li>
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <span>
-                <strong>Delete {data.branch} and its worktree?</strong> Uncommitted changes in it are lost.
-              </span>
-            )}
+          {/* What's still open sits next to the button it holds back. */}
+          {(guarded || (confirming && risky)) && (
+            <Notice tone={confirming ? 'warn' : 'caution'} role={confirming ? 'alert' : 'note'}>
+              {guarded ? (
+                <>
+                  <strong className="font-semibold">{confirming ? 'Merge with these still open?' : 'Not done yet'}</strong>
+                  <ul className="m-0 mt-1 flex list-disc flex-col gap-0.5 pl-4">
+                    {unfinished.map((u) => (
+                      <li key={u}>{u}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <>
+                  <strong className="font-semibold">Delete {data.branch} and its worktree?</strong> Uncommitted changes in it are lost.
+                </>
+              )}
+            </Notice>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button size="lg" shortcut="finish.back" onClick={() => go({ name: 'plan', projectId: data.projectId, branch: data.branch })}>
+              Keep reviewing
+            </Button>
+            <Button
+              variant={confirming && risky ? 'danger' : 'primary'}
+              filled={confirming && risky}
+              size="lg"
+              shortcut="finish.submit"
+              disabled={busy || !!current.disabled}
+              aria-busy={busy}
+              onClick={() => submit(false)}
+            >
+              {busy ? 'Working…' : confirming && guarded ? 'Merge anyway' : confirming && risky ? 'Delete and discard' : current.submit}
+            </Button>
           </div>
-        )}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button type="button" className="btn lg" onClick={() => go({ name: 'plan', projectId: data.projectId, branch: data.branch })}>
-            Keep reviewing
-          </button>
-          <button type="button" className="btn lg primary" disabled={busy || !!current.disabled} onClick={() => submit(false)}>
-            {busy ? 'Working…' : confirming && guarded ? 'Merge anyway' : confirming && risky ? 'Delete and discard' : current.submit}
-          </button>
         </div>
       </div>
     </div>

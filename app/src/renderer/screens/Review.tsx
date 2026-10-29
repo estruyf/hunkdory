@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, LoadingPage, useAsync } from '../components/ui.tsx';
+import { LoadingPage, useAsync } from '../components/ui.tsx';
+import { ViewHeader } from '../components/ViewHeader.tsx';
+import { Button } from '../components/ui/Button.tsx';
+import { Notice } from '../components/ui/Notice.tsx';
+import { TEXTAREA } from '../components/ui/field.ts';
 import type { ReviewData, ReviewState, Step } from '../../shared/types.ts';
 import { Markdown } from '../components/markdown.tsx';
 import { timeAgo } from '../../shared/order.ts';
@@ -19,17 +23,14 @@ export function Review({ go, projectId, branch, stepKey, decision, group, preloa
 
 export function ReviewError({ go, message }: { go: Go; message: string }) {
   return (
-    <div className="page">
-      <header className="topbar">
-        <Brand onClick={() => go({ name: 'home' })} />
-      </header>
-      <div style={{ maxWidth: 720, margin: '48px auto', padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <h1 style={{ fontSize: 22 }}>Can't open this review</h1>
-        <p className="error">{message}</p>
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      <ViewHeader>
+        <h1 className="text-title font-semibold">Can't open this review</h1>
+      </ViewHeader>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-8">
+        <Notice tone="error">{message}</Notice>
         <div>
-          <button type="button" className="btn" onClick={() => go({ name: 'home' })}>
-            Back to inbox
-          </button>
+          <Button onClick={() => go({ name: 'home' })}>Back to the inbox</Button>
         </div>
       </div>
     </div>
@@ -41,7 +42,7 @@ export function AskedFor({ data, clamp }: { data: ReviewData; clamp?: number }) 
   if (data.prompt) return <Prompt text={data.prompt} clamp={clamp} />;
   if (data.pr?.body.trim()) return <Prompt text={data.pr.body.trim()} clamp={clamp} />;
   return (
-    <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5 }}>
+    <p className="text-body text-muted">
       {data.pr ? 'The pull request has no description, and no Claude Code session on this Mac worked on its branch.' : 'No Claude Code session ran on this branch, so there is no prompt to show.'}
     </p>
   );
@@ -52,19 +53,17 @@ export function AgentTests({ data }: { data: ReviewData }) {
   const t = data.agentTests;
   if (!t) return null;
   const last = t.runs.at(-1);
-  if (!last) return <span style={{ color: 'var(--med-fg)', fontWeight: 600 }}>The agent didn’t run any tests in its session.</span>;
+  if (!last) return <span className="font-semibold text-caution">The agent didn’t run any tests in its session.</span>;
   const outcome = { passed: 'they passed', failed: 'they failed', unknown: 'the output doesn’t say if they passed' }[last.result];
   const stale = !!t.lastEditAt && t.lastEditAt > last.at;
   return (
     <span>
-      <span style={{ fontWeight: 600, color: last.result === 'passed' && !stale ? 'var(--low-fg)' : 'var(--med-fg)' }}>
+      <span className={`font-semibold ${last.result === 'passed' && !stale ? 'text-ok' : last.result === 'failed' ? 'text-error' : 'text-caution'}`}>
         Last run {timeAgo(last.at)}: {outcome}.
       </span>{' '}
-      <span className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>
-        {last.command}
-      </span>
+      <span className="font-mono text-meta break-all text-muted">{last.command}</span>
       {stale && <> The agent edited files after that run.</>}
-      {t.runs.length > 1 && <span className="muted"> ({t.runs.length} runs in all)</span>}
+      {t.runs.length > 1 && <span className="text-muted"> ({t.runs.length} runs in all)</span>}
     </span>
   );
 }
@@ -95,14 +94,14 @@ export function CommentBox({ initial, onSave, children }: { initial: string; onS
   useEffect(() => save, []);
 
   return (
-    <section className="card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <label htmlFor="feedback" style={{ fontSize: 13, fontWeight: 600 }}>
+    <section className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
+      <label htmlFor="feedback" className="text-ui font-semibold">
         Comment on this step
       </label>
       <textarea
         id="feedback"
         rows={3}
-        className="textarea"
+        className={TEXTAREA}
         placeholder="e.g. Use the existing cache helper instead of adding a dependency"
         value={body}
         onChange={(e) => {
@@ -111,8 +110,10 @@ export function CommentBox({ initial, onSave, children }: { initial: string; onS
           setBody(e.target.value);
         }}
         onBlur={save}
+        onKeyDown={(e) => e.key === 'Escape' && (e.target as HTMLTextAreaElement).blur()}
       />
-      {children && <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>{children}</div>}
+      <span className="text-meta text-faint">Saved as you type. It goes with your review when you finish.</span>
+      {children && <div className="flex flex-wrap items-center justify-between gap-2.5">{children}</div>}
     </section>
   );
 }
@@ -123,12 +124,12 @@ export function Prompt({ text, clamp = 600 }: { text: string; clamp?: number }) 
   // Cut by height, not characters: slicing markdown can break a table or code block halfway.
   const collapsed = long && !open;
   return (
-    <div style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--text-body)', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8, overflowWrap: 'anywhere' }}>
-      <div className={collapsed ? 'fade-out' : undefined} style={collapsed ? { maxHeight: `${Math.round(clamp / 45)}em`, overflow: 'hidden' } : undefined}>
+    <div className="rounded-lg bg-code px-3 py-2 text-body break-words select-text">
+      <div className={collapsed ? 'fade-out overflow-hidden' : undefined} style={collapsed ? { maxHeight: `${Math.round(clamp / 45)}em` } : undefined}>
         <Markdown text={text} />
       </div>
       {long && (
-        <button type="button" className="link" style={{ display: 'block', marginTop: 6, fontSize: 13, fontWeight: 500 }} onClick={() => setOpen(!open)}>
+        <button type="button" className="mt-1 block text-ui text-link hover:underline" onClick={() => setOpen(!open)}>
           {open ? 'Show less' : 'Show all'}
         </button>
       )}

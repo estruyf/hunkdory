@@ -2,6 +2,10 @@ import { useState } from 'react';
 import type { Go } from '../App.tsx';
 import type { CheckItem, ReviewData, StackEntry } from '../../shared/types.ts';
 import { cleanError } from './ui.tsx';
+import { Notice } from './ui/Notice.tsx';
+import { Pill } from './ui/Pill.tsx';
+import { SectionHeader } from './ui/SectionHeader.tsx';
+import type { PillTone } from './ui/buttonStyles.ts';
 
 export function checkCounts(checks: CheckItem[]) {
   const n = { pass: 0, fail: 0, pending: 0, skipped: 0 };
@@ -15,14 +19,16 @@ export function checksText(checks: CheckItem[]): string {
   return [n.fail && `${n.fail} failing`, n.pending && `${n.pending} running`, n.pass && `${n.pass} passed`, n.skipped && `${n.skipped} skipped`].filter(Boolean).join(' · ');
 }
 
-export const checksTone = (checks: CheckItem[]) => {
+/** The pill tone for a set of checks: failing is an error, all passed is ok, anything still running is neutral. */
+export const checksTone = (checks: CheckItem[]): PillTone => {
   const n = checkCounts(checks);
-  return n.fail ? 'high' : n.pending ? 'medium' : 'low';
+  return n.fail ? 'error' : n.pending ? 'default' : 'ok';
 };
 
-const DOT = { pass: 'var(--low-fg)', fail: 'var(--high-fg)', pending: 'var(--med-fg)', skipped: 'var(--muted)' } as const;
+const DOT = { pass: 'bg-ok', fail: 'bg-error', pending: 'bg-faint', skipped: 'bg-faint' } as const;
+const TEXT = { error: 'text-error', ok: 'text-ok', default: 'text-text' } as Record<PillTone, string>;
 
-/** CI on the pull request: a summary, with the checks that need a look listed. */
+/** CI on the pull request, in the Context panel: a summary, with the checks that need a look listed. */
 export function ChecksCard({ data }: { data: ReviewData }) {
   const [all, setAll] = useState(false);
   const checks = data.pr?.checks ?? [];
@@ -30,27 +36,27 @@ export function ChecksCard({ data }: { data: ReviewData }) {
   const notable = checks.filter((c) => c.state === 'fail' || c.state === 'pending');
   const list = all ? checks : notable;
   return (
-    <section className="card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <h2 className="label">CI on GitHub</h2>
+    <section className="flex flex-col gap-1.5">
+      <SectionHeader as="h3">CI on GitHub</SectionHeader>
       {!checks.length ? (
-        <p style={{ fontSize: 14, color: 'var(--muted)' }}>No checks ran on this pull request.</p>
+        <p className="text-ui text-muted">No checks ran on this pull request.</p>
       ) : (
         <>
-          <p style={{ fontSize: 14, fontWeight: 600, color: `var(--${checksTone(checks) === 'high' ? 'high' : checksTone(checks) === 'medium' ? 'med' : 'low'}-fg)` }}>{checksText(checks)}</p>
+          <p className={`text-ui font-semibold ${TEXT[checksTone(checks)]}`}>{checksText(checks)}</p>
           {list.map((c, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5 }}>
-              <span style={{ flex: 'none', width: 8, height: 8, borderRadius: 999, background: DOT[c.state] }} />
+            <div key={i} className="flex items-center gap-2 text-ui">
+              <span aria-hidden className={`size-2 shrink-0 rounded-full ${DOT[c.state]}`} />
               {c.url ? (
-                <button type="button" className="link" style={{ fontSize: 13.5, textAlign: 'left', overflowWrap: 'anywhere' }} onClick={() => window.api.openExternal(c.url!)}>
+                <button type="button" className="text-left break-words text-link hover:underline" onClick={() => window.api.openExternal(c.url!)}>
                   {c.name} ↗
                 </button>
               ) : (
-                <span style={{ overflowWrap: 'anywhere' }}>{c.name}</span>
+                <span className="break-words">{c.name}</span>
               )}
             </div>
           ))}
           {checks.length > notable.length && (
-            <button type="button" className="link" style={{ fontSize: 13, fontWeight: 500, textAlign: 'left' }} onClick={() => setAll(!all)}>
+            <button type="button" className="self-start text-meta text-link hover:underline" onClick={() => setAll(!all)}>
               {all ? 'Only what needs a look' : `Show all ${checks.length} checks`}
             </button>
           )}
@@ -76,32 +82,30 @@ export function StackBar({ data, go }: { data: ReviewData; go: Go }) {
     }
   };
   return (
-    <nav aria-label="Pull request stack" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 8px', fontSize: 13 }}>
-        <span style={{ fontWeight: 600, color: 'var(--muted)' }}>Stack</span>
-        <span className="mono" style={{ color: 'var(--muted)' }}>
-          {data.stack.base}
-        </span>
+    <nav aria-label="Pull request stack" className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-ui">
+        <span className="font-semibold text-muted">Stack</span>
+        <span className="font-mono text-muted">{data.stack.base}</span>
         {data.stack.prs.map((e) => (
-          <span key={e.number} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <span aria-hidden="true" style={{ color: 'var(--muted)' }}>
+          <span key={e.number} className="inline-flex items-center gap-2">
+            <span aria-hidden className="text-faint">
               ←
             </span>
             {e.current ? (
-              <span className="pill accent" style={{ border: 0 }} aria-current="page" title={e.title}>
+              <Pill selected aria-current="page" data-tooltip={e.title}>
                 #{e.number} this PR
-              </span>
+              </Pill>
             ) : (
-              <button type="button" className="pill neutral" style={{ border: 0, cursor: 'pointer', font: 'inherit', fontSize: 12, fontWeight: 600 }} title={`${e.title}${e.status ? ` · ${STATUS[e.status]}` : ''}`} onClick={() => open(e)}>
+              <Pill tone="muted" onClick={() => open(e)} data-tooltip={`${e.title}${e.status ? ` · ${STATUS[e.status]}` : ''}`}>
                 #{e.number}
                 {e.status ? ` · ${STATUS[e.status]}` : ''}
-              </button>
+              </Pill>
             )}
           </span>
         ))}
       </div>
-      <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>This review only shows what this PR adds on top of the one below it.</span>
-      {error && <p className="error">{error}</p>}
+      <span className="text-meta text-muted">This review only shows what this PR adds on top of the one below it.</span>
+      {error && <Notice tone="error">{error}</Notice>}
     </nav>
   );
 }

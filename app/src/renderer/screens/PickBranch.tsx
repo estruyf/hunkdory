@@ -1,6 +1,15 @@
-import { useState } from 'react';
+import { Search } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Crumbs, Loading, cleanError, plural, useAsync } from '../components/ui.tsx';
+import { Crumbs, Loading, cleanError, plural, useAsync } from '../components/ui.tsx';
+import { ViewHeader } from '../components/ViewHeader.tsx';
+import { Button } from '../components/ui/Button.tsx';
+import { Kbd } from '../components/ui/Kbd.tsx';
+import { Notice } from '../components/ui/Notice.tsx';
+import { Pill } from '../components/ui/Pill.tsx';
+import { Select } from '../components/ui/Select.tsx';
+import { FIELD_LG } from '../components/ui/field.ts';
+import { matches } from '../lib/shortcuts.ts';
 import { timeAgo } from '../../shared/order.ts';
 
 /** Review any branch: yours, a colleague's, or one an agent made without a session. */
@@ -12,10 +21,22 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
   const branches = useAsync(() => (current ? window.api.listBranches(current) : new Promise<never>(() => {})), [current]);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const field = useRef<HTMLInputElement>(null);
   const project = projects.value?.find((p) => p.id === current);
 
   const q = query.trim().toLowerCase();
   const list = (branches.value ?? []).filter((b) => !q || `${b.name} ${b.author} ${b.subject}`.toLowerCase().includes(q));
+
+  // ⌘F finds a branch.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!matches(e, 'pick.find')) return;
+      e.preventDefault();
+      field.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const pick = async (name: string) => {
     try {
@@ -27,63 +48,54 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
   };
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <Brand onClick={() => go({ name: 'home' })} />
-        <Crumbs items={[{ label: 'Inbox', onClick: () => go({ name: 'home' }) }, { label: 'Review another branch' }]} />
-      </header>
-      <div style={{ width: '100%', maxWidth: 960, margin: '0 auto', padding: '32px 24px 48px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <h1 style={{ fontSize: 26, letterSpacing: '-0.015em' }}>Review another branch</h1>
-          <p style={{ fontSize: 15, lineHeight: 1.6, color: 'var(--muted)' }}>
-            Any branch with commits on top of {project ? <span className="mono">{project.baseBranch}</span> : 'the base'}: yours, a colleague's, or an agent's. Remote branches are as fresh as your last fetch.
-          </p>
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      <ViewHeader>
+        <div className="min-w-0 flex-1">
+          <Crumbs items={[{ label: 'Review another branch' }]} />
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          {(projects.value?.length ?? 0) > 1 && (
-            <select aria-label="Project" className="field" value={current} onChange={(e) => setProjectId(e.target.value)}>
-              {projects.value!.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
+      </ViewHeader>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-7 pb-14">
+          <div className="flex flex-col gap-1.5">
+            <h1 className="text-hero font-semibold">Review another branch</h1>
+            <p className="text-body text-muted">
+              Any branch with commits on top of {project ? <span className="font-mono">{project.baseBranch}</span> : 'the base'}: yours, a colleague's, or an agent's. Remote branches are as fresh as your last fetch.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(projects.value?.length ?? 0) > 1 && (
+              <Select label="Project" value={current ?? ''} onChange={setProjectId} options={projects.value!.map((p) => ({ value: p.id, label: p.name }))} className={`${FIELD_LG} w-48`} />
+            )}
+            <label className={`${FIELD_LG} flex min-w-0 flex-[1_1_320px] items-center gap-2 focus-within:border-accent-ink`}>
+              <Search size={13} className="text-faint" aria-hidden />
+              <input ref={field} autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search branch, author or commit message" aria-label="Search branches" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-faint" />
+              <Kbd shortcut="pick.find" />
+            </label>
+          </div>
+          {error && <Notice tone="error">{error}</Notice>}
+          {branches.loading && <Loading label="Listing branches…" />}
+          {branches.error && <Notice tone="error">{branches.error}</Notice>}
+          {branches.value && !branches.loading && (
+            <ul className="m-0 flex list-none flex-col gap-px p-0">
+              {list.length === 0 && <Notice>No branches with changes on top of the base.</Notice>}
+              {list.map((b) => (
+                <li key={b.name} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-2.5 py-2 hover:bg-border/45">
+                  <div className="flex min-w-0 flex-[1_1_420px] flex-col gap-0.5">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-mono text-ui font-semibold">{b.name}</span>
+                      {b.remote && <Pill tone="muted">remote</Pill>}
+                      {b.inInbox && <Pill tone="muted">In your inbox</Pill>}
+                    </span>
+                    <span className="truncate text-meta text-faint">
+                      {b.author} · {timeAgo(b.updatedAt)} · {plural(b.ahead, 'commit')} · {b.subject}
+                    </span>
+                  </div>
+                  {b.inInbox ? <Button onClick={() => go({ name: 'plan', projectId: current!, branch: b.name })}>Open</Button> : <Button onClick={() => pick(b.name)}>Review</Button>}
+                </li>
               ))}
-            </select>
+            </ul>
           )}
-          <input className="field" autoFocus placeholder="Search branch, author or commit message" value={query} onChange={(e) => setQuery(e.target.value)} style={{ flex: '1 1 320px' }} />
         </div>
-        {error && <p className="error">{error}</p>}
-        {branches.loading && <Loading label="Listing branches…" />}
-        {branches.error && <p className="error">{branches.error}</p>}
-        {branches.value && !branches.loading && (
-          <section className="card" style={{ overflow: 'hidden' }}>
-            {list.length === 0 && <p style={{ padding: '16px 18px', fontSize: 14, color: 'var(--muted)' }}>No branches with changes on top of the base.</p>}
-            {list.map((b) => (
-              <div key={b.name} style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--divider)' }}>
-                <div style={{ flex: '1 1 420px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span className="mono" style={{ fontSize: 13.5, fontWeight: 500, overflowWrap: 'anywhere' }}>
-                    {b.name}
-                    {b.remote && <span className="pill neutral" style={{ marginLeft: 8, fontFamily: 'var(--sans)' }}>remote</span>}
-                  </span>
-                  <span style={{ fontSize: 13, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {b.author} · {timeAgo(b.updatedAt)} · {plural(b.ahead, 'commit')} · {b.subject}
-                  </span>
-                </div>
-                {b.inInbox ? (
-                  <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <span className="pill neutral">In your inbox</span>
-                    <button type="button" className="btn" onClick={() => go({ name: 'plan', projectId: current!, branch: b.name })}>
-                      Open
-                    </button>
-                  </span>
-                ) : (
-                  <button type="button" className="btn primary" onClick={() => pick(b.name)}>
-                    Review
-                  </button>
-                )}
-              </div>
-            ))}
-          </section>
-        )}
       </div>
     </div>
   );

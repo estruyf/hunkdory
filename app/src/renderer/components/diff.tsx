@@ -2,7 +2,12 @@ import { useMemo, useState, type ReactNode } from 'react';
 import hljs from 'highlight.js/lib/common';
 import { ignoreWhitespace, languageFor, riskReason, splitRows } from '../../shared/diff.ts';
 import type { Comment, DiffLine, HunkView } from '../../shared/types.ts';
+import { Sparkles } from 'lucide-react';
 import { Markdown } from './markdown.tsx';
+import { modKey } from '../lib/shortcuts.ts';
+import { Button } from './ui/Button.tsx';
+import { Pill } from './ui/Pill.tsx';
+import { TEXTAREA } from './ui/field.ts';
 
 const MAX_ROWS = 80;
 const STEP = 20;
@@ -59,13 +64,13 @@ function PathLabel({ path }: { path: string }) {
   // Deep paths keep their last folders; the full path is in the tooltip.
   const parts = all.length > 3 ? ['…', ...all.slice(-3)] : all;
   return (
-    <span className="mono" style={{ fontSize: 13, overflowWrap: 'anywhere' }} title={path}>
+    <span className="font-mono text-ui break-all" data-tooltip={path}>
       {parts.map((p, i) => (
-        <span key={i} style={{ color: 'var(--muted)' }}>
+        <span key={i} className="text-muted">
           {p}/<wbr />
         </span>
       ))}
-      <span style={{ fontWeight: 600 }}>{file}</span>
+      <span className="font-semibold text-text">{file}</span>
     </span>
   );
 }
@@ -119,7 +124,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
   const commentsAt = (a: Anchor | null) => (a ? comments.filter((c) => c.side === a.side && c.line === a.line) : []);
   const num = (n: number | null, l: DiffLine, a: Anchor | null) =>
     onComment && a && !extra.has(l) ? (
-      <button type="button" className="diff-n diff-n-btn" title="Comment on this line" aria-label={`Comment on line ${a.line}`} onClick={() => setEditing(a)}>
+      <button type="button" className="diff-n diff-n-btn" data-tooltip="Comment on this line" aria-label={`Comment on line ${a.line}`} onClick={() => setEditing(a)}>
         {n ?? ''}
       </button>
     ) : (
@@ -150,7 +155,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
   let body: ReactNode;
   if (!hunk.lines.length) {
     body = (
-      <div style={{ padding: '12px 16px', fontSize: 13.5, color: 'var(--muted)' }}>
+      <div className="px-3 py-2.5 text-ui text-muted">
         {hunk.synthetic === 'binary' ? 'Binary file. No text diff to show.' : hunk.synthetic === 'rename' ? `Renamed from ${hunk.oldPath} without content changes.` : 'File mode changed.'}
       </div>
     );
@@ -202,33 +207,31 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
 
   const bar = (children: ReactNode) => <div className="diff-bar">{children}</div>;
   return (
-    <section className="card" style={{ overflow: 'hidden' }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 16px', background: 'var(--bar-bg)', borderBottom: '1px solid var(--border)' }}>
+    <section className="overflow-hidden rounded-lg border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-code px-3 py-1.5">
         <PathLabel path={hunk.path} />
-        <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="flex flex-wrap items-center gap-1.5">
           {badge}
           {risks.map((r) => (
-            <span key={r.code} className={`pill ${r.severity}`} style={{ fontSize: 11 }} title={riskReason(r) ?? undefined}>
+            <Pill key={r.code} tone={r.severity === 'high' ? 'caution' : 'default'} data-tooltip={riskReason(r) ?? undefined}>
               {r.label}
-            </span>
+            </Pill>
           ))}
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{hunk.rangeLabel}</span>
+          <span className="font-mono text-meta text-faint">{hunk.rangeLabel}</span>
         </span>
       </div>
       {showNote && hunk.note && (
         // Before the code: it says what to look for while reading it.
-        <div style={{ display: 'flex', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--accent-soft)' }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: 'none', marginTop: 2 }}>
-            <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" />
-          </svg>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 13.5, lineHeight: 1.55, color: 'var(--text-body)', minWidth: 0 }}>
-            <span className="label-sm">{noteBy === 'reviewer' ? 'Hunkdory’s note' : 'Note from the agent'}</span>
+        <div className="flex gap-2.5 border-b border-border bg-link/6 px-3 py-2">
+          <Sparkles size={14} className="mt-0.5 shrink-0 text-link" aria-hidden />
+          <div className="flex min-w-0 flex-col gap-0.5 text-body text-text select-text">
+            <span className="text-meta font-semibold tracking-wider text-faint uppercase">{noteBy === 'reviewer' ? 'Hunkdory’s note' : 'Note from the agent'}</span>
             <Markdown text={hunk.note} />
           </div>
         </div>
       )}
       {!open ? (
-        <button type="button" className="link diff-bar" style={{ width: '100%', textAlign: 'left' }} onClick={() => setOpen(true)}>
+        <button type="button" className="diff-bar w-full text-left text-link hover:underline" onClick={() => setOpen(true)}>
           {collapsed} Show it
         </button>
       ) : (
@@ -237,24 +240,24 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
             bar(
               <>
                 {canUp && (
-                  <button type="button" className="link" disabled={loading} onClick={() => grow('up')}>
+                  <button type="button" className="text-link hover:underline disabled:opacity-50" disabled={loading} onClick={() => grow('up')}>
                     ↑ {STEP} more lines above
                   </button>
                 )}
-                <button type="button" className="link" disabled={loading} onClick={() => grow('all')}>
+                <button type="button" className="text-link hover:underline disabled:opacity-50" disabled={loading} onClick={() => grow('all')}>
                   Whole file
                 </button>
               </>
             )}
-          <div style={{ overflowX: 'auto' }}>{body}</div>
+          <div className="overflow-x-auto">{body}</div>
           {!all && base.length > MAX_ROWS && (
-            <button type="button" className="link diff-bar" style={{ width: '100%', textAlign: 'left' }} onClick={() => setAll(true)}>
+            <button type="button" className="diff-bar w-full text-left text-link hover:underline" onClick={() => setAll(true)}>
               Show {base.length - MAX_ROWS} more lines
             </button>
           )}
           {canDown &&
             bar(
-              <button type="button" className="link" disabled={loading} onClick={() => grow('down')}>
+              <button type="button" className="text-link hover:underline disabled:opacity-50" disabled={loading} onClick={() => grow('down')}>
                 ↓ {STEP} more lines below
               </button>
             )}
@@ -267,27 +270,30 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
 function LineComposer({ initial = '', onSave, onCancel }: { initial?: string; onSave: (body: string) => void; onCancel: () => void }) {
   const [body, setBody] = useState(initial);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="flex flex-col gap-2">
       <textarea
         autoFocus
         rows={2}
-        className="textarea"
+        className={TEXTAREA}
         aria-label="Comment on this line"
         placeholder="Comment on this line"
         value={body}
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onSave(body);
-          if (e.key === 'Escape') onCancel();
+          if (e.key === 'Enter' && modKey(e)) onSave(body);
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            onCancel();
+          }
         }}
       />
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button type="button" className="btn primary" style={{ height: 32 }} disabled={!body.trim() && !initial} onClick={() => onSave(body)}>
+      <div className="flex gap-2">
+        <Button variant="primary" kbd="mod+enter" disabled={!body.trim() && !initial} onClick={() => onSave(body)}>
           {initial ? 'Save' : 'Comment'}
-        </button>
-        <button type="button" className="btn" style={{ height: 32 }} onClick={onCancel}>
+        </Button>
+        <Button kbd="Esc" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -307,16 +313,16 @@ function LineComment({ comment, onSave }: { comment: Comment; onSave: (body: str
       />
     );
   return (
-    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13.5, lineHeight: 1.5 }}>
-      <div style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+    <div className="flex items-start gap-2 text-body">
+      <div className="min-w-0 flex-1 break-words select-text">
         <Markdown text={comment.body} />
       </div>
-      <button type="button" className="link" style={{ fontSize: 12.5 }} onClick={() => setEdit(true)}>
+      <Button variant="quiet" size="sm" onClick={() => setEdit(true)}>
         Edit
-      </button>
-      <button type="button" className="link" style={{ fontSize: 12.5, color: 'var(--high-fg)' }} onClick={() => onSave('')}>
+      </Button>
+      <Button variant="danger" size="sm" onClick={() => onSave('')}>
         Delete
-      </button>
+      </Button>
     </div>
   );
 }

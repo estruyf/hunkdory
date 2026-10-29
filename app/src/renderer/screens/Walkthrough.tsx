@@ -1,7 +1,17 @@
 // The step walkthrough: one step at a time, read top to bottom, with one clear next action.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Brand, Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, useMediaQuery, usePref, useShortcutSheet } from '../components/ui.tsx';
+import { ArrowLeft, Columns2, Rows2 } from 'lucide-react';
+import { Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, useMediaQuery, usePref } from '../components/ui.tsx';
+import { ViewHeader } from '../components/ViewHeader.tsx';
+import { Button } from '../components/ui/Button.tsx';
+import { Checkbox } from '../components/ui/Checkbox.tsx';
+import { Kbd } from '../components/ui/Kbd.tsx';
+import { Notice } from '../components/ui/Notice.tsx';
+import { Pill } from '../components/ui/Pill.tsx';
+import { SectionHeader } from '../components/ui/SectionHeader.tsx';
+import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
+import { matches } from '../lib/shortcuts.ts';
 import { DiffHunk, type DiffMode } from '../components/diff.tsx';
 import { ChecksCard, StackBar } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
@@ -20,7 +30,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   const steps = plan.sequence;
   // Where you are comes from the route, so back and forward move between steps and decisions.
   // Opened without a place ("Continue review"): the first thing not done yet, decisions first.
-  const [start] = useState(() => (stepKey || decision ? null : resumePoint(plan, state)));
+  const [start] = useState(() => (stepKey || decision || group ? null : resumePoint(plan, state)));
   const startKey = start?.stepKey ?? steps[0]?.key;
   const decisionId = decision ?? (stepKey ? undefined : start?.decision?.id);
   const dec = decisionId ? (plan.decisions.find((d) => d.id === decisionId) ?? null) : null;
@@ -95,48 +105,32 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   const prevDecision = () => (decPos > 0 ? decide(plan.decisions[decPos - 1]) : toPlan());
   const keys = useRef({ looksGood: () => {}, groupDone: () => {} });
 
-  const sheet = useShortcutSheet([
-    ['j', dec ? 'Next decision' : 'Next step'],
-    ['k', dec ? 'Previous decision' : 'Previous step'],
-    ['r', dec ? 'Choose the main answer, or go to the next decision' : skimGroup ? 'All look good' : 'Looks good, next'],
-    ['c', 'Comment on this step'],
-    ['a', 'Ask Claude'],
-    ['s', 'Unified or side by side'],
-    ['w', 'Hide whitespace changes'],
-    ['x', 'Show or hide context'],
-    ['/', 'Search the code'],
-    ['p', 'Back to the plan'],
-    ['f', 'Finish'],
-    ['?', 'This list'],
-  ]);
-
-  // j/k between steps, r looks good, c comments, a asks Claude, s switches the diff layout, w hides whitespace edits.
+  // The review's keys, from the registry: j and k move, r says it looks good (or gives a decision its main
+  // answer), n needs a fix, c comments, a asks Claude, s and w change the diff, Esc goes back to the plan.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!isPlainKey(e) || sheet.open) return;
-      const global: Record<string, () => void> = { p: toPlan, f: () => go({ name: 'finish', projectId: data.projectId, branch: data.branch }), x: toggleContext, s: () => setMode(mode === 'split' ? 'unified' : 'split'), w: () => setIgnoreSpace(!ignoreSpace) };
-      if (skimGroup && e.key === 'r') {
+      if (!isPlainKey(e)) return;
+      const run = (fn: () => void) => {
         e.preventDefault();
-        keys.current.groupDone();
+        fn();
+      };
+      if (matches(e, 'review.plan')) return run(toPlan);
+      if (matches(e, 'review.finish')) return run(() => go({ name: 'finish', projectId: data.projectId, branch: data.branch }));
+      if (matches(e, 'review.layout')) return run(() => setMode(mode === 'split' ? 'unified' : 'split'));
+      if (matches(e, 'review.whitespace')) return run(() => setIgnoreSpace(!ignoreSpace));
+      if (skimGroup) {
+        if (matches(e, 'review.good')) run(() => keys.current.groupDone());
         return;
       }
-      if (global[e.key]) {
-        e.preventDefault();
-        global[e.key]();
-        return;
-      }
-      if (skimGroup || (!cur && !dec)) return;
+      if (!cur && !dec) return;
+      if (matches(e, 'review.context') && cur) return run(toggleContext);
       // While deciding, next and back go through the decisions.
-      const moves: Record<string, () => void> = dec
-        ? { j: nextDecision, k: prevDecision, r: () => (state.settled?.[dec.id] ? nextDecision() : settle(dec, 'fine')) }
-        : { j: () => pos < steps.length - 1 && select(steps[pos + 1].key), k: () => pos > 0 && select(steps[pos - 1].key), r: () => keys.current.looksGood() };
-      const act: Record<string, () => void> = cur
-        ? { ...moves, c: () => openComment(), a: () => openAsk() }
-        : { j: moves.j, k: moves.k };
-      const fn = act[e.key];
-      if (!fn) return;
-      e.preventDefault();
-      fn();
+      if (matches(e, 'review.next')) return run(dec ? nextDecision : () => pos < steps.length - 1 && select(steps[pos + 1].key));
+      if (matches(e, 'review.previous')) return run(dec ? prevDecision : () => pos > 0 && select(steps[pos - 1].key));
+      if (matches(e, 'review.good')) return run(dec ? () => (state.settled?.[dec.id] ? nextDecision() : settle(dec, 'fine')) : () => keys.current.looksGood());
+      if (matches(e, 'review.fix') && dec && !state.settled?.[dec.id]) return run(() => settle(dec, 'fix'));
+      if (matches(e, 'review.comment') && cur) return run(openComment);
+      if (matches(e, 'review.ask') && cur) return run(openAsk);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -202,93 +196,104 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
 
   // One segment per decision or step, under the crumbs: click one to go there.
   const progressBar = (
-    <nav aria-label="Review progress" style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
+    <nav aria-label="Review progress" className="flex min-w-0 items-center gap-2.5">
       {phases.map((p) => {
         const n = p.segments.length;
         const done = p.segments.filter((x) => x.done).length;
         return (
-          <span key={p.label} title={`${p.label} · ${done} of ${n} done`} style={{ flex: `${Math.max(2, Math.min(n, 12))} 1 60px`, display: 'flex', gap: 2, minWidth: 0 }}>
+          <span key={p.label} data-tooltip={`${p.label} · ${done} of ${n} done`} className="flex min-w-0 gap-0.5" style={{ flex: `${Math.max(2, Math.min(n, 12))} 1 60px` }}>
             {n <= 40 ? (
               p.segments.map((x) => (
-                <button key={x.key} type="button" title={x.title} aria-label={x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} style={{ flex: 1, minWidth: 0, padding: '3px 0', border: 0, background: 'none', cursor: 'pointer' }}>
-                  <span style={{ display: 'block', height: 5, borderRadius: 3, background: x.done ? 'var(--accent)' : x.current ? 'var(--accent-soft)' : 'var(--border)', outline: x.current ? '2px solid var(--accent)' : undefined, outlineOffset: 1 }} />
+                <button key={x.key} type="button" data-tooltip={x.title} aria-label={x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} className="min-w-0 flex-1 py-1">
+                  <span className={`block h-1 rounded-full ${x.done ? 'bg-text' : x.current ? 'bg-text/45 outline-2 outline-offset-1 outline-text' : 'bg-selected'}`} />
                 </button>
               ))
             ) : (
-              <button type="button" onClick={p.onClick} aria-label={`${p.label}: ${done} of ${n} done`} style={{ flex: 1, padding: '3px 0', border: 0, background: 'none', cursor: 'pointer' }}>
-                <span style={{ display: 'block', height: 5, borderRadius: 3, background: `linear-gradient(to right, var(--accent) ${(done / n) * 100}%, var(--border) 0)` }} />
+              <button type="button" onClick={p.onClick} aria-label={`${p.label}: ${done} of ${n} done`} className="flex-1 py-1">
+                <span className="block h-1 rounded-full" style={{ background: `linear-gradient(to right, var(--sb-text) ${(done / n) * 100}%, var(--sb-selected) 0)` }} />
               </button>
             )}
           </span>
         );
       })}
       {nowPhase && (
-        <span style={{ flex: 'none', fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+        <span className="shrink-0 text-meta whitespace-nowrap text-faint">
           {nowPhase.label} · {nowPhase.segments.filter((x) => x.done).length} of {nowPhase.segments.length}
         </span>
       )}
     </nav>
   );
 
-  // Crumbs, progress and actions in one bar, so the diff gets the height.
+  // Crumbs, progress and actions in one bar, so the diff gets the height. Finish stays quiet until everything is done.
   const header = (
-    <header className="topbar" style={{ borderBottomColor: 'var(--divider)' }}>
-      <Brand onClick={() => go({ name: 'home' })} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 280px', minWidth: 0 }}>
+    <ViewHeader>
+      <div className="flex min-w-0 flex-[1_1_280px] flex-col gap-0.5">
         <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: toPlan, shrink: true }, { label: here }]} />
         {progressBar}
       </div>
       {search.button}
-      <button type="button" className="btn" style={{ height: 36 }} onClick={toPlan} title="Back to the plan (p)">
+      <Button variant="quiet" icon={<ArrowLeft size={13} aria-hidden />} shortcut="review.plan" onClick={toPlan}>
         Plan
-      </button>
+      </Button>
       {cur && !skimGroup && (
-        <button type="button" className="btn" style={{ height: 36 }} aria-pressed={contextShown} onClick={toggleContext} title="Show or hide context (x)">
+        <Button variant="quiet" selected={contextShown} aria-pressed={contextShown} shortcut="review.context" onClick={toggleContext}>
           Context
-        </button>
+        </Button>
       )}
-      {/* Finish stays quiet until everything is done: "Looks good" is the next click until then. */}
-      <button type="button" className={`btn ${allDone ? 'primary' : 'quiet'}`} style={{ height: 36 }} onClick={() => go({ name: 'finish', projectId: data.projectId, branch: data.branch })} title="Finish (f)">
+      <Button variant={allDone ? 'primary' : 'quiet'} shortcut="review.finish" onClick={() => go({ name: 'finish', projectId: data.projectId, branch: data.branch })}>
         Finish
-      </button>
-    </header>
+      </Button>
+    </ViewHeader>
   );
 
   // The decision you came for sits in the footer, where "Looks good" is for a step: in reach after reading the code.
   const decided = dec ? state.settled?.[dec.id] : undefined;
   const decLabels = dec ? decisionLabels(dec) : null;
-  const decisionActions = dec && decLabels && (
-    decided ? (
+  const decisionActions =
+    dec &&
+    decLabels &&
+    (decided ? (
       <>
-        <span style={{ fontSize: 14, fontWeight: 600, color: decided === 'fine' ? 'var(--low-fg)' : 'var(--med-fg)' }}>✓ {decided === 'fine' ? decLabels.fineDone : decLabels.fixDone}</span>
-        <button type="button" className="link" style={{ fontSize: 13.5 }} onClick={() => settle(dec, null)}>
+        <span className="text-ui font-semibold">✓ {decided === 'fine' ? decLabels.fineDone : decLabels.fixDone}</span>
+        <Button variant="quiet" onClick={() => settle(dec, null)}>
           Change
-        </button>
-        <button type="button" className="btn lg primary" style={{ minWidth: 170 }} onClick={nextDecision}>
-          {plan.decisions[decPos + 1] ? 'Next decision →' : 'On to the steps →'}
-        </button>
+        </Button>
+        <Button variant="primary" size="lg" shortcut="review.good" onClick={nextDecision}>
+          {plan.decisions[decPos + 1] ? 'Next decision' : 'On to the steps'}
+        </Button>
       </>
     ) : (
       <>
-        <button type="button" className="btn lg" onClick={() => settle(dec, 'fix')}>
-          {decLabels.fix}
-        </button>
-        <button type="button" className="btn lg primary" style={{ minWidth: 150 }} onClick={() => settle(dec, 'fine')}>
-          {decLabels.fine} →
-        </button>
-        <button type="button" className="link" style={{ fontSize: 13.5 }} onClick={nextDecision}>
+        <Button variant="quiet" onClick={nextDecision}>
           Decide later
-        </button>
+        </Button>
+        <Button size="lg" shortcut="review.fix" onClick={() => settle(dec, 'fix')}>
+          {decLabels.fix}
+        </Button>
+        <Button variant="primary" size="lg" shortcut="review.good" onClick={() => settle(dec, 'fine')}>
+          {decLabels.fine}
+        </Button>
       </>
-    )
+    ));
+
+  const footer = (children: React.ReactNode) => (
+    <footer className="flex shrink-0 flex-wrap items-center justify-center gap-2 border-t border-border px-6 py-2.5">
+      {children}
+      <span className="ml-2 flex items-center gap-1.5 text-meta text-faint">
+        <Kbd shortcut="shortcuts" /> every shortcut
+      </span>
+    </footer>
   );
 
-  // The header and the progress stay in view while you scroll: there's always a way to see what's left.
-  const top = (
-    <div style={{ position: 'sticky', top: 0, zIndex: 5 }}>
+  const shell = (body: React.ReactNode, foot: React.ReactNode, aside?: React.ReactNode) => (
+    <div className="flex h-full min-w-0 flex-1 flex-col">
       {header}
       {search.panel}
-      {sheet.sheet}
+      <div className="flex min-h-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{body}</div>
+        {aside}
+      </div>
+      {footer(foot)}
     </div>
   );
 
@@ -310,78 +315,93 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
       if (open) select(open.key);
       else go({ name: 'finish', projectId: data.projectId, branch: data.branch });
     });
-    return (
-      <div className="page" style={{ background: 'var(--surface)' }}>
-        {top}
-        <main style={{ width: '100%', maxWidth: 1080, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: 28, flex: 1 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)' }}>
-              Skim · {plural(groupSteps.length, 'low-risk step')} · {plural(skimGroup.files, 'file')}
-              {left.length < groupSteps.length ? ` · ${groupSteps.length - left.length} already reviewed` : ''}
-            </span>
-            <h1 className="mono" style={{ fontSize: 26, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
-              {skimGroup.name}
-            </h1>
-            <p style={{ fontSize: 15.5, lineHeight: 1.6, color: 'var(--muted)', maxWidth: 760 }}>Everything low risk in this folder, on one page. Scroll through, comment on a line where something looks off, then mark the whole folder reviewed.</p>
-          </div>
-          {groupSteps.map((x) => (
-            <section key={x.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-                <h2 style={{ fontSize: 17, overflowWrap: 'anywhere' }}>
-                  Step {x.index + 1}: {x.title}
-                </h2>
-                <RiskPill risk={x.risk} />
-                {isReviewed(x, state.reviewed) && <span className="pill low">Reviewed</span>}
-              </div>
-              {x.why && <p style={{ fontSize: 14.5, lineHeight: 1.6, color: 'var(--text-body)', maxWidth: 760 }}>{x.why}</p>}
-              {x.hunkIds.map((id) => {
-                const h = data.hunks[id];
-                return h ? (
-                  <DiffHunk
-                    key={id}
-                    hunk={h}
-                    mode={mode}
-                    ignoreSpace={ignoreSpace}
-                    comments={state.comments.filter((c) => c.hunkId === id && c.line)}
-                    onComment={(a, body, cid) => patch({ type: 'line-comment', id: cid, stepKey: x.key, hunkId: id, path: h.path, line: a.line, side: a.side, body })}
-                    loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
-                    noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
-                  />
-                ) : null;
-              })}
-            </section>
-          ))}
-          {error && <p className="error">{error}</p>}
-        </main>
-        <footer style={{ position: 'sticky', bottom: 0, zIndex: 4, background: 'var(--surface)', borderTop: '1px solid var(--divider)', padding: '12px 24px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-          <button type="button" className="btn lg" onClick={toPlan}>
-            ← Plan
-          </button>
-          <button type="button" className={`btn lg ${left.length ? 'primary' : 'done'}`} style={{ minWidth: 200 }} onClick={groupDone}>
-            {left.length ? `All ${plural(groupSteps.length, 'step')} look good →` : 'Reviewed · next →'}
-          </button>
-          <span style={{ display: 'flex', gap: 10, fontSize: 12.5, color: 'var(--muted)', marginLeft: 8, alignItems: 'center' }}>
-            <span>
-              <span className="kbd">r</span> all look good
-            </span>
-            {sheet.button}
+    return shell(
+      <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-7">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-meta text-faint">
+            Skim · {plural(groupSteps.length, 'low-risk step')} · {plural(skimGroup.files, 'file')}
+            {left.length < groupSteps.length ? ` · ${groupSteps.length - left.length} already reviewed` : ''}
           </span>
-        </footer>
-      </div>
+          <h1 className="font-mono text-hero font-semibold break-all">{skimGroup.name}</h1>
+          <p className="text-body text-muted">Everything low risk in this folder, on one page. Scroll through, comment on a line where something looks off, then mark the whole folder reviewed.</p>
+        </div>
+        <DiffToolbar mode={mode} setMode={setMode} ignoreSpace={ignoreSpace} setIgnoreSpace={setIgnoreSpace} />
+        {groupSteps.map((x) => (
+          <section key={x.key} className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-title font-semibold break-words">
+                Step {x.index + 1}: {x.title}
+              </h2>
+              <RiskPill risk={x.risk} />
+              {isReviewed(x, state.reviewed) && <Pill tone="muted">Reviewed</Pill>}
+            </div>
+            {x.why && <p className="text-body text-text select-text">{x.why}</p>}
+            {x.hunkIds.map((id) => {
+              const h = data.hunks[id];
+              return h ? (
+                <DiffHunk
+                  key={id}
+                  hunk={h}
+                  mode={mode}
+                  ignoreSpace={ignoreSpace}
+                  comments={state.comments.filter((c) => c.hunkId === id && c.line)}
+                  onComment={(a, body, cid) => patch({ type: 'line-comment', id: cid, stepKey: x.key, hunkId: id, path: h.path, line: a.line, side: a.side, body })}
+                  loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
+                  noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
+                />
+              ) : null;
+            })}
+          </section>
+        ))}
+        {error && <Notice tone="error">{error}</Notice>}
+      </main>,
+      <>
+        <Button size="lg" shortcut="review.plan" onClick={toPlan}>
+          Plan
+        </Button>
+        <Button variant={left.length ? 'primary' : 'secondary'} size="lg" shortcut="review.good" onClick={groupDone}>
+          {left.length ? `All ${plural(groupSteps.length, 'step')} look good` : 'Reviewed, next'}
+        </Button>
+      </>
     );
   }
 
-  if (dec && !cur) return <DecisionPage d={dec} n={decPos + 1} of={plan.decisions.length} data={data} top={top} onBack={prevDecision} actions={decisionActions} error={error} />;
+  if (dec && !cur) {
+    const failing = data.pr?.checks.find((c) => c.state === 'fail' && c.url);
+    return shell(
+      <main className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-7">
+        <span className="text-meta text-faint">
+          Decision {decPos + 1} of {plan.decisions.length}
+        </span>
+        <h1 className="text-hero font-semibold break-words">{dec.title}</h1>
+        <p className="text-body text-text select-text">{dec.detail}</p>
+        {dec.places.length > 1 && (
+          <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-ui text-muted">
+            {dec.places.map((p, i) => (
+              <li key={i} className="break-words">
+                {p}
+              </li>
+            ))}
+          </ul>
+        )}
+        {dec.kind === 'ci' && data.pr && (
+          <Button className="self-start" onClick={() => window.api.openExternal(failing?.url ?? data.pr!.url)}>
+            Open checks ↗
+          </Button>
+        )}
+        {error && <Notice tone="error">{error}</Notice>}
+      </main>,
+      <>
+        <Button size="lg" shortcut="review.previous" onClick={prevDecision}>
+          Back
+        </Button>
+        {decisionActions}
+      </>
+    );
+  }
 
   if (!cur) {
-    return (
-      <div className="page">
-        <header className="topbar">
-          <Brand onClick={() => go({ name: 'home' })} />
-        </header>
-        <p style={{ padding: 24 }}>This branch has no changes to review.</p>
-      </div>
-    );
+    return shell(<p className="p-6 text-body text-muted">This branch has no changes to review.</p>, null);
   }
 
   const done = isReviewed(cur, state.reviewed);
@@ -423,283 +443,221 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   };
 
 
-  return (
-    <div className="page" style={{ background: 'var(--surface)' }}>
-      {top}
+  const changedSince = since?.byStep[cur.key];
+  const aside = contextShown && (
+    <aside aria-label="Context" className="flex w-80 shrink-0 flex-col gap-5 overflow-y-auto border-l border-border bg-sidebar px-4 py-5">
+      <section className="flex flex-col gap-1.5">
+        <SectionHeader as="h3">{askedLabel(data)}</SectionHeader>
+        <AskedFor data={data} clamp={pos === 0 ? 400 : 160} />
+        {data.session && (
+          <button type="button" className="self-start text-ui text-link hover:underline" onClick={() => window.api.openSessionFile(data.session!.file)}>
+            Open the agent session
+          </button>
+        )}
+      </section>
+      {data.agentTests && (
+        <section className="flex flex-col gap-1.5 text-ui">
+          <SectionHeader as="h3">The agent’s tests</SectionHeader>
+          <AgentTests data={data} />
+        </section>
+      )}
+      {data.stack && <StackBar data={data} go={go} />}
+      <ChecksCard data={data} />
+    </aside>
+  );
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center', gap: 24, flex: 1 }}>
-        <main style={{ flex: '999 1 560px', minWidth: 0, maxWidth: 920, padding: '32px 24px 32px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 10px', fontSize: 13, color: 'var(--muted)' }}>
-              <span style={{ fontWeight: 600 }}>{here}</span>
-              <RiskPill risk={cur.risk} />
-              {cur.outsideTask && (
-                <span className="pill medium" title={OUTSIDE_HINT}>
-                  Outside your request
-                </span>
-              )}
-              {done && <span className="pill low">Reviewed</span>}
-              {since?.byStep[cur.key] && since.byStep[cur.key] !== 'same' && <span className="pill accent">{since.byStep[cur.key] === 'new' ? 'New' : 'Changed'} since last review</span>}
-            </div>
-            <h1 style={{ fontSize: 28, lineHeight: 1.25, letterSpacing: '-0.02em', overflowWrap: 'anywhere' }}>{cur.title}</h1>
-            <p style={{ fontSize: 16.5, lineHeight: 1.65, color: cur.why ? 'var(--text-body)' : 'var(--muted)', maxWidth: 760 }}>{cur.why || whyFallback(cur, data)}</p>
-          </div>
+  return shell(
+    <main className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 py-7">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <RiskPill risk={cur.risk} />
+          {cur.outsideTask && <Pill data-tooltip={OUTSIDE_HINT}>Outside your request</Pill>}
+          {done && <Pill tone="muted">Reviewed</Pill>}
+          {changedSince && changedSince !== 'same' && <Pill tone="link">{changedSince === 'new' ? 'New' : 'Changed'} since your last review</Pill>}
+        </div>
+        <h1 className="text-hero font-semibold break-words">{cur.title}</h1>
+        <p className={`text-body select-text ${cur.why ? 'text-text' : 'text-muted'}`}>{cur.why || whyFallback(cur, data)}</p>
+      </div>
 
-          {stepFlags.length > 0 && (
-            <section className="notice" style={{ flexDirection: 'column', gap: 10 }}>
-              {stepFlags.map((f) => {
-                const labels = decisionLabels(f);
-                const value = state.settled?.[f.id];
-                return (
-                  <div key={f.id} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 14px', alignItems: 'center' }}>
-                    <span style={{ flex: '1 1 320px', minWidth: 0, overflowWrap: 'anywhere' }}>
-                      <strong>{f.title}.</strong> {f.detail}
-                    </span>
-                    {f.id === dec?.id && f.stepKeys.length > 1 && (
-                      <span style={{ order: 3, flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 13 }}>
-                        In
-                        {f.stepKeys.map((k) => {
-                          const s = data.steps.find((x) => x.key === k);
-                          return s ? (
-                            <button key={k} type="button" className="link" aria-current={k === cur.key ? 'step' : undefined} style={{ fontSize: 13, fontWeight: k === cur.key ? 700 : 500 }} onClick={() => at({ decision: f.id, stepKey: k })}>
-                              step {s.index + 1}
-                            </button>
-                          ) : null;
-                        })}
-                      </span>
-                    )}
-                    {f.id === dec?.id ? null : value ? (
-                      <span style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5 }}>
-                        <span style={{ fontWeight: 600 }}>✓ {value === 'fine' ? labels.fineDone : labels.fixDone}</span>
-                        <button type="button" className="link" style={{ fontSize: 13 }} onClick={() => settle(f, null)}>
-                          Change
-                        </button>
-                      </span>
-                    ) : (
-                      <span style={{ display: 'flex', gap: 8 }}>
-                        <button type="button" className="btn" style={{ height: 32, fontSize: 13 }} onClick={() => settle(f, 'fine')}>
-                          {labels.fine}
-                        </button>
-                        <button type="button" className="btn" style={{ height: 32, fontSize: 13 }} onClick={() => settle(f, 'fix')}>
-                          {labels.fix}
-                        </button>
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </section>
-          )}
-
-          {earlier.length > 0 && (
-            <section className="notice info" style={{ flexDirection: 'column', gap: 6 }}>
-              <strong>What you said here last time</strong>
-              {earlier.map((c) => (
-                <div key={c.id} style={{ overflowWrap: 'anywhere' }}>
-                  {c.path && c.line ? <span className="mono" style={{ fontSize: 12.5 }}>{`${c.path}:${c.line}`}</span> : null}
-                  <Markdown text={c.body} />
-                </div>
-              ))}
-            </section>
-          )}
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
-            <span style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-              <span className="muted">
-                {plural(cur.files.length, 'file')} · {plural(cur.hunkIds.length, 'change')}
-              </span>
-              {/* With more than one file, a chip per file jumps to its first change. */}
-              {cur.files.length > 1 &&
-                cur.files.map((f) => {
-                  const first = cur.hunkIds.find((id) => data.hunks[id]?.path === f);
-                  return first ? (
-                    <button key={f} type="button" className="pill neutral mono" title={f} style={{ cursor: 'pointer', fontSize: 11.5, border: 0 }} onClick={() => document.getElementById(`hunk-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
-                      {f.split('/').pop()}
+      {stepFlags.map((f) => {
+        const labels = decisionLabels(f);
+        const value = state.settled?.[f.id];
+        const current = f.id === dec?.id;
+        return (
+          <Notice
+            key={f.id}
+            tone={current ? 'warn' : 'caution'}
+            role="note"
+            actions={
+              current ? undefined : value ? (
+                <>
+                  <span className="text-ui font-semibold">✓ {value === 'fine' ? labels.fineDone : labels.fixDone}</span>
+                  <Button variant="quiet" size="sm" onClick={() => settle(f, null)}>
+                    Change
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button size="sm" onClick={() => settle(f, 'fine')}>
+                    {labels.fine}
+                  </Button>
+                  <Button size="sm" onClick={() => settle(f, 'fix')}>
+                    {labels.fix}
+                  </Button>
+                </>
+              )
+            }
+          >
+            <strong className="font-semibold">{f.title}.</strong> {f.detail}
+            {current && <span className="block text-meta text-muted">Read the change, then decide below.</span>}
+            {current && f.stepKeys.length > 1 && (
+              <span className="mt-1 flex flex-wrap gap-2 text-meta">
+                In
+                {f.stepKeys.map((k) => {
+                  const st = data.steps.find((x) => x.key === k);
+                  return st ? (
+                    <button key={k} type="button" aria-current={k === cur.key ? 'step' : undefined} className={`text-link hover:underline ${k === cur.key ? 'font-semibold' : ''}`} onClick={() => at({ decision: f.id, stepKey: k })}>
+                      step {st.index + 1}
                     </button>
                   ) : null;
                 })}
-            </span>
-            <span style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span role="group" aria-label="Diff layout" style={{ display: 'inline-flex', border: '1px solid var(--border-strong)', borderRadius: 8, overflow: 'hidden' }}>
-                {(['unified', 'split'] as const).map((m) => (
-                  <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} style={{ border: 0, padding: '5px 12px', font: 'inherit', fontSize: 13, fontWeight: 500, cursor: 'pointer', background: mode === m ? 'var(--accent-soft)' : 'var(--surface)', color: mode === m ? 'var(--accent)' : 'var(--text)' }}>
-                    {m === 'unified' ? 'Unified' : 'Side by side'}
-                  </button>
-                ))}
               </span>
-              <label className="choice" style={{ alignItems: 'center', fontSize: 13 }}>
-                <input type="checkbox" checked={ignoreSpace} onChange={(e) => setIgnoreSpace(e.target.checked)} style={{ marginTop: 0 }} />
-                Hide whitespace
-              </label>
-            </span>
-          </div>
-
-          {cur.hunkIds.map((id) => {
-            const h = data.hunks[id];
-            if (!h) return null;
-            const isNew = since && !since.before.has(id);
-            return (
-              <div key={`${cur.key}:${id}`} id={`hunk-${id}`} style={{ scrollMarginTop: 'calc(var(--topbar-h) + 12px)' }}>
-              <DiffHunk
-                hunk={h}
-                mode={mode}
-                ignoreSpace={ignoreSpace}
-                comments={state.comments.filter((c) => c.hunkId === id && c.line)}
-                onComment={lineComment(id, h.path)}
-                loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
-                collapsed={since?.reviewedBefore.has(id) ? 'You reviewed this exact change last time.' : null}
-                badge={isNew ? <span className="pill accent" style={{ border: 0, fontSize: 11 }}>New since last review</span> : null}
-                noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
-              />
-              </div>
-            );
-          })}
-
-          {cur.checks.length > 0 && (
-            <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <h2 style={{ fontSize: 16 }}>{cur.checks.length === 1 ? 'One question for you' : `${cur.checks.length === 2 ? 'Two' : cur.checks.length === 3 ? 'Three' : cur.checks.length} questions for you`}</h2>
-              {cur.checks.map((q, i) => (
-                <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 16px', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 10 }}>
-                  <div style={{ flex: '1 1 360px', fontSize: 14.5, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
-                    <Markdown text={q} />
-                  </div>
-                  <span role="group" aria-label="Your answer" style={{ display: 'flex', gap: 6 }}>
-                    <button type="button" aria-pressed={answers[i] === 'yes'} className={`btn ${answers[i] === 'yes' ? 'done' : ''}`} style={{ height: 34, padding: '0 14px' }} onClick={() => answer(i, 'yes')}>
-                      Looks right
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={answers[i] === 'unsure'}
-                      className="btn"
-                      style={{ height: 34, padding: '0 14px', ...(answers[i] === 'unsure' ? { background: 'var(--med-bg)', color: 'var(--med-fg)', borderColor: 'var(--med-border)', fontWeight: 600 } : {}) }}
-                      onClick={() => answer(i, 'unsure')}
-                    >
-                      Not sure
-                    </button>
-                  </span>
-                </div>
-              ))}
-            </section>
-          )}
-
-          {(asking || stepExchanges.length > 0) && (
-            <AskPanel
-              key={`ask:${cur.key}`}
-              data={data}
-              step={cur}
-              exchanges={stepExchanges}
-              draft={askDraft?.stepKey === cur.key ? askDraft.text : undefined}
-              onShowChanges={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() })}
-            />
-          )}
-
-          {(commenting || stepComment) && (
-            <CommentBox key={`${cur.key}:${commentKey}`} initial={stepComment} onSave={(body) => patch({ type: 'comment', stepKey: cur.key, body })} />
-          )}
-          {error && <p className="error">{error}</p>}
-        </main>
-
-        {contextShown && (
-          <aside aria-label="Context" style={{ flex: '1 1 300px', maxWidth: 360, padding: '32px 24px 32px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <section className="card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <h2 className="label">{askedLabel(data)}</h2>
-              <AskedFor data={data} clamp={pos === 0 ? 400 : 160} />
-              {data.session && (
-                <button type="button" className="link" style={{ fontSize: 13, fontWeight: 500, textAlign: 'left' }} onClick={() => window.api.openSessionFile(data.session!.file)}>
-                  Open full agent session
-                </button>
-              )}
-            </section>
-            {data.agentTests && (
-              <section className="card" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 14, lineHeight: 1.5 }}>
-                <h2 className="label">The agent’s tests</h2>
-                <AgentTests data={data} />
-              </section>
             )}
-            {data.stack && (
-              <section className="card" style={{ padding: '16px 18px' }}>
-                <StackBar data={data} go={go} />
-              </section>
-            )}
-            <ChecksCard data={data} />
-          </aside>
-        )}
+          </Notice>
+        );
+      })}
+
+      {earlier.length > 0 && (
+        <Notice tone="info">
+          <strong className="font-semibold">What you said here last time</strong>
+          {earlier.map((c) => (
+            <div key={c.id} className="break-words select-text">
+              {c.path && c.line ? <span className="font-mono text-meta text-muted">{`${c.path}:${c.line}`}</span> : null}
+              <Markdown text={c.body} />
+            </div>
+          ))}
+        </Notice>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="text-meta text-faint">
+            {plural(cur.files.length, 'file')} · {plural(cur.hunkIds.length, 'change')}
+          </span>
+          {/* With more than one file, a chip per file jumps to its first change. */}
+          {cur.files.length > 1 &&
+            cur.files.map((f) => {
+              const first = cur.hunkIds.find((id) => data.hunks[id]?.path === f);
+              return first ? (
+                <Pill key={f} tone="muted" className="font-mono" data-tooltip={f} onClick={() => document.getElementById(`hunk-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+                  {f.split('/').pop()}
+                </Pill>
+              ) : null;
+            })}
+        </span>
+        <DiffToolbar mode={mode} setMode={setMode} ignoreSpace={ignoreSpace} setIgnoreSpace={setIgnoreSpace} />
       </div>
 
-      <footer style={{ position: 'sticky', bottom: 0, zIndex: 4, background: 'var(--surface)', borderTop: '1px solid var(--divider)', padding: '12px 24px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-        <button type="button" className="btn lg" disabled={!dec && pos === 0} onClick={() => (dec ? prevDecision() : select(steps[pos - 1].key))}>
-          ← Back
-        </button>
-        <button type="button" className="btn lg" onClick={openComment}>
-          Comment
-        </button>
-        {!asking && !stepExchanges.length && (
-          <button type="button" className="btn lg" onClick={openAsk}>
-            Ask Claude
-          </button>
-        )}
-        {dec ? (
-          decisionActions
-        ) : (
-          <button type="button" className={`btn lg ${done ? 'done' : 'primary'}`} style={{ minWidth: 170 }} onClick={looksGood}>
-            {done ? (pos < steps.length - 1 ? 'Reviewed · next →' : 'Reviewed ✓') : 'Looks good →'}
-          </button>
-        )}
-        <span style={{ display: 'flex', gap: 10, fontSize: 12.5, color: 'var(--muted)', marginLeft: 8, alignItems: 'center' }} aria-label="Keyboard shortcuts">
-          {[['j', 'next'], ['k', 'back'], ['r', decLabels ? (decided ? 'next decision' : decLabels.fine.toLowerCase()) : 'looks good']].map(([k, what]) => (
-            <span key={k}>
-              <span className="kbd">{k}</span> {what}
-            </span>
+      {cur.hunkIds.map((id) => {
+        const h = data.hunks[id];
+        if (!h) return null;
+        const isNew = since && !since.before.has(id);
+        return (
+          <div key={`${cur.key}:${id}`} id={`hunk-${id}`} className="scroll-mt-3">
+            <DiffHunk
+              hunk={h}
+              mode={mode}
+              ignoreSpace={ignoreSpace}
+              comments={state.comments.filter((c) => c.hunkId === id && c.line)}
+              onComment={lineComment(id, h.path)}
+              loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
+              collapsed={since?.reviewedBefore.has(id) ? 'You reviewed this exact change last time.' : null}
+              badge={isNew ? <Pill tone="link">New since your last review</Pill> : null}
+              noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
+            />
+          </div>
+        );
+      })}
+
+      {cur.checks.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <SectionHeader as="h2" count={cur.checks.length}>
+            {cur.checks.length === 1 ? 'A question for you' : 'Questions for you'}
+          </SectionHeader>
+          {cur.checks.map((q, i) => (
+            <div key={i} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-3.5 py-2.5">
+              <div className="min-w-0 flex-[1_1_360px] text-body break-words select-text">
+                <Markdown text={q} />
+              </div>
+              <span role="group" aria-label="Your answer" className="flex gap-1.5">
+                <Button selected={answers[i] === 'yes'} aria-pressed={answers[i] === 'yes'} onClick={() => answer(i, 'yes')}>
+                  Looks right
+                </Button>
+                <Button selected={answers[i] === 'unsure'} aria-pressed={answers[i] === 'unsure'} onClick={() => answer(i, 'unsure')}>
+                  Not sure
+                </Button>
+              </span>
+            </div>
           ))}
-          {sheet.button}
-        </span>
-      </footer>
-    </div>
+        </section>
+      )}
+
+      {(asking || stepExchanges.length > 0) && (
+        <AskPanel
+          key={`ask:${cur.key}`}
+          data={data}
+          step={cur}
+          exchanges={stepExchanges}
+          draft={askDraft?.stepKey === cur.key ? askDraft.text : undefined}
+          onShowChanges={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() })}
+        />
+      )}
+
+      {(commenting || stepComment) && <CommentBox key={`${cur.key}:${commentKey}`} initial={stepComment} onSave={(body) => patch({ type: 'comment', stepKey: cur.key, body })} />}
+      {error && <Notice tone="error">{error}</Notice>}
+    </main>,
+    <>
+      <Button size="lg" shortcut="review.previous" disabled={!dec && pos === 0} onClick={() => (dec ? prevDecision() : select(steps[pos - 1].key))}>
+        Back
+      </Button>
+      <Button size="lg" shortcut="review.comment" onClick={openComment}>
+        Comment
+      </Button>
+      {!asking && !stepExchanges.length && (
+        <Button size="lg" shortcut="review.ask" onClick={openAsk}>
+          Ask Claude
+        </Button>
+      )}
+      {dec ? (
+        decisionActions
+      ) : (
+        <Button variant={done ? 'secondary' : 'primary'} size="lg" shortcut="review.good" onClick={looksGood}>
+          {done ? (pos < steps.length - 1 ? 'Reviewed, next' : 'Reviewed') : 'Looks good'}
+        </Button>
+      )}
+    </>,
+    aside
   );
 }
 
-/** A decision with no step to show, like failing CI: what it is, where to look, and the choice. */
-function DecisionPage(props: {
-  d: PlanDecision;
-  n: number;
-  of: number;
-  data: ReviewData;
-  top: React.ReactNode;
-  onBack: () => void;
-  actions: React.ReactNode;
-  error: string | null;
-}) {
-  const { d, data } = props;
-  const failing = data.pr?.checks.find((c) => c.state === 'fail' && c.url);
+/** Unified or side by side (S), and whether whitespace changes show (W). */
+function DiffToolbar({ mode, setMode, ignoreSpace, setIgnoreSpace }: { mode: DiffMode; setMode(m: DiffMode): void; ignoreSpace: boolean; setIgnoreSpace(on: boolean): void }) {
   return (
-    <div className="page" style={{ background: 'var(--surface)' }}>
-      {props.top}
-      <main style={{ width: '100%', maxWidth: 920, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)' }}>
-          Decision {props.n} of {props.of}
-        </span>
-        <h1 style={{ fontSize: 28, lineHeight: 1.25, letterSpacing: '-0.02em', overflowWrap: 'anywhere' }}>{d.title}</h1>
-        <p style={{ fontSize: 16.5, lineHeight: 1.65, color: 'var(--text-body)', maxWidth: 760 }}>{d.detail}</p>
-        {d.places.length > 1 && (
-          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 14, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {d.places.map((p, i) => (
-              <li key={i} style={{ overflowWrap: 'anywhere' }}>{p}</li>
-            ))}
-          </ul>
-        )}
-        {d.kind === 'ci' && data.pr && (
-          <button type="button" className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => window.api.openExternal(failing?.url ?? data.pr!.url)}>
-            Open checks ↗
-          </button>
-        )}
-        {props.error && <p className="error">{props.error}</p>}
-      </main>
-      <footer style={{ position: 'sticky', bottom: 0, zIndex: 4, background: 'var(--surface)', borderTop: '1px solid var(--divider)', padding: '12px 24px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-        <button type="button" className="btn lg" onClick={props.onBack}>
-          ← Back
-        </button>
-        {props.actions}
-      </footer>
-    </div>
+    <span className="flex items-center gap-3">
+      <SegmentedControl<DiffMode>
+        mode="radio"
+        label="Diff layout"
+        size="sm"
+        value={mode}
+        onChange={setMode}
+        segments={[
+          { value: 'unified', label: 'Unified', icon: <Rows2 size={13} aria-hidden />, tooltip: 'Unified (S)' },
+          { value: 'split', label: 'Side by side', icon: <Columns2 size={13} aria-hidden />, tooltip: 'Side by side (S)' },
+        ]}
+      />
+      <Checkbox checked={ignoreSpace} onChange={setIgnoreSpace} tooltip="Hide whitespace changes (W)">
+        Hide whitespace
+      </Checkbox>
+    </span>
   );
 }

@@ -1,8 +1,13 @@
 // Search the branch's code from a review: "where is this used?" without leaving Hunkdory.
-// Opens with / or Cmd+F, filled in with the text you selected, like a name in a question.
+// Opens with ⌘F (the registry's `find`), filled in with the text you selected, like a name in a question.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeSearchResult, ReviewData } from '../../shared/types.ts';
+import { Search, X } from 'lucide-react';
+import { matches } from '../lib/shortcuts.ts';
 import { cleanError, plural } from './ui.tsx';
+import { Button } from './ui/Button.tsx';
+import { Pill } from './ui/Pill.tsx';
+import { FIELD_LG } from './ui/field.ts';
 
 type StepRef = { stepKey: string; index: number; title: string };
 
@@ -39,10 +44,7 @@ export function useCodeSearch(data: ReviewData, onShowStep: (stepKey: string) =>
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = !!(e.target as HTMLElement).closest('input, textarea, select, [contenteditable]');
-      const find = (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'f';
-      const slash = e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey;
-      if (!find && !slash) return;
+      if (!matches(e, 'find')) return;
       e.preventDefault();
       show(selectedText());
     };
@@ -51,19 +53,18 @@ export function useCodeSearch(data: ReviewData, onShowStep: (stepKey: string) =>
   }, []);
 
   const button = (
-    <button
-      type="button"
-      className="btn"
-      style={{ height: 36, gap: 8 }}
-      title="Search the branch's code (/ or ⌘F). Select a name first to search for it."
+    <Button
+      icon={<Search size={13} aria-hidden />}
+      shortcut="find"
+      data-tooltip="Search the branch's code. Select a name first to search for it."
       // Read the selection before the click takes it away.
       onMouseDown={(e) => {
         e.preventDefault();
         show(selectedText());
       }}
     >
-      Search code <span className="kbd">/</span>
-    </button>
+      Search code
+    </Button>
   );
 
   const panel = open ? (
@@ -137,36 +138,33 @@ function SearchPanel({ data, query, setQuery, onClose, onShowStep }: { data: Rev
       role="dialog"
       aria-label="Search code"
       onKeyDown={(e) => {
-        if (e.key === 'Escape') onClose();
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          onClose();
+        }
       }}
-      style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(620px, 92vw)', background: 'var(--surface)', borderLeft: '1px solid var(--border)', boxShadow: '-12px 0 32px var(--panel-shadow)', zIndex: 30, display: 'flex', flexDirection: 'column' }}
+      className="overlay fixed inset-y-0 right-0 z-50 flex w-[min(620px,92vw)] flex-col border-l"
     >
-      <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid var(--divider)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <h2 style={{ fontSize: 15 }}>Search code</h2>
-          <span className="mono" style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
-            {data.branch}
-          </span>
-          <button type="button" className="link" style={{ fontSize: 13 }} onClick={onClose}>
-            Close <span className="kbd">esc</span>
-          </button>
+      <div className="drag flex flex-col gap-2 border-b border-border px-4 pt-3 pb-3">
+        <div className="flex h-7 items-center gap-2">
+          <h2 className="text-title font-semibold">Search code</h2>
+          <span className="min-w-0 flex-1 truncate font-mono text-meta text-faint">{data.branch}</span>
+          <Button variant="quiet" size="sm" iconOnly aria-label="Close" kbd="Esc" icon={<X size={14} aria-hidden />} onClick={onClose} />
         </div>
-        <input ref={input} className="field mono" aria-label="Text to search for" placeholder="A function, a name, any text" value={query} onChange={(e) => setQuery(e.target.value)} style={{ height: 38, fontSize: 13.5 }} />
-        <span role="status" style={{ fontSize: 12.5, color: res?.error ? 'var(--high-fg)' : 'var(--muted)' }}>
+        <input ref={input} className={`${FIELD_LG} w-full font-mono`} aria-label="Text to search for" placeholder="A function, a name, any text" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <span role="status" className={`text-meta ${res?.error ? 'text-error' : 'text-muted'}`}>
           {status}
         </span>
       </div>
-      <div style={{ overflowY: 'auto', flex: 1, paddingBottom: 16 }}>
+      <div className="min-h-0 flex-1 overflow-y-auto pb-4">
         {groups.map(([path, matches]) => {
           const step = idx.files.get(path);
           return (
-            <section key={path} style={{ borderBottom: '1px solid var(--divider)', padding: '10px 0 6px' }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 10px', padding: '0 18px 4px' }}>
-                <span className="mono" style={{ fontSize: 12.5, fontWeight: 600, overflowWrap: 'anywhere', flex: '1 1 300px' }}>
-                  {path}
-                </span>
+            <section key={path} className="border-b border-border pt-2 pb-1.5">
+              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-4 pb-1">
+                <span className="min-w-0 flex-[1_1_300px] font-mono text-ui font-semibold break-all">{path}</span>
                 {step && (
-                  <button type="button" className="link" style={{ fontSize: 12.5 }} title={`Step ${step.index + 1}: ${step.title}`} onClick={() => onShowStep(step.stepKey)}>
+                  <button type="button" className="text-meta text-link hover:underline" data-tooltip={`Step ${step.index + 1}: ${step.title}`} onClick={() => onShowStep(step.stepKey)}>
                     In this change · step {step.index + 1} →
                   </button>
                 )}
@@ -196,35 +194,27 @@ function MatchRow({ data, match, query, changed, onShowStep }: { data: ReviewDat
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '3px 18px' }}>
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          title={open ? 'Hide the lines around it' : 'Show the lines around it'}
-          style={{ display: 'flex', alignItems: 'baseline', gap: 10, flex: 1, minWidth: 0, background: 'none', border: 0, padding: 0, font: 'inherit', textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}
-        >
-          <span className="mono" style={{ width: 44, flex: 'none', textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>
-            {match.line}
-          </span>
-          <span className="mono" style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}>
+      <div className="flex items-baseline gap-2.5 px-4 py-0.5">
+        <button type="button" onClick={toggle} aria-expanded={open} data-tooltip={open ? 'Hide the lines around it' : 'Show the lines around it'} className="flex min-w-0 flex-1 items-baseline gap-2.5 rounded text-left hover:bg-border/45">
+          <span className="w-11 shrink-0 text-right font-mono text-meta text-faint">{match.line}</span>
+          <span className="min-w-0 font-mono text-ui whitespace-pre-wrap break-all">
             <Marked text={match.text.trimStart()} query={query} />
           </span>
         </button>
         {changed && (
-          <button type="button" className="pill accent" style={{ border: 0, cursor: 'pointer', font: 'inherit', fontSize: 11.5, fontWeight: 600, flex: 'none' }} title={`Changed in step ${changed.index + 1}: ${changed.title}`} onClick={() => onShowStep(changed.stepKey)}>
+          <Pill tone="link" onClick={() => onShowStep(changed.stepKey)} data-tooltip={`Changed in step ${changed.index + 1}: ${changed.title}`}>
             Changed · step {changed.index + 1}
-          </button>
+          </Pill>
         )}
       </div>
       {open && context && (
-        <pre className="mono" style={{ margin: '4px 18px 8px 72px', padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--divider)', borderRadius: 8, fontSize: 12, lineHeight: 1.6, overflowX: 'auto' }}>
+        <pre className="mx-4 mt-1 mb-2 ml-[72px] overflow-x-auto rounded-md border border-border bg-code px-2.5 py-2 font-mono text-ui leading-relaxed">
           {context.lines.map((l, i) => {
             const n = context.from + i;
             return (
-              <div key={n} style={{ display: 'flex', gap: 12, background: n === match.line ? 'var(--line-hit)' : undefined }}>
-                <span style={{ width: 36, flex: 'none', textAlign: 'right', color: 'var(--muted)' }}>{n}</span>
-                <span style={{ whiteSpace: 'pre' }}>{l}</span>
+              <div key={n} className={`flex gap-3 ${n === match.line ? 'bg-accent/20' : ''}`}>
+                <span className="w-9 shrink-0 text-right text-faint">{n}</span>
+                <span className="whitespace-pre">{l}</span>
               </div>
             );
           })}

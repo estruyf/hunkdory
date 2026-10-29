@@ -16,7 +16,11 @@ import type { ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/typ
 const ICON = join(__dirname, '../../resources/icon.png');
 
 // The window's colour before the page draws: --bg in styles.css, light or dark.
-const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#0f1115' : '#F6F7F9');
+// Switchboard's Demo Time background, so the window never flashes another colour before the page paints.
+/** Where the traffic lights sit: centred in the 52px header, with room before the sidebar's controls. */
+const WINDOW_BUTTONS = { default: { x: 18, y: 19 } } as const;
+
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#15181f' : '#ffffff');
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -222,7 +226,7 @@ function createWindow() {
     show: false,
     title: 'Hunkdory',
     // On a Mac the app draws its own top bar: the traffic lights sit inside it, centred on its first row.
-    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 20, y: 26 } } : {}),
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: WINDOW_BUTTONS.default } : {}),
     backgroundColor: windowBackground(),
     icon: ICON,
     webPreferences: {

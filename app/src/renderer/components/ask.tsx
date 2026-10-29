@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { Exchange, ReviewData, Step } from '../../shared/types.ts';
 import { Markdown } from './markdown.tsx';
+import { modKey } from '../lib/shortcuts.ts';
+import { Loader2 } from 'lucide-react';
 import { cleanError } from './ui.tsx';
+import { Button } from './ui/Button.tsx';
+import { Notice } from './ui/Notice.tsx';
+import { SectionHeader } from './ui/SectionHeader.tsx';
+import { TEXTAREA } from './ui/field.ts';
 
 function since(from: string, to: string | null) {
   const s = Math.max(0, Math.round(((to ? Date.parse(to) : Date.now()) - Date.parse(from)) / 1000));
@@ -70,72 +76,74 @@ export function AskPanel({
   };
 
   return (
-    <section className="card" aria-label="Ask Claude about this step" style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <h2 style={{ fontSize: 13, fontWeight: 600 }}>Ask Claude about this step</h2>
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4" aria-label="Ask Claude about this step">
+      <SectionHeader as="h2">Ask Claude about this step</SectionHeader>
 
       {exchanges.map((e) => (
-        <div key={e.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 14, borderBottom: '1px solid var(--divider)' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span className="label-sm">{e.kind === 'question' ? 'You asked' : 'You asked for a change'}</span>
-            <div style={{ fontSize: 14.5, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+        <div key={e.id} className="flex flex-col gap-2 border-b border-border pb-3">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-meta text-faint">{e.kind === 'question' ? 'You asked' : 'You asked for a change'}</span>
+            <div className="text-body break-words select-text">
               <Markdown text={e.text} />
             </div>
           </div>
           {e.status === 'running' && (
-            <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5, color: 'var(--muted)' }}>
-              <span className="spinner" style={{ flex: 'none' }} />
-              <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+            <div role="status" aria-live="polite" className="flex items-center gap-2 text-ui text-muted">
+              <Loader2 size={13} className="shrink-0 animate-spin text-accent-ink" aria-hidden />
+              <span className="min-w-0 flex-1 break-words">
                 {e.activity ?? 'Working…'} · {since(e.at, null)}
               </span>
-              <button type="button" className="link" style={{ fontSize: 13, fontWeight: 600 }} onClick={() => window.api.cancelExchange(data.projectId, data.branch, e.id)}>
+              <Button variant="quiet" size="sm" onClick={() => window.api.cancelExchange(data.projectId, data.branch, e.id)}>
                 Stop
-              </button>
+              </Button>
             </div>
           )}
           {e.status === 'done' && (
-            <div style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--text-body)', padding: '10px 12px', background: 'var(--bg)', borderRadius: 8, overflowWrap: 'anywhere' }}>
+            <div className="rounded-lg bg-code px-3 py-2 text-body break-words select-text">
               <Markdown text={e.reply ?? ''} />
             </div>
           )}
-          {e.status === 'failed' && <p className="error">{e.error}</p>}
-          {e.status === 'cancelled' && <p style={{ fontSize: 13.5, color: 'var(--muted)' }}>You stopped this.</p>}
+          {e.status === 'failed' && <Notice tone="error">{e.error}</Notice>}
+          {e.status === 'cancelled' && <p className="text-ui text-muted">You stopped this.</p>}
         </div>
       ))}
 
       {changed && (
-        <div className="notice info" role="status">
-          <span>
-            <strong>Claude changed the branch.</strong> The diff above is from before.{' '}
-            <button type="button" className="link" style={{ fontSize: 13.5, fontWeight: 600 }} onClick={onShowChanges}>
+        <Notice
+          tone="info"
+          actions={
+            <Button size="sm" onClick={onShowChanges}>
               Show the new diff
-            </button>
-          </span>
-        </div>
+            </Button>
+          }
+        >
+          <strong className="font-semibold">Claude changed the branch.</strong> The diff above is from before.
+        </Notice>
       )}
 
       <textarea
         aria-label="Your question or change"
         rows={3}
-        className="textarea"
+        className={TEXTAREA}
         placeholder={canChange ? 'e.g. Why not reuse the existing cache helper? or: Use the existing cache helper here.' : 'e.g. Why not reuse the existing cache helper?'}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && text.trim() && !busy) send('question');
+          if (e.key === 'Enter' && modKey(e) && text.trim() && !busy) send('question');
         }}
       />
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        <button type="button" className="btn primary" disabled={!text.trim() || busy} onClick={() => send('question')} title="⌘↩">
-          Ask
-        </button>
-        <button type="button" className="btn" disabled={!text.trim() || busy || !canChange} onClick={() => send('change')} title={canChange ? undefined : who(data, 'change')}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="primary" kbd="mod+enter" disabled={!text.trim() || busy} aria-busy={busy} onClick={() => send('question')}>
+          {busy ? 'Asking…' : 'Ask'}
+        </Button>
+        <Button disabled={!text.trim() || busy || !canChange} onClick={() => send('change')} data-tooltip={canChange ? undefined : who(data, 'change')}>
           Ask for this change
-        </button>
+        </Button>
       </div>
-      <p style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--muted)' }}>
+      <p className="text-meta text-muted">
         {who(data, 'question')} {who(data, 'change')}
       </p>
-      {error && <p className="error">{error}</p>}
+      {error && <Notice tone="error">{error}</Notice>}
     </section>
   );
 }

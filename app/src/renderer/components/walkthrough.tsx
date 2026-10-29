@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { ReviewData, WalkthroughJob } from '../../shared/types.ts';
+import { Loader2 } from 'lucide-react';
 import { cleanError } from './ui.tsx';
+import { Button } from './ui/Button.tsx';
+import { Notice } from './ui/Notice.tsx';
 
 /**
  * Follows Hunkdory writing a walkthrough for one branch. With `auto`, starts it as soon as a branch
@@ -65,34 +68,25 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
   useTick(running);
   if (data.walkthrough === 'agent') return null;
 
-  const action = (label: string, fn: () => void) => (
-    <button type="button" className="link" style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap' }} onClick={fn}>
-      {label}
-    </button>
-  );
-  const row = (cls: string, body: React.ReactNode, act: React.ReactNode) => (
-    <div className={cls} role="status" aria-live="polite" style={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
-      <span style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>{body}</span>
-      {act}
-    </div>
-  );
-
   if (running) {
     const what = data.walkthrough === 'reviewer' ? 'Rewriting the walkthrough' : 'Hunkdory is writing a walkthrough for this branch';
-    return row(
-      'notice info',
-      <>
-        <span className="spinner" style={{ marginTop: 3, flex: 'none' }} />
-        <span>
-          <strong>{what}.</strong> {job.attempt > 1 ? 'Covering the changes the first pass missed. ' : ''}
-          {data.walkthrough === 'skeleton' ? 'Big changes take a few minutes. You can wait here, or start now with one step per file.' : 'The current one stays until the new one is ready.'}
-          <br />
-          <span className="muted" style={{ fontSize: 12.5 }}>
-            {job.activity ?? 'Working…'} · {since(job.startedAt)}
-          </span>
+    return (
+      <Notice
+        tone="info"
+        role="status"
+        icon={<Loader2 size={14} className="mt-0.5 animate-spin" aria-hidden />}
+        actions={
+          <Button size="sm" onClick={w.cancel}>
+            Stop
+          </Button>
+        }
+      >
+        <strong className="font-semibold">{what}.</strong> {job.attempt > 1 ? 'Covering the changes the first pass missed. ' : ''}
+        {data.walkthrough === 'skeleton' ? 'Big changes take a few minutes. You can wait here, or start now with one step per file.' : 'The current one stays until the new one is ready.'}
+        <span className="block text-meta text-muted">
+          {job.activity ?? 'Working…'} · {since(job.startedAt)}
         </span>
-      </>,
-      action('Stop', w.cancel)
+      </Notice>
     );
   }
 
@@ -110,26 +104,35 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
       }
     };
     const sharedUrl = sharing.startsWith('https://') ? sharing : shared?.url;
-    return row(
-      'notice info',
-      <span>
-        <strong>Hunkdory wrote this walkthrough</strong> from {from}
+    return (
+      <Notice
+        tone="neutral"
+        actions={
+          <>
+            {data.pr && (
+              <Button size="sm" disabled={sharing === 'busy'} aria-busy={sharing === 'busy'} onClick={share}>
+                {sharing === 'busy' ? 'Sharing…' : shared || sharing.startsWith('https://') ? 'Share again' : `Share on PR #${data.pr.number}`}
+              </Button>
+            )}
+            <Button size="sm" onClick={w.write}>
+              Rewrite
+            </Button>
+          </>
+        }
+      >
+        <strong className="font-semibold text-text">Hunkdory wrote this walkthrough</strong> from {from}
         {shared && !sharing.startsWith('https://') ? <>, and {shared.by} shared it on the PR</> : null}. The reasons are its reading of the change, not the author's own.
         {sharedUrl && (
           <>
             {' '}
-            <button type="button" className="link" style={{ fontSize: 13.5 }} onClick={() => window.api.openExternal(sharedUrl)}>
+            <button type="button" className="text-link hover:underline" onClick={() => window.api.openExternal(sharedUrl)}>
               See it on the PR ↗
             </button>
           </>
         )}
-        {sharing.startsWith('error:') && <span className="error"> Sharing failed: {sharing.slice(6)}</span>}
-        {failed && <span className="error"> Rewriting failed: {failed}</span>}
-      </span>,
-      <span style={{ display: 'flex', gap: 14 }}>
-        {data.pr && action(sharing === 'busy' ? 'Sharing…' : shared || sharing.startsWith('https://') ? 'Share again' : `Share on PR #${data.pr.number}`, share)}
-        {action('Rewrite', w.write)}
-      </span>
+        {sharing.startsWith('error:') && <span className="text-error"> Sharing failed: {sharing.slice(6)}</span>}
+        {failed && <span className="text-error"> Rewriting failed: {failed}</span>}
+      </Notice>
     );
   }
 
@@ -139,25 +142,37 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
       await window.api.setWriteWalkthroughs(data.projectId, on);
       if (on) w.write();
     };
-    return row(
-      'notice info',
-      <span>
-        <strong>No walkthrough on this branch.</strong> The steps below are one per file, without reasons. Claude Code can write one: it reads the diff, the commits and the agent session, and like any Claude Code run that goes to
-        Anthropic. Should Hunkdory do that for every branch in {data.projectName} that opens without one? You can change this in the project's settings.
-      </span>,
-      <span style={{ display: 'flex', gap: 14 }}>
-        {action('Yes, for this project', () => answer(true))}
-        {action('Only when I ask', () => answer(false))}
-      </span>
+    return (
+      <Notice
+        tone="info"
+        actions={
+          <>
+            <Button size="sm" onClick={() => answer(true)}>
+              Yes, for this project
+            </Button>
+            <Button size="sm" onClick={() => answer(false)}>
+              Only when I ask
+            </Button>
+          </>
+        }
+      >
+        <strong className="font-semibold">No walkthrough on this branch.</strong> The steps are one per file, without reasons. Claude Code can write one: it reads the diff, the commits and the agent session, and like any Claude Code
+        run that goes to Anthropic. Should Hunkdory do that for every branch in {data.projectName} that opens without one? You can change this in the project's settings.
+      </Notice>
     );
   }
 
-  return row(
-    'notice',
-    <span>
-      <strong>No walkthrough on this branch.</strong> The steps below are one per file, without reasons.{' '}
+  return (
+    <Notice
+      tone="caution"
+      actions={
+        <Button size="sm" onClick={w.write}>
+          {failed ? 'Try again' : 'Write one'}
+        </Button>
+      }
+    >
+      <strong className="font-semibold">No walkthrough on this branch.</strong> The steps are one per file, without reasons.{' '}
       {failed ? <>Hunkdory couldn't write one: {failed}</> : job?.status === 'cancelled' ? 'You stopped Hunkdory writing one.' : ''}
-    </span>,
-    action(failed ? 'Try again' : 'Write one', w.write)
+    </Notice>
   );
 }
