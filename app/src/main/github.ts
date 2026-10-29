@@ -48,12 +48,27 @@ async function ghApi(method: string, path: string, cwd: string, body?: unknown):
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) return resolve(out.trim() ? JSON.parse(out) : null);
-      const e = ghError(err || out) as Error & { status?: number };
+      const e = ghError(apiErrorText(err, out)) as Error & { status?: number };
       e.status = Number(err.match(/HTTP (\d{3})/)?.[1] ?? 0) || undefined;
       reject(e);
     });
     child.stdin.end(body === undefined ? '' : JSON.stringify(body));
   });
+}
+
+/**
+ * What went wrong in a failed `gh api` call. gh's stderr only has the status ("Unprocessable Entity
+ * (HTTP 422)"); GitHub's reason is in the response body on stdout. Pure, so it can be tested.
+ */
+export function apiErrorText(stderr: string, stdout: string): string {
+  try {
+    const body = JSON.parse(stdout) as { errors?: unknown[] };
+    const reasons = (body?.errors ?? []).map((x) => (typeof x === 'string' ? x : (x as { message?: string })?.message)).filter((x): x is string => !!x?.trim());
+    if (reasons.length) return reasons.join('; ');
+  } catch {
+    // Not JSON: stderr says it best.
+  }
+  return stderr.trim() || stdout;
 }
 
 /** PRs by the GitHub Copilot coding agent. gh reports it as "app/copilot-swe-agent" or "Copilot". */

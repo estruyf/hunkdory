@@ -170,7 +170,10 @@ export class Actions {
     // Line numbers only fit GitHub's diff when you reviewed exactly the PR's head.
     const inline = data.headSha === pr.headRefOid && !data.dirty;
     const review = githubReview(data, state, req, { inline, copilot: toCopilot });
-    const posted = await gh.postReview(project.path, repo, pr.number, { commitId: pr.headRefOid, body: review.body, event, comments: review.comments });
+    const posted = await gh.postReview(project.path, repo, pr.number, { commitId: pr.headRefOid, body: review.body, event, comments: review.comments }).catch((e) => {
+      if (event === 'APPROVE' && gh.isOwnPrError(e)) throw new Error(`GitHub doesn’t let you approve your own PR. Post your review as a comment, or approve and merge it without an approval.`);
+      throw e;
+    });
     const how = event === 'APPROVE' ? 'Approved' : event === 'REQUEST_CHANGES' ? 'Requested changes on' : 'Commented on';
     const moved = review.comments.length && !posted.inline ? ' GitHub couldn’t place your comments on the code, so they are in the review text.' : !inline && comments.length ? ' The PR differs from what you reviewed, so your comments are in the review text.' : '';
     const message = toCopilot ? `Posted your review on PR #${pr.number} for Copilot. It picks it up on GitHub and pushes new commits.${moved}` : `${how} PR #${pr.number} on GitHub.${moved}`;

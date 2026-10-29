@@ -27,7 +27,7 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
   const agent = data.session ? 'claude' : data.agent === 'copilot' ? 'copilot' : null;
   const open = openItems(buildPlan(data, state), state);
   const [pick, setPick] = useState<Decision>(() => (agent && (comments.length || drop.size) ? 'send-back' : data.pr ? 'github' : agent ? 'send-back' : 'merge'));
-  const [event, setEvent] = useState<GitHubEvent>(() => (open.fixes.length ? 'REQUEST_CHANGES' : comments.length ? 'COMMENT' : 'APPROVE'));
+  const [event, setEvent] = useState<GitHubEvent>(() => (open.fixes.length ? 'REQUEST_CHANGES' : comments.length || data.prByYou ? 'COMMENT' : 'APPROVE'));
   // Merging with something still open takes a second click.
   const [confirming, setConfirming] = useState(false);
   const [note, setNote] = useState('');
@@ -61,13 +61,15 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
   const options: { id: Decision; title: string; detail: string; submit: string; disabled?: string }[] = [
     {
       id: 'merge',
-      title: 'Approve and merge',
-      detail: data.pr
+      title: data.prByYou ? 'Merge' : 'Approve and merge',
+      detail: data.prByYou
+        ? `Merges your pull request #${data.pr!.number} into ${data.pr!.baseRefName}${comments.length ? `, with your ${plural(comments.length, 'comment')} on it` : ''}. GitHub doesn’t let you approve your own PR.`
+        : data.pr
         ? `Approves pull request #${data.pr.number} on GitHub${comments.length ? ` with your ${plural(comments.length, 'comment')}` : ''} and merges it into ${data.pr.baseRefName}.`
         : canOpenPr && openPr
           ? `Pushes ${data.branch} and opens a pull request into ${base}, with your comments in the description. Nothing is merged yet.`
           : `Merge into ${base} as it is. Your comments stay in Hunkdory.`,
-      submit: data.pr ? 'Approve & merge' : canOpenPr && openPr ? 'Approve & open PR' : 'Approve & merge',
+      submit: data.prByYou ? 'Merge' : data.pr ? 'Approve & merge' : canOpenPr && openPr ? 'Approve & open PR' : 'Approve & merge',
     },
     ...(data.pr
       ? [
@@ -219,8 +221,8 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
             <fieldset style={{ border: 0, margin: 0, padding: '4px 0 0', display: 'flex', flexWrap: 'wrap', gap: 16 }}>
               <legend className="sr-only">Review type</legend>
               {EVENTS.map((e) => (
-                <label key={e.id} className="choice" style={{ alignItems: 'center' }}>
-                  <input type="radio" name="event" checked={event === e.id} onChange={() => setEvent(e.id)} style={{ marginTop: 0 }} />
+                <label key={e.id} className="choice" style={{ alignItems: 'center', opacity: e.id === 'APPROVE' && data.prByYou ? 0.5 : undefined }} title={e.id === 'APPROVE' && data.prByYou ? 'GitHub doesn’t let you approve your own PR.' : undefined}>
+                  <input type="radio" name="event" checked={event === e.id} disabled={e.id === 'APPROVE' && data.prByYou} onChange={() => setEvent(e.id)} style={{ marginTop: 0 }} />
                   {e.title}
                 </label>
               ))}

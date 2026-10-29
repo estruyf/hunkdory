@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { baseRef, fetchRefspecs, foldComments, isCopilot, parseChecks, prRef, readWalkthroughComment, stackOf, toPullRequest, walkthroughComment, type RawPullRequest } from '../src/main/github.ts';
+import { apiErrorText, baseRef, fetchRefspecs, foldComments, isCopilot, isOwnPrError, parseChecks, prRef, readWalkthroughComment, stackOf, toPullRequest, walkthroughComment, type RawPullRequest } from '../src/main/github.ts';
 import type { PullRequest } from '../src/shared/types.ts';
 
 const pr = (number: number, headRefOid: string, baseRefName = 'develop/5.5'): PullRequest => ({
@@ -141,4 +141,14 @@ test('a PR without an author (a deleted account) or people fields still maps', (
   assert.equal(p.author, 'unknown');
   assert.equal(p.isBot, false);
   assert.deepEqual([p.assignees, p.requestedReviewers, p.reviews], [[], [], []]);
+});
+
+test('a failed API call says what GitHub said, not just the status', () => {
+  const stderr = 'gh: Unprocessable Entity (HTTP 422)\n';
+  const own = apiErrorText(stderr, JSON.stringify({ message: 'Unprocessable Entity', errors: ['Review Can not approve your own pull request'], status: '422' }));
+  assert.equal(own, 'Review Can not approve your own pull request');
+  assert.ok(isOwnPrError(new Error(own)));
+  assert.equal(apiErrorText(stderr, JSON.stringify({ message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'custom', message: 'title is too long' }] })), 'title is too long');
+  assert.equal(apiErrorText(stderr, JSON.stringify({ message: 'Not Found' })), 'gh: Unprocessable Entity (HTTP 422)');
+  assert.equal(apiErrorText(stderr, ''), 'gh: Unprocessable Entity (HTTP 422)');
 });

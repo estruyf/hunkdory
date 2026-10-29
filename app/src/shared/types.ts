@@ -237,6 +237,8 @@ export interface ReviewData {
   baseSha: string;
   head: string;
   pr: PullRequest | null;
+  /** You opened the pull request, so GitHub won't take your approval on it. */
+  prByYou: boolean;
   /** A local branch Hunkdory may merge or delete. False for pull requests and remote-only branches. */
   local: boolean;
   /** Who wrote the last commit, shown when no agent session is linked. */
