@@ -37,7 +37,15 @@ export interface BranchChoice {
   inInbox: boolean;
 }
 
-export type Watch = { mode: 'agent-sessions' } | { mode: 'pattern'; pattern: string } | { mode: 'pull-requests' };
+/** What lands in the inbox. Any mix of the three: a branch more than one of them finds shows up once. */
+export interface Watch {
+  /** Every local branch with commits on top of the base, whoever made it. Integration branches stay out. */
+  anyBranch: boolean;
+  /** Branch globs, comma separated, like "claude/*, feat/*". Null: off. */
+  pattern: string | null;
+  /** Every open pull request, from anyone. Needs the GitHub remote. */
+  pullRequests: boolean;
+}
 
 export interface PullRequest {
   number: number;

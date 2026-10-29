@@ -124,8 +124,10 @@ export class Projects {
 
   private async validate(root: string, input: Omit<ProjectInput, 'path'>) {
     if (!(await g.refExists(root, input.baseBranch))) throw new Error(`Base branch "${input.baseBranch}" not found`);
-    if (input.watch.mode === 'pattern' && !input.watch.pattern.trim()) throw new Error('Enter a branch pattern, like claude/*');
-    if (input.watch.mode === 'pull-requests' && !input.github) throw new Error('Link the GitHub remote to review open pull requests.');
+    const w = input.watch;
+    if (w.pattern !== null && !w.pattern.trim()) throw new Error('Enter a branch pattern, like claude/*');
+    if (w.pullRequests && !input.github) throw new Error('Link the GitHub remote to review open pull requests.');
+    if (!w.anyBranch && w.pattern === null && !w.pullRequests) throw new Error('Pick at least one kind of branch to review.');
   }
 
   async checkGitHub(path: string): Promise<string> {
@@ -215,7 +217,7 @@ export class Projects {
     if (before.ignored?.some((b) => b === branch || b === short)) this.store.addProject({ ...before, ignored: before.ignored.filter((b) => b !== branch && b !== short) });
     const project = this.store.project(projectId);
     // Watching every pull request, an open PR is in the inbox already, by its head branch name.
-    if (project.watch.mode === 'pull-requests' && project.github) {
+    if (project.watch.pullRequests && project.github) {
       const prs = await gh.openPullRequests(project.path, project.github).catch(() => [] as PullRequest[]);
       if (prs.some((p) => p.headRefName === branch)) return this.store.reopenReview(projectId, branch);
     }
@@ -242,19 +244,15 @@ export class Projects {
     scan.branchesSeen = seen.size;
     scan.gone = [...seen].filter((b) => !exists.has(b)).length;
 
-    let items: Discovered[];
-    if (project.watch.mode === 'pull-requests') {
-      const prs = await this.discoverPullRequests(project, sessions, exclude, scan, only);
-      const skip = new Set(prs.map((d) => d.branch.name));
-      items = [...prs, ...(await this.discoverBranches(project, sessions, branches, trees, exclude, scan, { trackedOnly: true, skip, only }))];
-    } else if (project.github) {
-      // The Copilot coding agent works on GitHub, not on this Mac: its open PRs are agent work too.
-      const copilot = await this.discoverPullRequests(project, sessions, exclude, scan, only, (p) => p.copilot);
-      const skip = new Set(copilot.map((d) => d.branch.name));
-      items = [...copilot, ...(await this.discoverBranches(project, sessions, branches, trees, exclude, scan, { skip, only }))];
-    } else {
-      items = await this.discoverBranches(project, sessions, branches, trees, exclude, scan, { only });
-    }
+    // Pull requests first: a branch that is also an open PR shows up once, as the PR.
+    // The Copilot coding agent works on GitHub, not on this Mac: its open PRs are agent work even when you don't watch every PR.
+    const prs = !project.github
+      ? []
+      : project.watch.pullRequests
+        ? await this.discoverPullRequests(project, sessions, exclude, scan, only)
+        : await this.discoverPullRequests(project, sessions, exclude, scan, only, (p) => p.copilot);
+    const skip = new Set(prs.map((d) => d.branch.name));
+    let items = [...prs, ...(await this.discoverBranches(project, sessions, branches, trees, exclude, scan, { skip, only }))];
     if (!only) items = foldDuplicates(items);
     scan.waiting = items.length;
     return { items, scan };
@@ -267,19 +265,16 @@ export class Projects {
     trees: g.Worktree[],
     exclude: Set<string>,
     scan: ProjectScan,
-    opts: { trackedOnly?: boolean; skip?: Set<string>; only?: string } = {}
+    opts: { skip?: Set<string>; only?: string } = {}
   ): Promise<Discovered[]> {
     const root = project.path;
     const exists = new Set(branches);
     // Look up sessions by branch name even when only the remote branch is left.
     const matched = matchSessions(sessions, { exists: () => true, exclude });
-    const names = new Set(opts.trackedOnly ? [] : [...matched.keys()].filter((b) => exists.has(b) && !opts.skip?.has(b)));
-    if (!opts.trackedOnly && project.watch.mode === 'pattern') {
-      const pattern = project.watch.pattern;
-      for (const b of branches) if (!exclude.has(b) && !opts.skip?.has(b) && matchesPattern(b, pattern)) names.add(b);
-      // In pattern mode only matching branches count, even if a session touched others.
-      for (const b of [...names]) if (!matchesPattern(b, pattern)) names.delete(b);
-    }
+    // Agent or person, any branch counts; a session on it adds the prompt and reasoning.
+    const pattern = project.watch.pattern;
+    const watched = (b: string) => project.watch.anyBranch || (!!pattern && matchesPattern(b, pattern));
+    const names = new Set(branches.filter((b) => !exclude.has(b) && !opts.skip?.has(b) && watched(b)));
     const tracked = new Set<string>();
     // A picked remote branch ("origin/x") that is also an open PR's head ("x") shows up once, as the PR.
     const skipped = (b: string) => !!opts.skip && (opts.skip.has(b) || opts.skip.has(b.replace(/^[^/]+\//, '')));
@@ -459,7 +454,7 @@ export class Projects {
       const branch =
         p.number === pr.number
           ? d.branch.name
-          : project.watch.mode === 'pull-requests' || (await g.refExists(project.path, `refs/heads/${p.headRefName}`))
+          : project.watch.pullRequests ||(await g.refExists(project.path, `refs/heads/${p.headRefName}`))
             ? p.headRefName
             : `origin/${p.headRefName}`;
       entries.push({ number: p.number, title: p.title, branch, url: p.url, current: p.number === pr.number, status: this.store.review(project.id, branch)?.status ?? null });

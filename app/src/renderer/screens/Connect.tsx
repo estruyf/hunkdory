@@ -13,8 +13,10 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const [check, setCheck] = useState<RepoCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [base, setBase] = useState('');
-  const [watch, setWatch] = useState<Watch['mode']>('agent-sessions');
+  const [anyBranch, setAnyBranch] = useState(true);
+  const [usePattern, setUsePattern] = useState(false);
   const [pattern, setPattern] = useState('claude/*, copilot/*');
+  const [pullRequests, setPullRequests] = useState(false);
   const [github, setGithub] = useState<string | null>(null);
   const [writeWalkthroughs, setWriteWalkthroughs] = useState<boolean | undefined>(undefined);
   const [linking, setLinking] = useState(false);
@@ -33,8 +35,10 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       setPath(p.path);
       setGithub(p.github ?? null);
       setWriteWalkthroughs(p.writeWalkthroughs);
-      setWatch(p.watch.mode);
-      if (p.watch.mode === 'pattern') setPattern(p.watch.pattern);
+      setAnyBranch(p.watch.anyBranch);
+      setUsePattern(p.watch.pattern !== null);
+      if (p.watch.pattern) setPattern(p.watch.pattern);
+      setPullRequests(p.watch.pullRequests);
     });
   }, [projectId]);
 
@@ -67,7 +71,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
     setGithubError(null);
     if (!on) {
       setGithub(null);
-      if (watch === 'pull-requests') setWatch('agent-sessions');
+      setPullRequests(false);
       return;
     }
     setLinking(true);
@@ -82,7 +86,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const save = async () => {
     setSaving(true);
     setError(null);
-    const w: Watch = watch === 'pattern' ? { mode: 'pattern', pattern } : watch === 'pull-requests' ? { mode: 'pull-requests' } : { mode: 'agent-sessions' };
+    const w: Watch = { anyBranch, pattern: usePattern ? pattern : null, pullRequests };
     try {
       if (existing) {
         const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs });
@@ -237,21 +241,21 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
 
         <Section n={3} title="What needs a review">
           <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <legend className="sr-only">Watch rule</legend>
+            <legend className="sr-only">Watch rules</legend>
             <label className="choice">
-              <input type="radio" name="watch" checked={watch === 'agent-sessions'} onChange={() => setWatch('agent-sessions')} />
+              <input type="checkbox" checked={anyBranch} onChange={(e) => setAnyBranch(e.target.checked)} />
               <span>
-                <strong>Any branch an agent worked on</strong> <span className="muted">(recommended)</span>
+                <strong>Any branch</strong> <span className="muted">(recommended)</span>
                 <br />
-                <span className="muted">Matched through the agent sessions above.</span>
+                <span className="muted">Every local branch with commits on top of the base, from an agent or a person. A session on it adds the prompt and the agent's reasoning.</span>
               </span>
             </label>
             <label className="choice">
-              <input type="radio" name="watch" checked={watch === 'pattern'} onChange={() => setWatch('pattern')} />
+              <input type="checkbox" checked={usePattern} onChange={(e) => setUsePattern(e.target.checked)} />
               <span style={{ flex: 1 }}>
                 <strong>Branches matching a pattern</strong>
                 <br />
-                {watch === 'pattern' ? (
+                {usePattern ? (
                   <input aria-label="Branch pattern" className="field mono" value={pattern} onChange={(e) => setPattern(e.target.value)} style={{ marginTop: 6, height: 34, fontSize: 13, width: '100%', maxWidth: 360 }} />
                 ) : (
                   <span className="muted mono" style={{ fontSize: 13 }}>
@@ -261,7 +265,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
               </span>
             </label>
             <label className={github ? 'choice' : 'choice off'}>
-              <input type="radio" name="watch" disabled={!github} checked={watch === 'pull-requests'} onChange={() => setWatch('pull-requests')} />
+              <input type="checkbox" disabled={!github} checked={pullRequests} onChange={(e) => setPullRequests(e.target.checked)} />
               <span>
                 <strong>Every open pull request</strong>
                 <br />
@@ -269,7 +273,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
               </span>
             </label>
           </fieldset>
-          <p style={{ fontSize: 13, color: 'var(--muted)' }}>Whatever you pick, you can review any other branch with “Review a branch” in the inbox.</p>
+          <p style={{ fontSize: 13, color: 'var(--muted)' }}>Pick any mix: a branch more than one of them finds shows up once. Whatever you pick, you can review any other branch with “Review a branch” in the inbox.</p>
         </Section>
 
         <Section n={4} title="Where your feedback goes">
@@ -289,7 +293,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
           <button type="button" className="btn lg" onClick={() => go(back)}>
             Cancel
           </button>
-          <button type="button" className="btn lg primary" disabled={!ok || !base || saving || (watch === 'pattern' && !pattern.trim())} onClick={save}>
+          <button type="button" className="btn lg primary" disabled={!ok || !base || saving || (usePattern && !pattern.trim()) || (!anyBranch && !usePattern && !pullRequests)} onClick={save}>
             {saving ? 'Saving…' : existing ? 'Save changes' : 'Connect project'}
           </button>
         </div>

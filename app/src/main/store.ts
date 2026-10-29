@@ -1,7 +1,7 @@
 // Review state in one JSON file. Small, readable, and written atomically.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
-import type { AppSettings, Project, ReviewState } from '../shared/types.ts';
+import type { AppSettings, Project, ReviewState, Watch } from '../shared/types.ts';
 
 interface Data {
   version: 1;
@@ -24,7 +24,19 @@ export const projectName = (name: string | undefined, root: string) => name?.tri
  */
 export const withProjectName = (p: Project, name: string | undefined): Project => (name === undefined ? p : { ...p, name: projectName(name, p.path) });
 
-export const reviewId = (projectId: string, branch: string) => `${projectId}::${branch}`;
+/** A project's watch rules. Stores from before you could combine them have a single `mode`. */
+export function toWatch(w: unknown): Watch {
+  const o = (w ?? {}) as Record<string, unknown>;
+  const pattern = typeof o.pattern === 'string' ? o.pattern : null;
+  if (typeof o.anyBranch === 'boolean') return { anyBranch: o.anyBranch, pattern, pullRequests: o.pullRequests === true };
+  // Branches an agent worked on, before every branch counted.
+  if (typeof o.agentSessions === 'boolean') return { anyBranch: o.agentSessions, pattern, pullRequests: o.pullRequests === true };
+  if (o.mode === 'pattern') return { anyBranch: false, pattern: pattern ?? '', pullRequests: false };
+  if (o.mode === 'pull-requests') return { anyBranch: false, pattern: null, pullRequests: true };
+  return { anyBranch: true, pattern: null, pullRequests: false };
+}
+
+export const reviewId =(projectId: string, branch: string) => `${projectId}::${branch}`;
 
 export class Store {
   private data: Data;
@@ -40,7 +52,9 @@ export class Store {
     try {
       const d = JSON.parse(readFileSync(this.file, 'utf8'));
       if (d?.version !== 1) throw new Error(`Unknown store version ${d?.version}`);
-      return { ...empty(), ...d };
+      const data: Data = { ...empty(), ...d };
+      data.projects = data.projects.map((p) => ({ ...p, watch: toWatch(p.watch) }));
+      return data;
     } catch (e) {
       // Keep the unreadable file for inspection rather than overwriting it.
       renameSync(this.file, `${this.file}.broken-${Date.now()}`);

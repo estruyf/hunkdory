@@ -235,9 +235,12 @@ function Tabs({ tabs, current, onChange }: { tabs: { id: Tab; label: string; cou
 }
 
 function sourcesLabel(p: Project) {
-  if (p.watch.mode === 'pull-requests') return `Open pull requests · ${p.github}`;
-  if (p.watch.mode === 'pattern') return `Branches ${p.watch.pattern}`;
-  return p.github ? 'Claude Code · GitHub' : 'Claude Code';
+  const parts: string[] = [];
+  if (p.watch.anyBranch) parts.push('Any branch');
+  if (p.watch.pattern) parts.push(`Branches ${p.watch.pattern}`);
+  if (p.watch.pullRequests) parts.push(`Open pull requests · ${p.github}`);
+  else if (p.github) parts.push('GitHub');
+  return parts.join(' · ');
 }
 
 /** Why a project has nothing in the inbox, in numbers you can check. */
