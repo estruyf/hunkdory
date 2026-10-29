@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "pack:mac": "electron-vite build && electron-builder --mac --dir",
+    "pack:mac": "electron-vite build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --dir",
     "dist:mac": "electron-vite build && electron-builder --mac",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",

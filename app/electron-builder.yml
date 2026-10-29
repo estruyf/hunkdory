@@ -13,6 +13,10 @@ files:
   - resources/icon.png
   - '!node_modules/**/*'
 
+# Electron ships hundreds of locale .lproj folders, each signed separately; keep only English.
+electronLanguages:
+  - en
+
 # wtv runs as `node <Resources>/tools/wtv/bin/wtv.mjs` from the agent prompts (wtvBin in src/main/index.ts).
 extraResources:
   - from: ../tools/wtv
