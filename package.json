@@ -1,0 +1,16 @@
+{
+  "name": "hunkdory-workspace",
+  "private": true,
+  "description": "Root scripts for Hunkdory: the app lives in app/, wtv in tools/wtv/",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "npm --prefix app install",
+    "dev": "npm --prefix app run dev",
+    "build": "npm --prefix app run build",
+    "typecheck": "npm --prefix app run typecheck",
+    "test": "npm --prefix app test && npm --prefix tools/wtv test",
+    "pack:mac": "npm --prefix app run pack:mac",
+    "build:mac": "npm --prefix app run dist:mac",
+    "open:mac": "open app/dist/mac-arm64/Hunkdory.app"
+  }
+}

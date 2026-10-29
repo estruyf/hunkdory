@@ -113,7 +113,8 @@ export function Sidebar({ data }: { data: SidebarData }) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2" onKeyDown={onListKey}>
-        {!data.loaded && data.loading && <Loading label="Checking branches…" />}
+        {/* Where the first group's header goes, so the list doesn't jump when it loads. */}
+        {!data.loaded && data.loading && <Loading label="Checking branches…" className="mt-2 h-6 px-2" />}
         {data.error && (
           <Notice tone="error" className="mx-1">
             {data.error}

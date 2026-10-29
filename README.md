@@ -26,7 +26,18 @@ really hunky-dory?
 ## Run it
 
 ```bash
-cd app
-npm install
+npm install   # installs app/ too
 npm run dev
 ```
+
+## Build the macOS app
+
+```bash
+npm run pack:mac    # just the .app, in app/dist/mac-arm64/
+npm run build:mac   # the .app plus a .dmg and .zip, in app/dist/
+npm run open:mac    # open the packaged app
+```
+
+The build signs with the Developer ID certificate in your keychain if it finds
+one. Set `CSC_IDENTITY_AUTO_DISCOVERY=false` to skip signing. Notarization is
+not set up.

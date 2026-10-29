@@ -76,10 +76,10 @@ export function RiskPill({ risk }: { risk: RiskLevel }) {
   return <Pill tone={risk === 'high' ? 'caution' : risk === 'medium' ? 'default' : 'muted'}>{RISK_LABEL[risk]}</Pill>;
 }
 
-/** A spinner and a present-tense label, for a list or panel that is loading. */
-export function Loading({ label }: { label: string }) {
+/** A spinner and a present-tense label, for a list or panel that is loading. `className` replaces the default spacing. */
+export function Loading({ label, className = 'py-6' }: { label: string; className?: string }) {
   return (
-    <div role="status" className="flex items-center gap-2 py-6 text-ui text-muted">
+    <div role="status" className={`flex items-center gap-2 text-ui text-muted ${className}`}>
       <Loader2 size={14} className="animate-spin text-accent-ink" aria-hidden /> {label}
     </div>
   );

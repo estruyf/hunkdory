@@ -1,0 +1,38 @@
+# macOS packaging. Run from the repo root: npm run build:mac (see ../package.json).
+appId: dev.hunkdory.app
+productName: Hunkdory
+copyright: Copyright © 2026 Elio Struyf
+
+directories:
+  output: dist
+  buildResources: resources
+
+# Every runtime dependency is bundled into out/ by electron-vite, so node_modules stays out of the asar.
+files:
+  - out/**/*
+  - resources/icon.png
+  - '!node_modules/**/*'
+
+# wtv runs as `node <Resources>/tools/wtv/bin/wtv.mjs` from the agent prompts (wtvBin in src/main/index.ts).
+extraResources:
+  - from: ../tools/wtv
+    to: tools/wtv
+    filter:
+      - bin/**/*
+      - src/**/*
+      - package.json
+
+mac:
+  icon: resources/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+
+  # The zip; the dmg sets its own name below.
+  artifactName: ${productName}-${version}-${arch}-mac.${ext}
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
