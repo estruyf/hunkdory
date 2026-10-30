@@ -1,4 +1,4 @@
-// The sidebar's groups: what waits for your review first, then what you started, what is with the agent,
+// The inbox's groups: what waits for your review first, then what you started, what is with the agent,
 // and what you finished or set aside. Pure, so the order can be tested without React.
 import { formatDuration, suggestedOrder, tooBig } from '../../../shared/order.ts';
 import type { InboxItem, ReviewState } from '../../../shared/types.ts';
@@ -13,16 +13,16 @@ export interface BranchRow {
   title: string;
   /** One line under the title. */
   meta: string;
+  /** Who opened it, reviews and assignees: the people line, after the meta line. */
+  who: string;
   /** The part of the meta line that is a failure (CI failing, a failed run), shown in the error colour. */
   problem: string | null;
   /** When it last changed, short: "2h", "35m". */
   age: string | null;
+  /** "+120 −40 · 6 files"; null when it isn't known (an error, an ignored branch) or no longer matters (finished). */
+  size: string | null;
   /** New, or changed since your review: a bold title. */
   unseen: boolean;
-  /** Changed since your review (or since you sent it back): the rail's dot. */
-  updated: boolean;
-  /** Two letters for the rail's tile, from the title: "Move the page" is MP. */
-  initials: string;
   /** Can't be opened (the branch is gone or unreadable). */
   error: string | null;
   /** Ignore takes it out of To review; Bring back puts it back. */
@@ -42,7 +42,7 @@ export interface BranchGroup {
   foldable: boolean;
 }
 
-/** "now", "35m", "2h", "3d": an age in the sidebar's meta size. */
+/** "now", "35m", "2h", "3d": an age in the inbox's meta size. */
 export function shortAge(iso: string | null, now = Date.now()): string | null {
   if (!iso) return null;
   const s = Math.max(0, (now - Date.parse(iso)) / 1000);
@@ -52,22 +52,10 @@ export function shortAge(iso: string | null, now = Date.now()): string | null {
   return `${Math.round(s / 86400)}d`;
 }
 
-/**
- * Two letters that tell branches apart on the rail, from the title without a conventional-commit prefix:
- * "perf(navigation): move the page once" is MP, "Fix flaky worktree tests" is FF. Small words don't count.
- */
-const SMALL = new Set(['a', 'an', 'the', 'to', 'of', 'on', 'in', 'for', 'and', 'or', 'with', 'by', 'at', 'from', 'into']);
-
-export function initialsOf(title: string): string {
-  const words = title
-    .replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, '')
-    .split(/[\s/_-]+/)
-    .filter((w) => /^[a-z0-9]/i.test(w) && !SMALL.has(w.toLowerCase()));
-  const letters = words.slice(0, 2).map((w) => w[0]!.toUpperCase());
-  return letters.join('') || '?';
-}
-
 const RESULT = { merged: 'Merged', 'sent-back': 'Sent back', discarded: 'Discarded', reviewed: 'Reviewed on GitHub', open: 'Open' } as const;
+
+/** "+120 −40 · 6 files". */
+const sizeOf = (w: InboxItem) => `+${w.added} −${w.removed} · ${w.files} ${w.files === 1 ? 'file' : 'files'}`;
 
 const inProgress = (w: InboxItem) => !!w.review && w.review.reviewedSteps > 0 && w.review.status === 'open';
 
@@ -89,27 +77,26 @@ function waitingRow(w: InboxItem, who: string): BranchRow {
     projectName: w.projectName,
     title: w.title,
     meta: parts.join(' · '),
+    who,
     problem: w.error ? null : failing ? 'CI failing' : null,
     age: shortAge(w.updatedAt),
+    size: w.error || w.ignored ? null : sizeOf(w),
     unseen: !started && !w.error,
-    updated: !started && !w.error && w.updatedSinceReview,
-    initials: initialsOf(w.title),
     error: w.error ?? null,
     ignored: w.ignored,
     working: false,
-    tooltip: [w.branch, who, w.buildsOn ? `Builds on ${w.buildsOn.pr ? `PR #${w.buildsOn.pr}` : w.buildsOn.branch}` : ''].filter(Boolean).join(' · ') || null,
+    tooltip: [w.branch, w.buildsOn ? `Builds on ${w.buildsOn.pr ? `PR #${w.buildsOn.pr}` : w.buildsOn.branch}` : ''].filter(Boolean).join(' · ') || null,
   };
 }
 
-function sentRow(w: InboxItem, state: ReviewState | undefined): BranchRow {
+function sentRow(w: InboxItem, state: ReviewState | undefined, who: string): BranchRow {
   const running = state?.decision?.result === 'running';
   const failed = state?.decision?.result === 'failed';
   return {
-    ...waitingRow(w, ''),
+    ...waitingRow(w, who),
     meta: [running ? `Sent back ${shortAge(state!.decision!.at)} ago, the agent is on it` : w.updatedSinceReview ? 'New commits since you sent it back' : 'Sent back', w.projectName].join(' · '),
     problem: failed ? 'The agent run failed' : null,
     unseen: !running && w.updatedSinceReview,
-    updated: !running && w.updatedSinceReview,
     working: running,
   };
 }
@@ -122,11 +109,11 @@ function doneRow(d: ReviewState, projectName: string): BranchRow {
     projectName,
     title: d.title,
     meta: `${RESULT[d.status]} · ${projectName}`,
+    who: '',
     problem: null,
     age: shortAge(d.decision?.at ?? null),
+    size: null,
     unseen: false,
-    updated: false,
-    initials: initialsOf(d.title),
     error: null,
     ignored: false,
     working: false,
@@ -169,7 +156,7 @@ export function branchGroups({ waiting, done, projectNames, shown, shownDone, or
   return [
     { id: 'review', label: 'To review', rows: sorted.filter((w) => !inProgress(w)).map((w) => waitingRow(w, who(w))), foldable: false },
     { id: 'progress', label: 'In progress', rows: sorted.filter(inProgress).map((w) => waitingRow(w, who(w))), foldable: false },
-    { id: 'sent', label: 'Sent back', rows: sent.map((w) => sentRow(w, done.find((d) => d.projectId === w.projectId && d.branch === w.branch))), foldable: false },
+    { id: 'sent', label: 'Sent back', rows: sent.map((w) => sentRow(w, done.find((d) => d.projectId === w.projectId && d.branch === w.branch), who(w))), foldable: false },
     { id: 'reviewed', label: 'Reviewed this week', rows: finished.map((d) => doneRow(d, projectNames.get(d.projectId) ?? '')), foldable: true },
     { id: 'ignored', label: 'Ignored', rows: visible.filter((w) => w.ignored).map((w) => waitingRow(w, who(w))), foldable: true },
   ];

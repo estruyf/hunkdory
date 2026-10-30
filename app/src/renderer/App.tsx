@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { SidebarShell } from './components/sidebar/SidebarShell.tsx';
-import { openSidebarSearch } from './components/sidebar/Sidebar.tsx';
+import { useInboxData, type InboxData } from './components/inbox/useInboxData.ts';
 import { ShortcutsSheet } from './components/shortcuts/ShortcutsSheet.tsx';
 import { TooltipLayer } from './components/ui/Tooltip.tsx';
 import { matches, type ShortcutContext } from './lib/shortcuts.ts';
 import { stepBranch, useBranches } from './state/branches.ts';
 import { openSettings, useNav } from './state/nav.ts';
-import { useSidebar } from './state/sidebar.ts';
 import { jobKey, useWalkthroughs, watchWalkthroughs } from './state/walkthroughs.ts';
 import { Welcome } from './screens/Welcome.tsx';
 import { Connect } from './screens/Connect.tsx';
-import { Home } from './screens/Home.tsx';
+import { focusInboxSearch, Home } from './screens/Home.tsx';
 import { Review } from './screens/Review.tsx';
 import { Finish } from './screens/Finish.tsx';
 import { Done } from './screens/Done.tsx';
@@ -44,6 +42,8 @@ export function App() {
   const settings = useNav((s) => s.settings);
   // The newest state of each review. A screen you go back to may carry an older one.
   const latest = useRef(new Map<string, ReviewState>());
+  // Read here rather than in Home, so the order ⌃⇥ steps through stays current on every screen.
+  const inbox = useInboxData();
 
   useEffect(() => {
     window.api.listProjects().then((ps) => {
@@ -78,10 +78,9 @@ export function App() {
       return { stack, at };
     });
 
-  // The shell reads where you are; while you review, the sidebar steps aside.
+  // The shell reads where you are.
   useEffect(() => {
     useNav.setState({ go, route });
-    useSidebar.getState().setReviewing(route?.name === 'review' || route?.name === 'finish');
     if (route && 'branch' in route) useWalkthroughs.getState().seen(route.projectId, route.branch);
   }, [route]);
 
@@ -110,10 +109,9 @@ export function App() {
         fn();
       };
       if (matches(e, 'shortcuts')) run(() => setSheet((s) => (s ? null : sheetContext(current))));
-      else if (matches(e, 'sidebar.toggle')) run(() => !useSidebar.getState().reviewing && useSidebar.getState().toggle());
       else if (matches(e, 'home')) run(() => go({ name: 'home' }));
       else if (matches(e, 'settings')) run(() => openSettings(!useNav.getState().settings));
-      else if (matches(e, 'branch.goto')) run(openSidebarSearch);
+      else if (matches(e, 'branch.goto')) run(focusInboxSearch);
       else if (matches(e, 'branch.other')) run(() => go({ name: 'pick', projectId: branch?.projectId }));
       else if (matches(e, 'nav.back')) run(() => move(-1));
       else if (matches(e, 'nav.forward')) run(() => move(1));
@@ -140,7 +138,7 @@ export function App() {
       {sheet && <ShortcutsSheet ctx={sheet} onClose={() => setSheet(null)} />}
     </>
   );
-  // First run: one focused view, no sidebar yet.
+  // First run: one focused view.
   if (route.name === 'welcome')
     return (
       <div className="flex h-full">
@@ -149,37 +147,34 @@ export function App() {
       </div>
     );
   return (
-    <div className="flex h-full">
-      <SidebarShell />
-      <main className="relative flex min-w-0 flex-1 flex-col">
-        {view(route, go, hasProjects)}
-        {/* Settings covers only the view: the sidebar stays, and closing it leaves you where you were. */}
-        {settings && (
-          <div className="absolute inset-0 z-20 flex bg-bg">
-            <Settings
-              go={(r) => {
-                openSettings(false);
-                go(r);
-              }}
-              onClose={() => openSettings(false)}
-            />
-          </div>
-        )}
-      </main>
+    <main className="relative flex h-full min-w-0 flex-col">
+      {view(route, go, hasProjects, inbox)}
+      {/* Settings covers the view, and closing it leaves you where you were. */}
+      {settings && (
+        <div className="absolute inset-0 z-20 flex bg-bg">
+          <Settings
+            go={(r) => {
+              openSettings(false);
+              go(r);
+            }}
+            onClose={() => openSettings(false)}
+          />
+        </div>
+      )}
       {overlays}
-    </div>
+    </main>
   );
 }
 
 /** Where you are, for the shortcuts sheet: what works here. */
 function sheetContext(route: Route | null): ShortcutContext {
   const el = document.activeElement;
-  const focus = el?.closest('nav[aria-label="Branches"]') ? 'sidebar' : el?.closest('input, textarea, [contenteditable]') ? 'field' : 'other';
+  const focus = el?.closest('[data-inbox-list]') ? 'list' : el?.closest('input, textarea, [contenteditable]') ? 'field' : 'other';
   const view: ShortcutContext['view'] = useNav.getState().settings ? 'settings' : !route ? 'home' : route.name;
   return { view, decision: route?.name === 'review' && !!route.decision, group: route?.name === 'review' && !!route.group, focus };
 }
 
-function view(route: Route, go: Go, hasProjects: boolean) {
+function view(route: Route, go: Go, hasProjects: boolean, inbox: InboxData) {
   switch (route.name) {
     case 'welcome':
       return <Welcome go={go} />;
@@ -188,7 +183,7 @@ function view(route: Route, go: Go, hasProjects: boolean) {
     case 'pick':
       return <PickBranch go={go} initialProject={route.projectId} />;
     case 'home':
-      return <Home key={route.projectId ?? 'all'} go={go} initialProject={route.projectId} />;
+      return <Home key={route.projectId ?? 'all'} go={go} data={inbox} initialProject={route.projectId} />;
     case 'plan':
       return <PlanScreen key={`${route.projectId}:${route.branch}`} go={go} projectId={route.projectId} branch={route.branch} preloaded={route.preloaded} />;
     case 'review':

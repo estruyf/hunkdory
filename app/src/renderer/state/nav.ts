@@ -1,4 +1,4 @@
-// Where you are and how to go elsewhere, for parts of the shell that aren't handed `go` (the sidebar toggle's pill).
+// Where you are and how to go elsewhere, for parts of the shell that aren't handed `go` (the header's Inbox button, ⌘P).
 import { create } from 'zustand';
 import type { Go, Route } from '../App.tsx';
 

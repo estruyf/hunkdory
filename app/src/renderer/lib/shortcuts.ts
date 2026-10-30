@@ -223,15 +223,15 @@ export interface ShortcutContext {
   /** A skim folder is open on one page. */
   group: boolean;
   /** Where keyboard focus was. */
-  focus: 'sidebar' | 'field' | 'other';
+  focus: 'list' | 'field' | 'other';
 }
 
-export type ShortcutSection = 'general' | 'sidebar' | 'plan' | 'review' | 'finish' | 'projects';
+export type ShortcutSection = 'general' | 'inbox' | 'plan' | 'review' | 'finish' | 'projects';
 
 /** The sections' headings, in the sheet. */
 export const SECTION_TITLES: Record<ShortcutSection, string> = {
   general: 'General',
-  sidebar: 'Branches and sidebar',
+  inbox: 'Inbox',
   plan: 'Plan',
   review: 'In a review',
   finish: 'Finish',
@@ -239,7 +239,7 @@ export const SECTION_TITLES: Record<ShortcutSection, string> = {
 };
 
 /** Where focus has to be for a key to do this. Two shortcuts on the same keys in different places don't collide. */
-export type ShortcutPlace = 'sidebar' | 'view';
+export type ShortcutPlace = 'list' | 'view';
 
 export interface ShortcutDef {
   id: string;
@@ -273,21 +273,20 @@ export const SHORTCUTS = [
   { id: 'settings', keys: ['mod+,'], action: 'Open or close Settings', section: 'general' },
   { id: 'settings.close', keys: ['escape'], action: 'Close Settings', section: 'general', when: (ctx) => ctx.view === 'settings' },
   { id: 'home', keys: ['mod+shift+h'], action: 'Inbox', section: 'general', note: 'From a review, your place in it is kept' },
-  { id: 'branch.goto', keys: ['mod+p'], action: 'Go to a branch', section: 'general', note: 'Opens the sidebar and its search' },
+  { id: 'branch.goto', keys: ['mod+p'], action: 'Go to a branch', section: 'general', note: 'The inbox’s search, from any view' },
   { id: 'branch.other', keys: ['mod+n'], action: 'Review another branch', section: 'general' },
   { id: 'nav.back', keys: ['mod+['], action: 'Back', section: 'general', note: 'Also the mouse’s back button and a swipe' },
   { id: 'nav.forward', keys: ['mod+]'], action: 'Forward', section: 'general' },
 
-  // Branches and sidebar
-  { id: 'sidebar.toggle', keys: ['mod+b'], action: 'Show or hide the sidebar', section: 'sidebar', context: 'Not during a review: it stays out of the way there', when: (ctx) => ctx.view !== 'review' && ctx.view !== 'finish' },
-  { id: 'branch.next', keys: ['ctrl+tab'], action: 'Next branch', section: 'sidebar' },
-  { id: 'branch.previous', keys: ['ctrl+shift+tab'], action: 'Previous branch', section: 'sidebar' },
-  { id: 'sidebar.move', keys: ['arrowup', 'arrowdown'], action: 'Move through branches', section: 'sidebar', where: 'sidebar' },
-  { id: 'sidebar.open', keys: ['enter'], action: 'Open the branch', section: 'sidebar', where: 'sidebar' },
-  { id: 'sidebar.ignore', keys: ['e'], action: 'Ignore the branch, or bring it back', section: 'sidebar', where: 'sidebar', note: 'Ignored branches stay out of To review' },
+  // Inbox
+  { id: 'home.open', keys: ['mod+enter'], action: 'Open the first branch to review', section: 'inbox', when: (ctx) => ctx.view === 'home' },
+  { id: 'branch.next', keys: ['ctrl+tab'], action: 'Next branch', section: 'inbox' },
+  { id: 'branch.previous', keys: ['ctrl+shift+tab'], action: 'Previous branch', section: 'inbox' },
+  { id: 'inbox.move', keys: ['arrowup', 'arrowdown'], action: 'Move through branches', section: 'inbox', where: 'list', when: (ctx) => ctx.view === 'home' },
+  { id: 'inbox.open', keys: ['enter'], action: 'Open the branch', section: 'inbox', where: 'list', when: (ctx) => ctx.view === 'home' },
+  { id: 'inbox.ignore', keys: ['e'], action: 'Ignore the branch, or bring it back', section: 'inbox', where: 'list', note: 'Ignored branches stay out of To review', when: (ctx) => ctx.view === 'home' },
 
   // Plan
-  { id: 'home.open', keys: ['mod+enter'], action: 'Open the first branch to review', section: 'plan', when: (ctx) => ctx.view === 'home' },
   { id: 'plan.start', keys: ['mod+enter'], action: 'Start or continue the review', section: 'plan', when: (ctx) => ctx.view === 'plan' },
   { id: 'find', keys: ['mod+f'], action: 'Search the branch’s code', section: 'plan', note: 'Select a name first to search for it', when: withCode },
   { id: 'review.finish', keys: ['mod+shift+enter'], action: 'Finish', section: 'plan', context: 'In the plan and in a review', when: reviewing },

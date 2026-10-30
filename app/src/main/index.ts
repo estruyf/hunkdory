@@ -18,7 +18,7 @@ const ICON = join(__dirname, '../../resources/icon.png');
 
 // The window's colour before the page draws: --bg in styles.css, light or dark.
 // Switchboard's Demo Time background, so the window never flashes another colour before the page paints.
-/** Where the traffic lights sit: centred in the 52px header, with room before the sidebar's controls. */
+/** Where the traffic lights sit: centred in the 52px header, with room before the header's controls. */
 const WINDOW_BUTTONS = { default: { x: 18, y: 19 } } as const;
 
 const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#15181f' : '#ffffff');

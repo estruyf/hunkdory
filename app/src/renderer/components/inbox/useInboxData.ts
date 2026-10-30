@@ -7,14 +7,17 @@ import { jobKey, useWalkthroughs } from '../../state/walkthroughs.ts';
 import { useAsync, useInbox, usePref } from '../ui.tsx';
 import { branchGroups, withWalkthroughs, type BranchRow } from './branchRows.ts';
 
-/** Everything the sidebar and its rail show: the inbox in groups, the filters, and Ignore. Shared by both. */
-export function useSidebarData() {
+/**
+ * Everything the inbox shows: the branches in groups, the filters, and Ignore. App reads it once, so the
+ * order ⌃⇥ steps through stays current on every screen, and hands it to Home.
+ */
+export function useInboxData() {
   const routeName = useNav((s) => s.route?.name);
   // Back from connecting or changing a project: read the list again.
   const settingsOpen = useNav((s) => s.settings);
   const projects = useAsync(() => window.api.listProjects(), [routeName, settingsOpen]);
   const inbox = useInbox();
-  const [project, setProject] = usePref<string>('sidebar-project', 'all');
+  const [project, setProject] = usePref<string>('inbox-project', 'all');
   const [people, setPeople] = usePref<PeopleFilter>('inbox-people', 'anyone');
   const [order] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
   const [query, setQuery] = useState('');
@@ -62,14 +65,16 @@ export function useSidebarData() {
     });
   }, [inbox.value, names, filter, q, people, me, order, jobs, ready]);
 
-  // The order ⌃⇥ steps through, and what the closed sidebar's pill opens.
+  // The order ⌃⇥ steps through, and what Open the first one opens.
   useEffect(() => {
     const listed = groups.filter((g) => g.id !== 'ignored').flatMap((g) => g.rows);
     const review = groups.find((g) => g.id === 'review')!.rows;
+    // The first one you can open, from To review and then In progress: the hero counts both.
+    const first = [...review, ...groups.find((g) => g.id === 'progress')!.rows].find((r) => !r.error);
     useBranches.getState().setOrder(
       listed.map((r) => ({ projectId: r.projectId, branch: r.branch })),
       review.length,
-      review[0] ? { projectId: review[0].projectId, branch: review[0].branch } : null
+      first ? { projectId: first.projectId, branch: first.branch } : null
     );
   }, [groups]);
 
@@ -82,6 +87,8 @@ export function useSidebarData() {
 
   return {
     groups,
+    /** Every branch the inbox read, before the filters. */
+    waiting: inbox.value?.waiting ?? [],
     projects: projects.value ?? [],
     scans: inbox.value?.scans ?? [],
     loading: inbox.loading,
@@ -98,4 +105,4 @@ export function useSidebarData() {
   };
 }
 
-export type SidebarData = ReturnType<typeof useSidebarData>;
+export type InboxData = ReturnType<typeof useInboxData>;

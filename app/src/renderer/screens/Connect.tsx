@@ -226,7 +226,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                 <label className="flex flex-col gap-1 text-ui font-semibold">
                   Name
                   <input className={`${FIELD_LG} max-w-md font-normal`} value={name ?? folderName} onChange={(e) => setName(e.target.value)} placeholder={folderName || 'my-project'} />
-                  <span className="text-meta font-normal text-muted">How the sidebar and reviews show this project. Leave it empty to use the folder's name.</span>
+                  <span className="text-meta font-normal text-muted">How the inbox and reviews show this project. Leave it empty to use the folder's name.</span>
                 </label>
 
                 <div className="flex flex-col gap-1.5">
@@ -256,7 +256,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                     Every open pull request
                   </Checkbox>
                   <span className="-mt-1 pl-6 text-meta text-muted">{github ? 'From anyone, agents or people. Fetched into a private ref, your branches stay as they are.' : 'Link the GitHub remote above first.'}</span>
-                  <p className="text-meta text-muted">Pick any mix: a branch more than one of them finds shows up once. You can always review another branch from the sidebar.</p>
+                  <p className="text-meta text-muted">Pick any mix: a branch more than one of them finds shows up once. You can always review another branch from the inbox.</p>
                 </div>
               </div>
             )}
