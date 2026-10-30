@@ -14,7 +14,7 @@ import { ReviewError } from './Review.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, defaultDrops, openItems } from '../../shared/plan.ts';
-import type { Decision, GitHubEvent, ReviewData, ReviewState } from '../../shared/types.ts';
+import type { Comment, Decision, GitHubEvent, ReviewData, ReviewPatch, ReviewState } from '../../shared/types.ts';
 
 const EVENTS: { id: GitHubEvent; title: string }[] = [
   { id: 'COMMENT', title: 'Comment' },
@@ -29,7 +29,9 @@ export function Finish({ go, projectId, branch }: { go: Go; projectId: string; b
   return <FinishForm go={go} data={loaded.value.data} state={loaded.value.state} />;
 }
 
-function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: ReviewState }) {
+function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewData; state: ReviewState }) {
+  // Removing a comment here updates the review, and what you finish with.
+  const [state, setState] = useState(initialState);
   const outside = data.steps.filter((s) => s.outsideTask);
   const [drop, setDrop] = useState<Set<string>>(() => new Set(defaultDrops(data.steps, state.settled)));
   const comments = state.comments.filter((c) => c.body.trim());
@@ -65,7 +67,22 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
   const guarded = pick === 'merge' && unfinished.length > 0;
   const stepLabel = (key: string) => {
     const s = data.steps.find((x) => x.key === key);
-    return s ? `Step ${s.index + 1} · ${s.files.length === 1 ? s.files[0] : s.title}` : 'Removed step';
+    if (s) return `Step ${s.index + 1} · ${s.files.length === 1 ? s.files[0] : s.title}`;
+    // The walkthrough changed since: the step's title as it was when you asked Claude about it, if you did.
+    const was = state.exchanges?.find((e) => e.stepKey === key)?.stepTitle;
+    return was ? `Step no longer in the walkthrough · ${was}` : 'Step no longer in the walkthrough';
+  };
+  // Claude changed this step after you wrote the comment: that may have settled it.
+  const changedAfter = (c: Comment) => state.exchanges?.some((e) => e.stepKey === c.stepKey && e.kind === 'change' && e.status === 'done' && e.at > c.createdAt);
+  const remove = async (c: Comment) => {
+    try {
+      const patch: ReviewPatch = c.line && c.hunkId
+        ? { type: 'line-comment', id: c.id, stepKey: c.stepKey, hunkId: c.hunkId, path: c.path ?? '', line: c.line, side: c.side ?? 'RIGHT', body: '' }
+        : { type: 'comment', stepKey: c.stepKey, body: '' };
+      setState(await window.api.updateReview(data.projectId, data.branch, patch));
+    } catch (e) {
+      setError(cleanError(e));
+    }
   };
 
   const options: { id: Decision; title: string; detail: string; submit: string; disabled?: string }[] = [
@@ -101,7 +118,7 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
       : {
           id: 'send-back' as const,
           title: 'Send back to the agent',
-          detail: `Resumes the Claude Code session with your ${plural(comments.length, 'comment')}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
+          detail: `Resumes the Claude Code session with ${comments.length ? `your ${plural(comments.length, 'comment')}` : 'your note'}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
           submit: 'Send back',
           disabled: agent ? undefined : 'No Claude Code session on this Mac worked on this branch, so there is no agent to send it back to.',
         },
@@ -295,13 +312,19 @@ function FinishForm({ go, data, state }: { go: Go; data: ReviewData; state: Revi
             {showComments &&
               comments.map((c) => (
                 <div key={c.id} className="flex flex-col gap-1 rounded-lg bg-code px-3 py-2.5">
-                  <span className="text-meta break-words text-faint">
-                    {stepLabel(c.stepKey)}
-                    {c.path && c.line ? <span className="font-mono"> · {c.path}:{c.line}</span> : null}
-                  </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 pt-0.5 text-meta break-words text-faint">
+                      {stepLabel(c.stepKey)}
+                      {c.path && c.line ? <span className="font-mono"> · {c.path}:{c.line}</span> : null}
+                    </span>
+                    <Button variant="quiet" size="sm" disabled={busy} onClick={() => remove(c)}>
+                      Remove
+                    </Button>
+                  </div>
                   <div className="text-body break-words select-text">
                     <Markdown text={c.body} />
                   </div>
+                  {changedAfter(c) && <span className="text-meta text-muted">You had Claude change this step after writing this. If that settled it, remove it so it doesn’t go with your review.</span>}
                 </div>
               ))}
           </section>
