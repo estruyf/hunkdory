@@ -14,6 +14,7 @@ import { ReviewError } from './Review.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, defaultDrops, openItems } from '../../shared/plan.ts';
+import { reviewedNote } from '../../shared/comments.ts';
 import type { Comment, Decision, GitHubEvent, ReviewData, ReviewPatch, ReviewState } from '../../shared/types.ts';
 
 const EVENTS: { id: GitHubEvent; title: string }[] = [
@@ -182,10 +183,10 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
     setConfirming(false);
   };
 
-  const noteField = (label: string) => (
+  const noteField = (label: string, placeholder = 'Anything else it should know') => (
     <label className="flex flex-col gap-1 text-ui font-semibold">
       {label}
-      <textarea rows={2} className={`${TEXTAREA} font-normal`} placeholder="Anything else it should know" value={note} onChange={(e) => setNote(e.target.value)} />
+      <textarea rows={2} className={`${TEXTAREA} font-normal`} placeholder={placeholder} value={note} onChange={(e) => setNote(e.target.value)} />
     </label>
   );
 
@@ -220,7 +221,9 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
             ))}
           </RadioGroup>
           {data.prByYou && <span className="text-meta text-muted">GitHub doesn’t let you approve your own PR.</span>}
-          {noteField('Review summary (optional)')}
+          {event === 'REQUEST_CHANGES'
+            ? noteField(comments.length ? 'Review summary (optional)' : 'Review summary', 'What needs to change')
+            : noteField('Review summary (optional)', comments.length ? 'Anything else it should know' : `Leave it empty to post “${reviewedNote(data.githubLogin)}”`)}
         </>
       );
     if (id === 'send-back')

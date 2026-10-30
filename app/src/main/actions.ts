@@ -8,6 +8,7 @@ import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
 import { shellEnv, which } from './shellEnv.ts';
 import { DEFAULT_CONFIG_DIR } from './sessions/claude.ts';
+import { reviewedNote } from '../shared/comments.ts';
 import type { Comment, DecisionRecord, FinishRequest, FinishResult, HunkView, ReviewData, ReviewState, Step } from '../shared/types.ts';
 
 const where = (c: Comment) => (c.path && c.line ? ` at ${c.path}:${c.line}${c.side === 'LEFT' ? ' (removed line)' : ''}` : '');
@@ -65,7 +66,7 @@ export function githubReview(
   data: Pick<ReviewData, 'steps'> & Partial<Pick<ReviewData, 'hunks'>>,
   state: Pick<ReviewState, 'comments'>,
   req: Pick<FinishRequest, 'note' | 'dropStepKeys'>,
-  opts: { inline: boolean; copilot: boolean }
+  opts: { inline: boolean; copilot: boolean; reviewer?: string | null }
 ): { body: string; comments: gh.LineComment[] } {
   const stepOf = (key: string) => data.steps.find((s) => s.key === key);
   const label = (s: Step | undefined) => (s ? `Step ${s.index + 1}: ${s.title}` : 'A step that no longer exists');
@@ -93,6 +94,8 @@ export function githubReview(
   parts.push(...folded);
   const drops = req.dropStepKeys.map(stepOf).filter((s): s is Step => !!s);
   if (drops.length) parts.push(['Please drop these changes, they are outside the task:', ...drops.map((s) => `- ${label(s)} (${s.files.map((f) => `\`${f}\``).join(', ')})`)].join('\n'));
+  // Nothing to say: one line that you reviewed it, rather than a review that's only the footer.
+  if (!parts.length && !inline.length) return { body: reviewedNote(opts.reviewer ?? null), comments: [] };
   parts.push('<sub>Reviewed step by step with Hunkdory.</sub>');
   return { body: parts.join('\n\n'), comments: inline };
 }
@@ -166,10 +169,11 @@ export class Actions {
     const { project, pr, repo } = await this.projects.pullRequest(req.projectId, req.branch);
     const event = req.event ?? 'COMMENT';
     const comments = state.comments.filter((c) => c.body.trim());
-    if (event !== 'APPROVE' && !comments.length && !req.note.trim() && !req.dropStepKeys.length) throw new Error('Add a comment or a note first, or approve.');
+    // A comment or an approval without anything to say still says you reviewed it; asking for changes has to say which.
+    if (event === 'REQUEST_CHANGES' && !comments.length && !req.note.trim() && !req.dropStepKeys.length) throw new Error('Say what needs to change: add a comment or a review summary.');
     // Line numbers only fit GitHub's diff when you reviewed exactly the PR's head.
     const inline = data.headSha === pr.headRefOid && !data.dirty;
-    const review = githubReview(data, state, req, { inline, copilot: toCopilot });
+    const review = githubReview(data, state, req, { inline, copilot: toCopilot, reviewer: data.githubLogin });
     const posted = await gh.postReview(project.path, repo, pr.number, { commitId: pr.headRefOid, body: review.body, event, comments: review.comments }).catch((e) => {
       if (event === 'APPROVE' && gh.isOwnPrError(e)) throw new Error(`GitHub doesn’t let you approve your own PR. Post your review as a comment, or approve and merge it without an approval.`);
       throw e;
@@ -186,7 +190,7 @@ export class Actions {
     const { project, pr, repo } = await this.projects.pullRequest(req.projectId, req.branch);
     if (data.headSha !== pr.headRefOid) throw new Error(`PR #${pr.number} changed since you opened this review. Reload it and look at what's new first.`);
     const comments = state.comments.filter((c) => c.body.trim());
-    const review = githubReview(data, state, { ...req, dropStepKeys: [] }, { inline: !data.dirty, copilot: false });
+    const review = githubReview(data, state, { ...req, dropStepKeys: [] }, { inline: !data.dirty, copilot: false, reviewer: data.githubLogin });
     let url: string | null = null;
     let approved = true;
     try {

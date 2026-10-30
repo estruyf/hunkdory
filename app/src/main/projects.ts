@@ -637,6 +637,7 @@ export class Projects {
     const title = authorTitle ?? d.branch.pr?.title ?? d.match?.origin.title ?? promptTitle ?? reviewerTitle ?? subject ?? intent ?? d.branch.name;
 
     const shared = (wt.value as { shared?: { url: string; by: string } } | null)?.shared;
+    const me = d.branch.pr ? await gh.login(root).catch(() => null) : null;
     const data: ReviewData = {
       ask: askAbility(session, d.branch),
       agent: d.match ? 'claude-code' : d.branch.pr?.copilot ? 'copilot' : null,
@@ -660,7 +661,8 @@ export class Projects {
       baseSha,
       head: r.head,
       pr: d.branch.pr,
-      prByYou: !!d.branch.pr && d.branch.pr.author === (await gh.login(root).catch(() => null)),
+      githubLogin: me,
+      prByYou: !!d.branch.pr && d.branch.pr.author === me,
       local: !d.branch.pr && d.branch.headRef === d.branch.name && (await g.refExists(root, `refs/heads/${d.branch.name}`)),
       author: d.match ? null : author || null,
       walkthrough: source,

@@ -56,3 +56,6 @@ export function setAnswerLine(r: Pick<ReviewState, 'comments'>, stepKey: string,
   }
   if (line) addToStepComment(r, stepKey, line);
 }
+
+/** What a GitHub review says when you post it without comments or a summary: GitHub wants some text on it. */
+export const reviewedNote = (login: string | null) => `Reviewed${login ? ` by ${login}` : ''} in Hunkdory.`;
