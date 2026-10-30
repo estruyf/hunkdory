@@ -11,6 +11,7 @@ import { Notice } from '../components/ui/Notice.tsx';
 import { Pill } from '../components/ui/Pill.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
+import { Select } from '../components/ui/Select.tsx';
 import { matches } from '../lib/shortcuts.ts';
 import { StackBar, checksText, checksTone } from '../components/github.tsx';
 import { AgentTests, AskedFor, ReviewError } from './Review.tsx';
@@ -35,6 +36,43 @@ export function PlanScreen({ go, projectId, branch, preloaded }: { go: Go; proje
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
   if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
   return <PlanView key={version} go={go} data={value.data} initialState={value.state} onReload={() => setVersion((v) => v + 1)} />;
+}
+
+const AUTO_BASE = '\0auto';
+
+/** The base the review compares against. Picking another one is for this branch only, whatever the project's base. */
+function BasePicker({ data, onChanged, onError }: { data: ReviewData; onChanged: () => void; onError: (message: string | null) => void }) {
+  const choices = useAsync(() => window.api.listBases(data.projectId, data.branch), [data.projectId, data.branch]);
+  const [busy, setBusy] = useState(false);
+  const options = [
+    ...(data.baseChosen ? [{ value: AUTO_BASE, label: 'Let Hunkdory pick', hint: 'project base or PR base' }] : []),
+    // The current base stays listed even when it isn't a branch here, such as a PR's base.
+    ...(choices.value?.some((c) => c.name === data.baseRef) ? [] : [{ value: data.baseRef, label: data.baseRef }]),
+    ...(choices.value ?? []).map((c) => ({ value: c.name, label: c.name, hint: plural(c.commits, 'commit') })),
+  ];
+  const pick = async (value: string) => {
+    setBusy(true);
+    try {
+      await window.api.setBase(data.projectId, data.branch, value === AUTO_BASE ? null : value);
+      onError(null);
+      onChanged();
+    } catch (e) {
+      onError(cleanError(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <Select
+      label="Compare against"
+      tooltip={data.baseChosen ? 'Compare against another branch (you picked this one)' : 'Compare against another branch'}
+      value={data.baseRef}
+      options={options}
+      onChange={pick}
+      disabled={busy}
+      menuWidth={340}
+      className="-mx-1 rounded px-1 font-mono text-meta text-faint hover:bg-border/45 hover:text-text"
+    />
+  );
 }
 
 const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
@@ -177,8 +215,8 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-2">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint">
-              <span className="font-mono">
-                {data.branch} → {data.baseRef}
+              <span className="flex min-w-0 items-center gap-1 font-mono">
+                {data.branch} → <BasePicker data={data} onChanged={onReload} onError={setError} />
               </span>
               <span>· {sizeText(data.files, data.added, data.removed)}</span>
               <span>· about {formatDuration(data.minutes)}</span>
@@ -252,7 +290,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
               }
             >
               <strong className="font-semibold">Too big for one sitting.</strong> About {formatDuration(data.minutes)} of reading. Smaller branches get a better review: ask the agent to split it{copied ? ' (paste the request into its session)' : ''}. Or take it over
-              several sittings: Hunkdory keeps your place.
+              several sittings: Hunkdory keeps your place.{!data.baseChosen && <> More than you expected? Check the branch it compares against, next to the branch name above.</>}
             </Notice>
           )}
 

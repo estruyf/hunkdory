@@ -3,8 +3,9 @@ import { matchesPeople, peopleLine, peopleOptions, type PeopleFilter } from '../
 import type { InboxItem } from '../../../shared/types.ts';
 import { useBranches } from '../../state/branches.ts';
 import { useNav } from '../../state/nav.ts';
+import { jobKey, useWalkthroughs } from '../../state/walkthroughs.ts';
 import { useAsync, useInbox, usePref } from '../ui.tsx';
-import { branchGroups, type BranchRow } from './branchRows.ts';
+import { branchGroups, withWalkthroughs, type BranchRow } from './branchRows.ts';
 
 /** Everything the sidebar and its rail show: the inbox in groups, the filters, and Ignore. Shared by both. */
 export function useSidebarData() {
@@ -17,6 +18,8 @@ export function useSidebarData() {
   const [people, setPeople] = usePref<PeopleFilter>('inbox-people', 'anyone');
   const [order] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
   const [query, setQuery] = useState('');
+  const jobs = useWalkthroughs((s) => s.jobs);
+  const ready = useWalkthroughs((s) => s.ready);
 
   // Agents keep working while you review: refresh when the window comes back (at most every 30 seconds),
   // and always when an agent run ends.
@@ -42,19 +45,22 @@ export function useSidebarData() {
   const names = useMemo(() => new Map(projects.value?.map((p) => [p.id, p.name])), [projects.value]);
   const filter = project === 'all' || !names.has(project) ? null : project;
   const q = query.trim().toLowerCase();
-  const groups = useMemo(
-    () =>
-      branchGroups({
-        waiting: inbox.value?.waiting ?? [],
-        done: inbox.value?.done ?? [],
-        projectNames: names,
-        shown: (w: InboxItem) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName}`.toLowerCase().includes(q)) && matchesPeople(w, people, me),
-        shownDone: (d) => (!filter || d.projectId === filter) && (!q || `${d.title} ${d.branch} ${names.get(d.projectId) ?? ''}`.toLowerCase().includes(q)),
-        order,
-        who: (w) => peopleLine(w, me),
-      }),
-    [inbox.value, names, filter, q, people, me, order]
-  );
+  const groups = useMemo(() => {
+    const rows = branchGroups({
+      waiting: inbox.value?.waiting ?? [],
+      done: inbox.value?.done ?? [],
+      projectNames: names,
+      shown: (w: InboxItem) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName}`.toLowerCase().includes(q)) && matchesPeople(w, people, me),
+      shownDone: (d) => (!filter || d.projectId === filter) && (!q || `${d.title} ${d.branch} ${names.get(d.projectId) ?? ''}`.toLowerCase().includes(q)),
+      order,
+      who: (w) => peopleLine(w, me),
+    });
+    // Walkthroughs go on being written while you're on another branch.
+    return withWalkthroughs(rows, (row) => {
+      const key = jobKey(row.projectId, row.branch);
+      return jobs[key]?.status === 'running' ? 'writing' : ready[key] ? 'ready' : null;
+    });
+  }, [inbox.value, names, filter, q, people, me, order, jobs, ready]);
 
   // The order ⌃⇥ steps through, and what the closed sidebar's pill opens.
   useEffect(() => {

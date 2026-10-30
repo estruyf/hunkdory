@@ -21,6 +21,7 @@ import type { ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/ty
 import { AskPanel } from '../components/ask.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
+import { WalkthroughBar } from '../components/walkthrough.tsx';
 import { AgentTests, AskedFor, CommentBox, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
 
@@ -288,6 +289,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   const shell = (body: React.ReactNode, foot: React.ReactNode, aside?: React.ReactNode) => (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {header}
+      <WalkthroughBar data={data} onSwitch={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, reload: Date.now() })} />
       {search.panel}
       <div className="flex min-h-0 flex-1">
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{body}</div>

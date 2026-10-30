@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell, Tray } from 'electron';
 import { release } from 'node:os';
 import { join, resolve } from 'node:path';
 import { existsSync, renameSync } from 'node:fs';
@@ -10,6 +10,7 @@ import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
 import { addToStepComment, removeFromStepComments } from '../shared/comments.ts';
+import { carryReviewed } from '../shared/order.ts';
 import type { ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/types.ts';
 
 // The app icon. Packaged builds take icon.icns from resources/; this covers the dock and window in dev.
@@ -54,6 +55,13 @@ const writer = new Writer({
     win?.webContents.send('walkthrough-changed', job);
     // The inbox shows whether a branch has a walkthrough.
     if (job.status === 'done') win?.webContents.send('reviews-changed');
+    // You went to do something else while it ran: say it's ready, and open the branch from the notification.
+    if (job.status === 'done' && !win?.isFocused() && Notification.isSupported()) {
+      const title = store.review(job.projectId, job.branch)?.title ?? job.branch;
+      const n = new Notification({ title: 'Walkthrough ready', body: `${title}: you can start the review.` });
+      n.on('click', () => openBranch(job.projectId, job.branch));
+      n.show();
+    }
   },
 });
 const wtvBin = resolve(app.getAppPath(), '../tools/wtv/bin/wtv.mjs');
@@ -158,6 +166,13 @@ const api: ReviewerApi = {
   listBranches: (projectId) => projects.listBranches(projectId),
   trackBranch: (projectId, branch) => projects.trackBranch(projectId, branch),
   ignoreBranch: async (projectId, branch, on) => projects.ignoreBranch(projectId, branch, on),
+  listBases: (projectId, branch) => projects.listBases(projectId, branch),
+  setBase: async (projectId, branch, base) => {
+    await projects.setBase(projectId, branch, base);
+    // A walkthrough being written is for the old diff.
+    writer.cancel(projectId, branch);
+    win?.webContents.send('reviews-changed');
+  },
   openExternal: async (url) => {
     // Only links Hunkdory shows itself, like a pull request on GitHub.
     if (/^https:\/\//.test(url)) await shell.openExternal(url);
@@ -181,13 +196,16 @@ const api: ReviewerApi = {
   },
   loadReview: async (projectId, branch, opts) => {
     const data = await projects.review(projectId, branch, opts?.refresh);
-    const state = store.ensureReview(projectId, branch, { title: data.title, sessionId: data.session?.id ?? null });
+    let state = store.ensureReview(projectId, branch, { title: data.title, sessionId: data.session?.id ?? null });
     if (state.title !== data.title || state.sessionId !== (data.session?.id ?? null)) {
-      store.updateReview(projectId, branch, (r) => {
+      state = store.updateReview(projectId, branch, (r) => {
         r.title = data.title;
         r.sessionId = data.session?.id ?? null;
       });
     }
+    // A walkthrough that arrived mid-review regroups the steps: what you already reviewed stays reviewed.
+    const carried = state.decision ? null : carryReviewed(data.steps, state.reviewed);
+    if (carried) state = store.updateReview(projectId, branch, (r) => (r.reviewed = carried));
     return { data, state };
   },
   updateReview: async (projectId, branch, patch) => {
@@ -202,6 +220,7 @@ const api: ReviewerApi = {
     shell.showItemInFolder(file);
   },
   walkthroughJob: async (projectId, branch) => writer.job(projectId, branch),
+  walkthroughJobs: async () => writer.jobsAll(),
   writeWalkthrough: (projectId, branch, opts) => writer.start(projectId, branch, opts),
   cancelWalkthrough: async (projectId, branch) => writer.cancel(projectId, branch),
   ask: (projectId, branch, stepKey, kind, text) => conversations.ask(projectId, branch, stepKey, kind, text),
@@ -268,6 +287,15 @@ function showWindow() {
   if (!win) createWindow();
   win!.show();
   win!.focus();
+}
+
+/** Brings the window up on a branch's review plan, also when it has to open first. */
+function openBranch(projectId: string, branch: string) {
+  const fresh = !win;
+  showWindow();
+  const send = () => win?.webContents.send('open-branch', { projectId, branch });
+  if (fresh || win!.webContents.isLoading()) win!.webContents.once('did-finish-load', send);
+  else send();
 }
 
 function createTray() {

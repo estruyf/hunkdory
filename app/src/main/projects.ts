@@ -16,7 +16,7 @@ import { projectName, toWatch, withProjectName, type Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
 import type { Summaries, Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
-import type { BranchChoice, BranchInfo, CodeSearchResult, FoundFolder, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BaseChoice, BranchChoice, BranchInfo, CodeSearchResult, FoundFolder, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -202,6 +202,43 @@ export class Projects {
     return list;
   }
 
+  /** Branches the review could compare against: each with the branch's commits that aren't on it, fewest first. */
+  async listBases(projectId: string, branch: string): Promise<BaseChoice[]> {
+    const { project, d } = await this.find(projectId, branch);
+    const fmt = ['%(refname)', '%(refname:short)', `%(ahead-behind:${d.branch.headSha})`].join('%00');
+    const out = await g.git(['for-each-ref', `--format=${fmt}`, 'refs/heads', 'refs/remotes'], project.path);
+    const short = branch.replace(/^[^/]+\//, '');
+    const list: BaseChoice[] = [];
+    for (const line of out.split('\n').filter(Boolean)) {
+      const [full, name, ab] = line.split('\0');
+      if (full.endsWith('/HEAD') || /(^|\/)gh-readonly-queue\//.test(name)) continue;
+      if (name === branch || name.replace(/^[^/]+\//, '') === short) continue;
+      // `behind` is what the branch has that this ref doesn't: the commits a review against it shows.
+      const commits = Number(ab?.split(' ')[1] ?? 0);
+      if (commits) list.push({ name, commits });
+    }
+    return list.sort((a, b) => a.commits - b.commits).slice(0, 300);
+  }
+
+  /** Compares one branch against `base`, whatever the project's base. `null` goes back to Hunkdory's pick. */
+  async setBase(projectId: string, branch: string, base: string | null) {
+    const before = this.store.project(projectId);
+    if (base && !(await g.refExists(before.path, base))) throw new Error(`Branch ${base} not found`);
+    const save = (bases: Record<string, string>) => {
+      this.store.addProject({ ...this.store.project(projectId), bases });
+      // A scan that started before this would hand back the old size.
+      this.scanning = null;
+    };
+    const { [branch]: _old, ...rest } = before.bases ?? {};
+    save(base ? { ...rest, [branch]: base } : rest);
+    try {
+      await this.find(projectId, branch);
+    } catch {
+      save(before.bases ?? {});
+      throw new Error(`${branch} has no changes on top of ${base ?? 'the base Hunkdory picks'}.`);
+    }
+  }
+
   ignoreBranch(projectId: string, branch: string, on: boolean) {
     const project = this.store.project(projectId);
     const rest = (project.ignored ?? []).filter((b) => b !== branch);
@@ -290,9 +327,10 @@ export class Projects {
       const local = exists.has(name) ? name : name.replace(/^[^/]+\//, '');
       const match = matched.get(name) ?? matched.get(local) ?? null;
       const pr = prs.find((p) => p.headRefName === local) ?? null;
-      // An open pull request says what the branch merges into. That beats guessing, and matters for stacked PRs.
-      const prBase = pr ? await firstRef(root, [gh.baseRef(pr.baseRefName), `origin/${pr.baseRefName}`, pr.baseRefName]) : null;
-      const { ref: baseRef, ahead } = await this.pickBase(root, name, prBase ? [prBase] : [match?.origin.originalBranch, project.baseBranch, ...exclude]);
+      // A base you picked wins. Then an open pull request, which says what the branch merges into: that beats guessing, and matters for stacked PRs.
+      const chosen = await chosenBase(project, name);
+      const prBase = pr && !chosen ? await firstRef(root, [gh.baseRef(pr.baseRefName), `origin/${pr.baseRefName}`, pr.baseRefName]) : null;
+      const { ref: baseRef, ahead } = await this.pickBase(root, name, chosen ? [chosen] : prBase ? [prBase] : [match?.origin.originalBranch, project.baseBranch, ...exclude]);
       const headSha = (await g.git(['rev-parse', name], root)).trim();
       const dirty = checkout.kind === 'none' ? 0 : (await g.dirtyFiles(checkout.path)).length;
       if (!ahead && !dirty) {
@@ -306,6 +344,7 @@ export class Projects {
           checkout,
           baseRef,
           baseName: prBase ? pr!.baseRefName : baseRef,
+          baseChosen: !!chosen,
           headRef: name,
           headSha,
           pr,
@@ -336,7 +375,8 @@ export class Projects {
     for (const pr of prs) {
       if (only && pr.headRefName !== only) continue;
       const headRef = gh.prRef(pr.number);
-      const baseRef = gh.baseRef(pr.baseRefName);
+      const chosen = await chosenBase(project, pr.headRefName);
+      const baseRef = chosen ?? gh.baseRef(pr.baseRefName);
       if (!(await g.refExists(root, headRef)) || !(await g.refExists(root, baseRef))) continue;
       const match = matched.get(pr.headRefName) ?? null;
       out.push({
@@ -345,7 +385,8 @@ export class Projects {
           name: pr.headRefName,
           checkout: { kind: 'none' },
           baseRef,
-          baseName: pr.baseRefName,
+          baseName: chosen ?? pr.baseRefName,
+          baseChosen: !!chosen,
           headRef,
           headSha: pr.headRefOid,
           pr,
@@ -615,6 +656,7 @@ export class Projects {
       writeWalkthroughs: project.writeWalkthroughs ?? null,
       branch: d.branch.name,
       baseRef: d.branch.baseName,
+      baseChosen: d.branch.baseChosen,
       baseSha,
       head: r.head,
       pr: d.branch.pr,
@@ -759,6 +801,12 @@ function foldDuplicates(items: Discovered[]): Discovered[] {
     keep.match = keep.match ? { ...keep.match, sessions: [...keep.match.sessions, ...extra] } : dup.match;
   }
   return items.filter((d) => !dups.has(d.branch.name));
+}
+
+/** The base you picked for a branch, while it still exists. */
+async function chosenBase(project: Project, branch: string): Promise<string | null> {
+  const base = project.bases?.[branch];
+  return base && (await g.refExists(project.path, base)) ? base : null;
 }
 
 async function firstRef(root: string, refs: string[]): Promise<string | null> {

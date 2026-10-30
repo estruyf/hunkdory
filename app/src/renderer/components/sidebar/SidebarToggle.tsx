@@ -3,6 +3,7 @@ import { currentPlatform } from '../../lib/platform.ts';
 import { formatKeys, keysFor } from '../../lib/shortcuts.ts';
 import { useBranches } from '../../state/branches.ts';
 import { useNav } from '../../state/nav.ts';
+import { useWalkthroughs } from '../../state/walkthroughs.ts';
 import { useShownSidebar, useSidebar } from '../../state/sidebar.ts';
 import { Button } from '../ui/Button.tsx';
 import { Pill } from '../ui/Pill.tsx';
@@ -25,6 +26,7 @@ export function SidebarToggle() {
         <Button variant="quiet" icon={<House size={14} aria-hidden />} shortcut="home" onClick={() => go({ name: 'home' })} data-tooltip={`Back to the inbox (${formatKeys(keysFor('home'))}). Your place in this review is kept.`}>
           Inbox
         </Button>
+        <ReadyPill />
       </div>
     );
   const open = shown === 'open';
@@ -41,7 +43,24 @@ export function SidebarToggle() {
         onClick={() => useSidebar.getState().toggle()}
       />
       {!open && <ToReviewPill />}
+      {!open && <ReadyPill />}
     </div>
+  );
+}
+
+/** Walkthroughs that finished for other branches while there was no sidebar to show it: opens the oldest. */
+function ReadyPill() {
+  const ready = Object.values(useWalkthroughs((s) => s.ready));
+  const first = ready[0];
+  if (!first) return null;
+  return (
+    <Pill
+      tone="ok"
+      onClick={() => useNav.getState().go({ name: 'plan', projectId: first.projectId, branch: first.branch })}
+      data-tooltip={`Hunkdory finished the walkthrough for ${ready.map((r) => r.branch).join(', ')}. Open ${first.branch}.`}
+    >
+      {ready.length === 1 ? 'Walkthrough ready' : `${ready.length} walkthroughs ready`}
+    </Pill>
   );
 }
 

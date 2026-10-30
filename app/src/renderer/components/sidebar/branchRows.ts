@@ -27,8 +27,10 @@ export interface BranchRow {
   error: string | null;
   /** Ignore takes it out of To review; Bring back puts it back. */
   ignored: boolean;
-  /** The agent is working on what you sent back. */
+  /** The agent is working on what you sent back, or Hunkdory on a walkthrough. */
   working: boolean;
+  /** What `working` means, read out for the dots. Defaults to the agent. */
+  workingLabel?: string;
   tooltip: string | null;
 }
 
@@ -130,6 +132,19 @@ function doneRow(d: ReviewState, projectName: string): BranchRow {
     working: false,
     tooltip: d.branch,
   };
+}
+
+/** Rows of branches Hunkdory is writing a walkthrough for, or wrote one for while you were elsewhere. */
+export function withWalkthroughs(groups: BranchGroup[], status: (row: BranchRow) => 'writing' | 'ready' | null): BranchGroup[] {
+  return groups.map((g) => ({
+    ...g,
+    rows: g.rows.map((row) => {
+      const s = g.id === 'reviewed' ? null : status(row);
+      if (s === 'writing') return { ...row, meta: `Writing a walkthrough · ${row.meta}`, working: true, workingLabel: 'Hunkdory is writing a walkthrough' };
+      if (s === 'ready') return { ...row, meta: `Walkthrough ready · ${row.meta}`, unseen: true };
+      return row;
+    }),
+  }));
 }
 
 export interface RowInput {

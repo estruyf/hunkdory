@@ -18,12 +18,20 @@ export interface Project {
   tracked?: string[];
   /** Branches you ignored, e.g. because someone else reviews them on GitHub. They stay out of "Waiting for you" until you bring them back. */
   ignored?: string[];
+  /** Bases you picked for one branch, by branch name. They win over the project's base and a PR's. */
+  bases?: Record<string, string>;
   /**
    * Whether Hunkdory may have Claude Code write a walkthrough when a branch opens without one.
    * Unset until you answer: until then nothing is sent to Claude unless you click "Write one".
    */
   writeWalkthroughs?: boolean;
   addedAt: string;
+}
+
+/** A branch you can compare a review against, with how many of the branch's commits aren't on it. */
+export interface BaseChoice {
+  name: string;
+  commits: number;
 }
 
 /** A branch you can pick to review, for the branch picker. */
@@ -140,6 +148,8 @@ export interface BranchInfo {
   baseRef: string;
   /** Base as people call it, for display. */
   baseName: string;
+  /** You picked the base for this branch, instead of Hunkdory. */
+  baseChosen: boolean;
   /** Ref with the changes: the branch, or "refs/reviewer/pr/<n>" for a pull request. */
   headRef: string;
   headSha: string;
@@ -242,6 +252,8 @@ export interface ReviewData {
   writeWalkthroughs: boolean | null;
   branch: string;
   baseRef: string;
+  /** You picked the base for this branch, instead of Hunkdory. */
+  baseChosen: boolean;
   baseSha: string;
   head: string;
   pr: PullRequest | null;
@@ -493,6 +505,10 @@ export interface ReviewerApi {
   trackBranch(projectId: string, branch: string): Promise<void>;
   /** Takes a branch out of the inbox, or (`on` false) brings it back. */
   ignoreBranch(projectId: string, branch: string, on: boolean): Promise<void>;
+  /** Branches a review could compare against, the ones with the fewest commits to review first. */
+  listBases(projectId: string, branch: string): Promise<BaseChoice[]>;
+  /** Compares one branch against `base`, whatever the project's base. `null` goes back to Hunkdory's pick. */
+  setBase(projectId: string, branch: string, base: string | null): Promise<void>;
   openExternal(url: string): Promise<void>;
   /** `me` is who gh is signed in as, null without GitHub. */
   inbox(opts?: { refresh?: boolean }): Promise<{ waiting: InboxItem[]; done: ReviewState[]; scans: ProjectScan[]; me: string | null }>;
@@ -501,6 +517,8 @@ export interface ReviewerApi {
   finish(req: FinishRequest): Promise<FinishResult>;
   openSessionFile(file: string): Promise<void>;
   walkthroughJob(projectId: string, branch: string): Promise<WalkthroughJob | null>;
+  /** Every walkthrough run since the app started, for the sidebar. */
+  walkthroughJobs(): Promise<WalkthroughJob[]>;
   /** Has Hunkdory write a walkthrough. `auto` only starts for a branch without one, once per diff. */
   writeWalkthrough(projectId: string, branch: string, opts?: { auto?: boolean }): Promise<WalkthroughJob | null>;
   cancelWalkthrough(projectId: string, branch: string): Promise<void>;

@@ -14,6 +14,8 @@ const methods: (keyof ReviewerApi)[] = [
   'listBranches',
   'trackBranch',
   'ignoreBranch',
+  'listBases',
+  'setBase',
   'openExternal',
   'inbox',
   'loadReview',
@@ -21,6 +23,7 @@ const methods: (keyof ReviewerApi)[] = [
   'finish',
   'openSessionFile',
   'walkthroughJob',
+  'walkthroughJobs',
   'writeWalkthrough',
   'cancelWalkthrough',
   'ask',
@@ -59,6 +62,11 @@ contextBridge.exposeInMainWorld('events', {
     const listener = (_e: unknown, dir: 'back' | 'forward') => fn(dir);
     ipcRenderer.on('navigate', listener);
     return () => ipcRenderer.removeListener('navigate', listener);
+  },
+  onOpenBranch(fn: (to: { projectId: string; branch: string }) => void) {
+    const listener = (_e: unknown, to: { projectId: string; branch: string }) => fn(to);
+    ipcRenderer.on('open-branch', listener);
+    return () => ipcRenderer.removeListener('open-branch', listener);
   },
   onWalkthroughChanged(fn: (job: WalkthroughJob) => void) {
     const listener = (_e: unknown, job: WalkthroughJob) => fn(job);

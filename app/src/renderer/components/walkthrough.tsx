@@ -1,46 +1,100 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReviewData, WalkthroughJob } from '../../shared/types.ts';
-import { Loader2 } from 'lucide-react';
+import { CircleCheck, Loader2 } from 'lucide-react';
 import { cleanError } from './ui.tsx';
 import { Button } from './ui/Button.tsx';
 import { Notice } from './ui/Notice.tsx';
+import { jobKey, useWalkthroughJobFor, useWalkthroughs } from '../state/walkthroughs.ts';
 
 /**
  * Follows Hunkdory writing a walkthrough for one branch. With `auto`, starts it as soon as a branch
  * without a walkthrough opens, if the project allows it; the main process checks that, and runs it once per diff.
+ * The run goes on when you leave the branch. `onDone` fires when it finishes while you're here, and when you
+ * come back to data read before it finished.
  */
 export function useWalkthroughJob(data: ReviewData | undefined, opts: { auto?: boolean; onDone?: () => void } = {}) {
-  const [job, setJob] = useState<WalkthroughJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const projectId = data?.projectId;
   const branch = data?.branch;
+  const job = useWalkthroughJobFor(projectId, branch);
 
   useEffect(() => {
     if (!projectId || !branch) return;
     let live = true;
-    const off = window.events.onWalkthroughChanged((j) => {
-      if (j.projectId !== projectId || j.branch !== branch) return;
-      setJob(j);
-      if (j.status === 'done') opts.onDone?.();
-    });
     const first = opts.auto && data?.walkthrough === 'skeleton' ? window.api.writeWalkthrough(projectId, branch, { auto: true }) : window.api.walkthroughJob(projectId, branch);
-    first.then((j) => live && setJob(j), (e) => live && setError(cleanError(e)));
+    first.then((j) => live && remember(j), (e) => live && setError(cleanError(e)));
     return () => {
       live = false;
-      off();
     };
   }, [projectId, branch]);
+
+  const onDone = useRef(opts.onDone);
+  onDone.current = opts.onDone;
+  const before = useRef(job?.status);
+  useEffect(() => {
+    const was = before.current;
+    before.current = job?.status;
+    if (job?.status !== 'done' || !onDone.current) return;
+    // Finished before this data was read, and the data doesn't have it yet: once per run, so it can't loop.
+    const stale = data?.walkthrough === 'skeleton' && !reloaded.has(`${projectId}::${branch}::${job.finishedAt}`);
+    if (was !== 'running' && !stale) return;
+    reloaded.add(`${projectId}::${branch}::${job.finishedAt}`);
+    onDone.current();
+  }, [job?.status, job?.finishedAt]);
 
   const write = async () => {
     setError(null);
     try {
-      setJob(await window.api.writeWalkthrough(projectId!, branch!));
+      remember(await window.api.writeWalkthrough(projectId!, branch!));
     } catch (e) {
       setError(cleanError(e));
     }
   };
   const cancel = () => window.api.cancelWalkthrough(projectId!, branch!);
   return { job, error, write, cancel };
+}
+
+/** Runs whose result a screen read the branch again for. */
+const reloaded = new Set<string>();
+
+function remember(job: WalkthroughJob | null) {
+  if (job) useWalkthroughs.setState((s) => ({ jobs: { ...s.jobs, [jobKey(job.projectId, job.branch)]: job } }));
+}
+
+/**
+ * In a review that opened with one step per file: the walkthrough Hunkdory is writing, and switching to it
+ * once it's ready. Keep reading meanwhile; what you mark reviewed carries over.
+ */
+export function WalkthroughBar({ data, onSwitch }: { data: ReviewData; onSwitch(): void }) {
+  const job = useWalkthroughJobFor(data.projectId, data.branch);
+  const running = job?.status === 'running';
+  useTick(running);
+  if (data.walkthrough !== 'skeleton' || !job || (!running && job.status !== 'done')) return null;
+  return (
+    <div role="status" className="flex shrink-0 items-center gap-2 border-b border-link/30 bg-link/8 px-6 py-1.5 text-meta text-text">
+      {running ? (
+        <>
+          <Loader2 size={13} className="shrink-0 animate-spin text-link" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">
+            <strong className="font-semibold">Hunkdory is writing a walkthrough.</strong> Keep going with one step per file; you can switch when it's ready.{' '}
+            <span className="text-muted">
+              {job.activity ?? 'Working…'} · {since(job.startedAt)}
+            </span>
+          </span>
+        </>
+      ) : (
+        <>
+          <CircleCheck size={13} className="shrink-0 text-ok" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">
+            <strong className="font-semibold">The walkthrough is ready.</strong> Steps you already reviewed stay reviewed.
+          </span>
+          <Button size="sm" variant="primary" onClick={onSwitch}>
+            Switch to it
+          </Button>
+        </>
+      )}
+    </div>
+  );
 }
 
 function since(iso: string) {

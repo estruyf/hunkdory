@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { buildFixture } from '../../tools/wtv/test/fixture.mjs';
 import { normalizeWalkthrough, skeleton, verify } from '../../tools/wtv/src/verify.mjs';
 import { attention, buildSteps, diffLines, estimateMinutes, rangeText } from '../src/main/steps.ts';
-import { isReviewed, orderSteps } from '../src/shared/order.ts';
+import { carryReviewed, isReviewed, orderSteps } from '../src/shared/order.ts';
 import { sendBackPrompt } from '../src/main/actions.ts';
 
 function fixture(edit?: (wt: { chapters: Record<string, unknown>[] }) => void) {
@@ -158,4 +158,25 @@ test('estimates review time and builds the send-back message', () => {
   assert.match(msg, /Drop these steps[\s\S]*Step 4 "Not in the walkthrough: scratch\.js"/);
   assert.match(msg, /Note: Thanks/);
   assert.match(msg, /run `wtv verify` until it passes/);
+});
+
+test('a walkthrough that regroups the steps keeps what you reviewed in one step per file', () => {
+  // One step per file: you reviewed a.ts (h1, h2) and half of what b.ts has.
+  const reviewed = { 'file:a.ts': ['h1', 'h2'], 'file:b.ts-1': ['h3'] };
+  const chapters = [
+    { key: 'ch:0', hunkIds: ['h1', 'h3'] },
+    { key: 'ch:1', hunkIds: ['h2'] },
+    { key: 'ch:2', hunkIds: ['h2', 'h4'] },
+  ];
+  assert.deepEqual(carryReviewed(chapters, reviewed), {
+    'ch:0': ['h1', 'h3'],
+    'ch:1': ['h2'],
+  });
+});
+
+test('a mark for a step that is gone stays while some of its hunks are in no reviewed step', () => {
+  const next = carryReviewed([{ key: 'ch:0', hunkIds: ['h1'] }, { key: 'ch:1', hunkIds: ['h2', 'h9'] }], { 'file:a.ts': ['h1', 'h2'] });
+  assert.deepEqual(next, { 'file:a.ts': ['h1', 'h2'], 'ch:0': ['h1'] });
+  // Run again on its own output: nothing left to change.
+  assert.equal(carryReviewed([{ key: 'ch:0', hunkIds: ['h1'] }, { key: 'ch:1', hunkIds: ['h2', 'h9'] }], next!), null);
 });

@@ -180,7 +180,7 @@ function Row({ row, selected, canIgnore, onIgnore }: { row: BranchRow; selected:
           </span>
         </span>
         {row.working ? (
-          <span className="working-dots self-start pt-2" aria-label="The agent is working">
+          <span className="working-dots self-start pt-2" aria-label={row.workingLabel ?? 'The agent is working'}>
             <span />
             <span />
             <span />

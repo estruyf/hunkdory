@@ -175,6 +175,11 @@ export class Writer {
     this.onChange = opts.onChange;
   }
 
+  /** Every run since the app started, running or not, for the sidebar. */
+  jobsAll(): WalkthroughJob[] {
+    return [...this.jobs.values()].map((j) => this.job(j.projectId, j.branch)!);
+  }
+
   job(projectId: string, branch: string): WalkthroughJob | null {
     const j = this.jobs.get(id(projectId, branch));
     if (!j) return null;

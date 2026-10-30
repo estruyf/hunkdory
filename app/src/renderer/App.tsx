@@ -7,6 +7,7 @@ import { matches, type ShortcutContext } from './lib/shortcuts.ts';
 import { stepBranch, useBranches } from './state/branches.ts';
 import { openSettings, useNav } from './state/nav.ts';
 import { useSidebar } from './state/sidebar.ts';
+import { jobKey, useWalkthroughs, watchWalkthroughs } from './state/walkthroughs.ts';
 import { Welcome } from './screens/Welcome.tsx';
 import { Connect } from './screens/Connect.tsx';
 import { Home } from './screens/Home.tsx';
@@ -67,6 +68,11 @@ export function App() {
       const r = n.stack[at];
       if (!r) return n;
       const pre = (r.name === 'plan' || r.name === 'review') && r.preloaded;
+      // A walkthrough finished since you were here: read the branch again rather than show one step per file.
+      if (pre && pre.data.walkthrough === 'skeleton' && useWalkthroughs.getState().jobs[jobKey(r.projectId, r.branch)]?.status === 'done') {
+        const { preloaded: _stale, ...again } = r;
+        return { stack: n.stack.map((x, i) => (i === at ? again : x)), at };
+      }
       const fresh = pre ? latest.current.get(`${r.projectId}::${r.branch}`) : undefined;
       const stack = pre && fresh ? n.stack.map((x, i) => (i === at ? { ...r, preloaded: { ...pre, state: fresh } } : x)) : n.stack;
       return { stack, at };
@@ -76,7 +82,18 @@ export function App() {
   useEffect(() => {
     useNav.setState({ go, route });
     useSidebar.getState().setReviewing(route?.name === 'review' || route?.name === 'finish');
+    if (route && 'branch' in route) useWalkthroughs.getState().seen(route.projectId, route.branch);
   }, [route]);
+
+  // Walkthroughs keep being written while you're elsewhere; "Walkthrough ready" notifications open their branch.
+  useEffect(() => {
+    const stop = watchWalkthroughs();
+    const off = window.events.onOpenBranch((to) => useNav.getState().go({ name: 'plan', ...to }));
+    return () => {
+      stop();
+      off();
+    };
+  }, []);
 
   // The app's own shortcuts, from the registry: the same keys as Switchboard where they mean the same thing.
   useEffect(() => {

@@ -28,6 +28,30 @@ export function isReviewed(step: Step, reviewed: Record<string, string[]>): bool
   return step.hunkIds.every((id) => set.has(id));
 }
 
+/**
+ * Your reviewed marks after the steps changed shape, e.g. a walkthrough replaced one step per file: a step
+ * whose every hunk you already reviewed counts as reviewed. A mark for a step that is gone stays while some
+ * of its hunks aren't in a reviewed step yet, so nothing you looked at is forgotten. Null when nothing changes.
+ */
+export function carryReviewed(steps: Pick<Step, 'key' | 'hunkIds'>[], reviewed: Record<string, string[]>): Record<string, string[]> | null {
+  const seen = new Set(Object.values(reviewed).flat());
+  const next = { ...reviewed };
+  let changed = false;
+  for (const step of steps) {
+    if (!step.hunkIds.length || isReviewed(step as Step, next) || !step.hunkIds.every((id) => seen.has(id))) continue;
+    next[step.key] = [...step.hunkIds];
+    changed = true;
+  }
+  const keys = new Set(steps.map((s) => s.key));
+  const covered = new Set(steps.filter((s) => isReviewed(s as Step, next)).flatMap((s) => s.hunkIds));
+  for (const [key, ids] of Object.entries(next)) {
+    if (keys.has(key) || !ids.every((id) => covered.has(id))) continue;
+    delete next[key];
+    changed = true;
+  }
+  return changed ? next : null;
+}
+
 /** One scale everywhere: risk pills, decision cards and the inbox. */
 export const RISK_LABEL = { high: 'Needs attention', medium: 'Worth a look', low: 'Low risk' } as const;
 
