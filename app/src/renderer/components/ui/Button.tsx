@@ -22,7 +22,7 @@ interface BaseProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   round?: boolean;
   /**
    * Quiet: shown as pressed or current (an open panel, the view you're on); set `aria-pressed` or `aria-current` yourself.
-   * Secondary: highlighted from the keyboard, as the last choice under a list (Add project's Choose folder…).
+   * Secondary: pressed, for the answer you picked (Looks right, Needs a change or Not sure on a step’s questions); set `aria-pressed` yourself.
    * Side: pressed, while the Ask panel is open.
    */
   selected?: boolean;

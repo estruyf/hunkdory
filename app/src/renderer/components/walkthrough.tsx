@@ -97,6 +97,75 @@ export function WalkthroughBar({ data, onSwitch }: { data: ReviewData; onSwitch(
   );
 }
 
+/**
+ * A step whose refs match nothing: the code it was about changed after the walkthrough was written.
+ * Says so instead of an empty diff, and brings Hunkdory's walkthrough up to date. Reloads once that's done.
+ */
+export function EmptyStepNotice({ data, onReload, onOpenStep }: { data: ReviewData; onReload(): void; onOpenStep(key: string): void }) {
+  const w = useWalkthroughJob(data, { onDone: onReload });
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const running = w.job?.status === 'running';
+  useTick(running);
+  const unnarrated = data.steps.find((s) => s.source === 'unnarrated');
+  const where = unnarrated && (
+    <>
+      {' '}
+      The code as it is now is in{' '}
+      <button type="button" className="text-link hover:underline" onClick={() => onOpenStep(unnarrated.key)}>
+        step {unnarrated.index + 1}
+      </button>{' '}
+      and the steps after it, under “Not in the walkthrough”.
+    </>
+  );
+
+  if (running) {
+    return (
+      <Notice tone="info" role="status" icon={<Loader2 size={14} className="mt-0.5 animate-spin" aria-hidden />}>
+        <strong className="font-semibold">Hunkdory is updating the walkthrough.</strong> The code this step was about changed, so it has no changes until the update is done. It
+        reloads by itself.
+        <span className="block text-meta text-muted">
+          {w.job!.activity ?? 'Working…'} · {since(w.job!.startedAt)}
+        </span>
+      </Notice>
+    );
+  }
+
+  const update = async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      const job = await window.api.updateWalkthrough(data.projectId, data.branch);
+      // Nothing to update: the walkthrough already covers the diff, so this screen read the branch too early.
+      if (job) remember(job);
+      else onReload();
+    } catch (e) {
+      setError(cleanError(e));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <Notice
+      tone="caution"
+      role="note"
+      actions={
+        data.walkthrough === 'reviewer' ? (
+          <Button size="sm" disabled={starting} aria-busy={starting} onClick={update}>
+            {starting ? 'Starting…' : 'Update the walkthrough'}
+          </Button>
+        ) : undefined
+      }
+    >
+      <strong className="font-semibold">Nothing in the diff matches this step any more.</strong>{' '}
+      {data.walkthrough === 'reviewer' ? 'The code it was about changed after Hunkdory wrote the walkthrough.' : 'The code it was about changed after the agent wrote the walkthrough.'}
+      {where}
+      {(error || (w.job?.status === 'failed' && w.job.error)) && <span className="block text-error">Updating failed: {error ?? w.job!.error}</span>}
+    </Notice>
+  );
+}
+
 function since(iso: string) {
   const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min`;

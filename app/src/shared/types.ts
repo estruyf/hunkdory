@@ -293,6 +293,9 @@ export interface ReviewData {
 }
 
 /** A question about a step, or a change you asked Claude to make there, with how it went. */
+/** Your answer to one of a step's questions: it holds, it doesn't and you want a change, or you'd like to ask first. */
+export type CheckAnswer = 'yes' | 'no' | 'unsure';
+
 export interface Exchange {
   id: string;
   stepKey: string;
@@ -300,6 +303,8 @@ export interface Exchange {
   stepTitle: string;
   kind: 'question' | 'change';
   text: string;
+  /** The step's question (its index in `checks`) this follows up on. It shows under that question instead of in the Ask panel. */
+  check?: number;
   /** Who handled it: a copy of the session that wrote the branch, that session itself, or a fresh Claude Code run. */
   by: 'session-copy' | 'session' | 'fresh';
   status: 'running' | 'done' | 'failed' | 'cancelled';
@@ -377,7 +382,9 @@ export interface ReviewState {
   /** Review plan decisions you made, by decision id: fine as is, or needs a fix (for changes outside the task: drop them). */
   settled?: Record<string, 'fine' | 'fix'>;
   /** Your answers to a step's "check these" questions, by step key and question index. */
-  answers?: Record<string, Record<number, 'yes' | 'unsure'>>;
+  answers?: Record<string, Record<number, CheckAnswer>>;
+  /** What should change, for questions you answered "Needs a change", by step key and question index. */
+  answerNotes?: Record<string, Record<number, string>>;
   /** Summary kept for the inbox once the branch is gone. */
   summary: { files: number; added: number; removed: number; steps: number } | null;
 }
@@ -521,9 +528,11 @@ export interface ReviewerApi {
   walkthroughJobs(): Promise<WalkthroughJob[]>;
   /** Has Hunkdory write a walkthrough. `auto` only starts for a branch without one, once per diff. */
   writeWalkthrough(projectId: string, branch: string, opts?: { auto?: boolean }): Promise<WalkthroughJob | null>;
+  /** Brings Hunkdory's walkthrough up to date with a diff that changed, keeping its chapters. Null when it still covers the diff. */
+  updateWalkthrough(projectId: string, branch: string): Promise<WalkthroughJob | null>;
   cancelWalkthrough(projectId: string, branch: string): Promise<void>;
   /** Asks Claude about a step, or to change something there. Returns the review with the new exchange. */
-  ask(projectId: string, branch: string, stepKey: string, kind: Exchange['kind'], text: string): Promise<ReviewState>;
+  ask(projectId: string, branch: string, stepKey: string, kind: Exchange['kind'], text: string, check?: number): Promise<ReviewState>;
   cancelExchange(projectId: string, branch: string, exchangeId: string): Promise<void>;
   /** Lines `from`..`to` (1-based, inclusive) of a file on one side of the diff, for showing more context. */
   fileLines(projectId: string, branch: string, path: string, side: 'old' | 'new', from: number, to: number): Promise<{ lines: string[]; total: number }>;
@@ -557,6 +566,10 @@ export type ReviewPatch =
    * any other value takes it out again, so a decision you changed doesn't leave its old comment behind.
    */
   | { type: 'settle'; id: string; value: 'fine' | 'fix' | null; comment?: { stepKey?: string; body: string } }
-  | { type: 'answer'; stepKey: string; index: number; value: 'yes' | 'unsure' | null }
+  /**
+   * Answers one of a step's questions. "Needs a change" and "Not sure" put a line for it in the step's comment, so it goes
+   * with your review; `note` is what should change. Another answer replaces that line, `null` clears the answer.
+   */
+  | { type: 'answer'; stepKey: string; index: number; question: string; value: CheckAnswer | null; note?: string }
   /** Adds a line comment, or edits it when `id` is set. An empty body removes it. */
   | { type: 'line-comment'; id?: string; stepKey: string; hunkId: string; path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string };

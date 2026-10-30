@@ -25,6 +25,7 @@ const methods: (keyof ReviewerApi)[] = [
   'walkthroughJob',
   'walkthroughJobs',
   'writeWalkthrough',
+  'updateWalkthrough',
   'cancelWalkthrough',
   'ask',
   'cancelExchange',

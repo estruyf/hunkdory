@@ -25,3 +25,34 @@ export function removeFromStepComments(r: Pick<ReviewState, 'comments'>, line: s
   }
   r.comments = r.comments.filter((c) => c.line || c.body);
 }
+
+const NOT_SURE = 'Not sure: ';
+const NEEDS_CHANGE = 'Needs a change: ';
+
+/** The step comment's line for an answer to one of its questions: none for "Looks right". */
+export function answerLine(question: string, value: 'yes' | 'no' | 'unsure' | null, note?: string): string | null {
+  const q = question.trim();
+  if (value === 'unsure') return `${NOT_SURE}${q}`;
+  if (value !== 'no') return null;
+  // One line, so the next answer can find it and take it out again.
+  const n = note?.replace(/\s+/g, ' ').trim();
+  return `${NEEDS_CHANGE}${q}${n ? ` — ${n}` : ''}`;
+}
+
+/** Replaces the line an earlier answer to `question` left in the step's comment with `line`, or just removes it. */
+export function setAnswerLine(r: Pick<ReviewState, 'comments'>, stepKey: string, question: string, line: string | null) {
+  const q = question.trim();
+  const existing = r.comments.find((c) => c.stepKey === stepKey && !c.line);
+  if (existing) {
+    existing.body = existing.body
+      .split('\n')
+      .filter((l) => {
+        const t = l.trim();
+        return t !== `${NOT_SURE}${q}` && t !== `${NEEDS_CHANGE}${q}` && !t.startsWith(`${NEEDS_CHANGE}${q} — `);
+      })
+      .join('\n')
+      .trim();
+    if (!existing.body) r.comments = r.comments.filter((c) => c !== existing);
+  }
+  if (line) addToStepComment(r, stepKey, line);
+}

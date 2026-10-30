@@ -172,9 +172,14 @@
   color: var(--sb-text);
   font-size: var(--text-ui);
   font-weight: 500;
-  &:hover:not(:disabled),
-  &[data-selected] {
+  &:hover:not(:disabled) {
     background-color: color-mix(in srgb, var(--sb-text) 10%, transparent);
+  }
+  /* Pressed (an answer you picked): clearly apart from hover, with the text colour as its edge. */
+  &[data-selected] {
+    border-color: color-mix(in srgb, var(--sb-text) 70%, transparent);
+    background-color: color-mix(in srgb, var(--sb-text) 14%, transparent);
+    font-weight: 600;
   }
   &:disabled {
     opacity: 0.5;

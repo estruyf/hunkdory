@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Exchange, ReviewData, Step } from '../../shared/types.ts';
 import { Markdown } from './markdown.tsx';
 import { modKey } from '../lib/shortcuts.ts';
@@ -35,33 +35,29 @@ function who(data: ReviewData, kind: Exchange['kind']): string {
   return a.change.by === 'session' ? `The agent’s own session makes the change, in ${a.change.where}.` : `Claude edits the files in ${a.change.where}. Nothing is committed.`;
 }
 
-/** Questions and change requests on one step, and the box to ask the next one. */
-export function AskPanel({
-  data,
-  step,
-  exchanges,
-  onShowChanges,
-  loadedAt,
-  draft,
-}: {
-  data: ReviewData;
-  step: Step;
-  exchanges: Exchange[];
-  /** Reloads the review after Claude changed the branch. */
-  onShowChanges: () => void;
-  /** When the review on screen read the branch. */
-  loadedAt: string;
-  /** A question to start from, like a check you weren't sure about. */
-  draft?: string;
-}) {
-  const [text, setText] = useState('');
-  useEffect(() => {
-    if (draft) setText(draft);
-  }, [draft]);
+/** Asking Claude from one step, or from one of its questions. */
+function useSend(data: ReviewData, step: Step, check?: number) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const send = async (kind: Exchange['kind'], text: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await window.api.ask(data.projectId, data.branch, step.key, kind, text, check);
+      return true;
+    } catch (e) {
+      setError(cleanError(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { send, busy, error };
+}
+
+/** What you asked and what came back, and the way to the new diff once Claude changed the branch. */
+export function Thread({ data, exchanges, onShowChanges, loadedAt }: { data: ReviewData; exchanges: Exchange[]; onShowChanges: () => void; loadedAt: string }) {
   const running = exchanges.some((e) => e.status === 'running');
-  const canChange = !!data.ask.change.by;
   // The diff on screen is out of date once a change finished after the review loaded. Hunkdory then updates its
   // walkthrough so the new code lands in its step; until that's done, the new diff shows it in "Not in the walkthrough".
   const job = useWalkthroughJobFor(data.projectId, data.branch);
@@ -70,23 +66,8 @@ export function AskPanel({
   useTick(running || !!updating);
   const changed = madeChange && (updating || exchanges.some((e) => e.kind === 'change' && e.status === 'done' && (e.finishedAt ?? '') > loadedAt) || (!!job?.finishedAt && job.finishedAt > loadedAt));
 
-  const send = async (kind: Exchange['kind']) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await window.api.ask(data.projectId, data.branch, step.key, kind, text);
-      setText('');
-    } catch (e) {
-      setError(cleanError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4" aria-label="Ask Claude about this step">
-      <SectionHeader as="h2">Ask Claude about this step</SectionHeader>
-
+    <>
       {exchanges.map((e) => (
         <div key={e.id} className="flex flex-col gap-2 border-b border-border pb-3">
           <div className="flex flex-col gap-0.5">
@@ -140,6 +121,38 @@ export function AskPanel({
           )}
         </Notice>
       )}
+    </>
+  );
+}
+
+/** Questions and change requests on one step, and the box to ask the next one. */
+export function AskPanel({
+  data,
+  step,
+  exchanges,
+  onShowChanges,
+  loadedAt,
+}: {
+  data: ReviewData;
+  step: Step;
+  exchanges: Exchange[];
+  /** Reloads the review after Claude changed the branch. */
+  onShowChanges: () => void;
+  /** When the review on screen read the branch. */
+  loadedAt: string;
+}) {
+  const [text, setText] = useState('');
+  const { send: ask, busy, error } = useSend(data, step);
+  const canChange = !!data.ask.change.by;
+  const send = async (kind: Exchange['kind']) => {
+    if (await ask(kind, text)) setText('');
+  };
+
+  return (
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4" aria-label="Ask Claude about this step">
+      <SectionHeader as="h2">Ask Claude about this step</SectionHeader>
+
+      <Thread data={data} exchanges={exchanges} onShowChanges={onShowChanges} loadedAt={loadedAt} />
 
       <textarea
         aria-label="Your question or change"
@@ -165,5 +178,106 @@ export function AskPanel({
       </p>
       {error && <Notice tone="error">{error}</Notice>}
     </section>
+  );
+}
+
+/**
+ * Under one of a step's questions, once you answered it "Needs a change" or "Not sure": say what should change
+ * (and have Claude do it), or ask about it. What comes back shows here too, not at the bottom of the step.
+ */
+export function CheckFollowUp({
+  data,
+  step,
+  index,
+  value,
+  note,
+  onNote,
+  exchanges,
+  onShowChanges,
+  loadedAt,
+  autoFocus,
+}: {
+  data: ReviewData;
+  step: Step;
+  index: number;
+  value: 'no' | 'unsure';
+  /** What should change, as saved. */
+  note: string;
+  onNote: (note: string) => void;
+  exchanges: Exchange[];
+  onShowChanges: () => void;
+  loadedAt: string;
+  autoFocus?: boolean;
+}) {
+  const question = step.checks[index];
+  const change = value === 'no';
+  // A question starts from the one on screen; a change from what you said should change.
+  const [text, setText] = useState(change ? note : question);
+  const { send, busy, error } = useSend(data, step, index);
+  const canChange = !!data.ask.change.by;
+  const changeRunning = exchanges.some((e) => e.kind === 'change' && e.status === 'running');
+
+  // The note goes with your review: saved shortly after typing stops, and when you leave.
+  const latest = useRef({ text, onNote, saved: note });
+  latest.current = { ...latest.current, text, onNote };
+  const save = () => {
+    const { text, onNote, saved } = latest.current;
+    if (!change || text.trim() === saved.trim()) return;
+    latest.current.saved = text;
+    onNote(text);
+  };
+  useEffect(() => {
+    const t = setTimeout(save, 800);
+    return () => clearTimeout(t);
+  }, [text]);
+  useEffect(() => save, []);
+
+  const submit = async () => {
+    if (!change) {
+      if (await send('question', text)) setText('');
+      return;
+    }
+    save();
+    await send('change', text.trim() ? `${question}\n\n${text.trim()}` : question);
+  };
+  const disabled = busy || (change ? !canChange || changeRunning : !text.trim());
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border pt-3">
+      <Thread data={data} exchanges={exchanges} onShowChanges={onShowChanges} loadedAt={loadedAt} />
+      <textarea
+        aria-label={change ? 'What should change' : 'Your question'}
+        rows={2}
+        autoFocus={autoFocus}
+        className={TEXTAREA}
+        placeholder={change ? 'What should change? e.g. Move it to a shared helper and use it in both places.' : 'Ask about this'}
+        value={text}
+        onChange={(e) => {
+          // Also record it synchronously, so the save on leaving sees the last keystroke.
+          latest.current.text = e.target.value;
+          setText(e.target.value);
+        }}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && modKey(e) && !disabled) submit();
+        }}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="primary"
+          kbd="mod+enter"
+          disabled={disabled}
+          aria-busy={busy}
+          onClick={submit}
+          data-tooltip={change && !canChange ? who(data, 'change') : undefined}
+        >
+          {busy ? (change ? 'Starting…' : 'Asking…') : change ? 'Ask Claude to change it' : 'Ask'}
+        </Button>
+        <span className="min-w-0 flex-1 text-meta text-muted">
+          {change ? <>Goes with your review as “Needs a change”, whether or not Claude changes it now. {canChange ? who(data, 'change') : ''}</> : who(data, 'question')}
+        </span>
+      </div>
+      {error && <Notice tone="error">{error}</Notice>}
+    </div>
   );
 }

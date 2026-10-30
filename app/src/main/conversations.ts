@@ -152,7 +152,7 @@ export class Conversations {
     return r;
   }
 
-  async ask(projectId: string, branch: string, stepKey: string, kind: Exchange['kind'], text: string): Promise<ReviewState> {
+  async ask(projectId: string, branch: string, stepKey: string, kind: Exchange['kind'], text: string, check?: number): Promise<ReviewState> {
     if (!text.trim()) throw new Error(kind === 'question' ? 'Type a question first.' : 'Describe the change first.');
     const data = await this.projects.review(projectId, branch);
     const step = data.steps.find((s) => s.key === stepKey);
@@ -164,7 +164,7 @@ export class Conversations {
     if (kind === 'change' && state.exchanges?.some((e) => e.kind === 'change' && e.status === 'running')) {
       throw new Error('Claude is still working on the last change. Wait for it, or stop it first.');
     }
-    const x: Exchange = { id: randomUUID(), stepKey, stepTitle: step.title, kind, text: text.trim(), by: ability.by, status: 'running', activity: 'Starting Claude Code…', reply: null, at: new Date().toISOString(), finishedAt: null };
+    const x: Exchange = { id: randomUUID(), stepKey, stepTitle: step.title, kind, text: text.trim(), by: ability.by, status: 'running', activity: 'Starting Claude Code…', reply: null, at: new Date().toISOString(), finishedAt: null, ...(check !== undefined && { check }) };
     const history = (state.exchanges ?? []).filter((e) => e.stepKey === stepKey && e.status === 'done');
     const r = this.store.updateReview(projectId, branch, (r) => {
       r.exchanges = [...(r.exchanges ?? []), x];

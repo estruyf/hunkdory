@@ -1,7 +1,7 @@
 // The step walkthrough: one step at a time, read top to bottom, with one clear next action.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { ArrowLeft, Columns2, Rows2 } from 'lucide-react';
+import { ArrowLeft, Check, Columns2, Rows2 } from 'lucide-react';
 import { Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, useMediaQuery, usePref } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
@@ -17,16 +17,19 @@ import { ChecksCard, StackBar } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { OUTSIDE_HINT, isReviewed } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, isCareful, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
-import type { ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
-import { AskPanel } from '../components/ask.tsx';
+import type { CheckAnswer, ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
+import { answerLine } from '../../shared/comments.ts';
+import { AskPanel, CheckFollowUp, Thread } from '../components/ask.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
-import { WalkthroughBar } from '../components/walkthrough.tsx';
+import { EmptyStepNotice, WalkthroughBar } from '../components/walkthrough.tsx';
 import { AgentTests, AskedFor, CommentBox, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
 
 export function Walkthrough({ go, data, initialState, stepKey, decision, group }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string }) {
   const [state, setState] = useState(initialState);
+  const latestState = useRef(state);
+  latestState.current = state;
   // A review reads the branch once, so this is how old the diff on screen is. "Show the new diff" remounts it.
   const [loadedAt] = useState(() => new Date().toISOString());
   const plan = useMemo(() => buildPlan(data, state), [data, state.order]);
@@ -41,8 +44,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   const selKey = dec ? (stepKey && dec.stepKeys.includes(stepKey) ? stepKey : dec.stepKeys[0]) : (stepKey ?? startKey);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
-  // A check you weren't sure about, ready to ask Claude on that step.
-  const [askDraft, setAskDraft] = useState<{ stepKey: string; text: string } | null>(null);
+  // The question you just answered "Needs a change" or "Not sure", so its box takes the focus.
+  const [answered, setAnswered] = useState<{ stepKey: string; index: number } | null>(null);
   const [commenting, setCommenting] = useState(false);
   const [commentKey, setCommentKey] = useState(0);
   const [showContext, setShowContext] = usePref<boolean>('walkthrough-context', true);
@@ -409,12 +412,18 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   }
 
   const done = isReviewed(cur, state.reviewed);
-  const stepExchanges = (state.exchanges ?? []).filter((e) => e.stepKey === cur.key);
+  const allExchanges = (state.exchanges ?? []).filter((e) => e.stepKey === cur.key);
+  // Follow-ups on one of the step's questions show under that question.
+  const stepExchanges = allExchanges.filter((e) => e.check === undefined);
   const earlier = since?.earlierComments[cur.key] ?? [];
   const stepComment = state.comments.find((c) => c.stepKey === cur.key && !c.line)?.body ?? '';
   // The decision you came for first.
   const stepFlags = [...plan.decisions, ...plan.notes].filter((d) => d.stepKeys.includes(cur.key)).sort((a, b) => Number(b.id === dec?.id) - Number(a.id === dec?.id));
   const answers = state.answers?.[cur.key] ?? {};
+  const answerNotes = state.answerNotes?.[cur.key] ?? {};
+  // The comment box opens by itself only for what you wrote there: the lines your answers add show under their questions.
+  const answerLines = new Set(cur.checks.map((q, i) => answerLine(q, answers[i] ?? null, answerNotes[i])).filter(Boolean));
+  const ownComment = stepComment.split('\n').some((l) => l.trim() && !answerLines.has(l.trim()));
   const lineComment = (hunkId: string, path: string) => (a: { side: 'LEFT' | 'RIGHT'; line: number }, body: string, id?: string) =>
     patch({ type: 'line-comment', id, stepKey: cur.key, hunkId, path, line: a.line, side: a.side, body });
 
@@ -431,20 +440,20 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
     else go({ name: 'finish', projectId: data.projectId, branch: data.branch });
   });
 
-  const answer = async (index: number, value: 'yes' | 'unsure') => {
-    const same = answers[index] === value;
-    await patch({ type: 'answer', stepKey: cur.key, index, value: same ? null : value });
-    if (value === 'unsure' && !same) {
-      const line = `Not sure: ${cur.checks[index]}`;
-      if (!stepComment.includes(line)) {
-        await patch({ type: 'comment', stepKey: cur.key, body: stepComment.trim() ? `${stepComment.trim()}\n${line}` : line });
-        setCommentKey((k) => k + 1);
-      }
-      setCommenting(true);
-      setAskDraft({ stepKey: cur.key, text: cur.checks[index] });
-      setAsking(true);
-    }
+  // Answering changes the step's comment, so an open comment box starts again from the saved one.
+  const answer = async (index: number, value: CheckAnswer) => {
+    const next = answers[index] === value ? null : value;
+    await patch({ type: 'answer', stepKey: cur.key, index, question: cur.checks[index], value: next, note: answerNotes[index] });
+    setCommentKey((k) => k + 1);
+    setAnswered(next === 'no' || next === 'unsure' ? { stepKey: cur.key, index } : null);
   };
+  // A note box saves when it closes; once you picked another answer that save must not bring "Needs a change" back.
+  const saveNote = (key: string, index: number, question: string) => async (note: string) => {
+    if (latestState.current.answers?.[key]?.[index] !== 'no') return;
+    await patch({ type: 'answer', stepKey: key, index, question, value: 'no', note });
+    setCommentKey((k) => k + 1);
+  };
+  const showChanges = () => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() });
 
 
   const changedSince = since?.byStep[cur.key];
@@ -543,24 +552,30 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
         </Notice>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex flex-wrap items-center gap-1.5">
-          <span className="text-meta text-faint">
-            {plural(cur.files.length, 'file')} · {plural(cur.hunkIds.length, 'change')}
+      {!cur.hunkIds.length && (
+        <EmptyStepNotice data={data} onReload={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() })} onOpenStep={select} />
+      )}
+
+      {cur.hunkIds.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span className="text-meta text-faint">
+              {plural(cur.files.length, 'file')} · {plural(cur.hunkIds.length, 'change')}
+            </span>
+            {/* With more than one file, a chip per file jumps to its first change. */}
+            {cur.files.length > 1 &&
+              cur.files.map((f) => {
+                const first = cur.hunkIds.find((id) => data.hunks[id]?.path === f);
+                return first ? (
+                  <Pill key={f} tone="muted" className="font-mono" data-tooltip={f} onClick={() => document.getElementById(`hunk-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+                    {f.split('/').pop()}
+                  </Pill>
+                ) : null;
+              })}
           </span>
-          {/* With more than one file, a chip per file jumps to its first change. */}
-          {cur.files.length > 1 &&
-            cur.files.map((f) => {
-              const first = cur.hunkIds.find((id) => data.hunks[id]?.path === f);
-              return first ? (
-                <Pill key={f} tone="muted" className="font-mono" data-tooltip={f} onClick={() => document.getElementById(`hunk-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
-                  {f.split('/').pop()}
-                </Pill>
-              ) : null;
-            })}
-        </span>
-        <DiffToolbar mode={mode} setMode={setMode} ignoreSpace={ignoreSpace} setIgnoreSpace={setIgnoreSpace} />
-      </div>
+          <DiffToolbar mode={mode} setMode={setMode} ignoreSpace={ignoreSpace} setIgnoreSpace={setIgnoreSpace} />
+        </div>
+      )}
 
       {cur.hunkIds.map((id) => {
         const h = data.hunks[id];
@@ -588,21 +603,50 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
           <SectionHeader as="h2" count={cur.checks.length}>
             {cur.checks.length === 1 ? 'A question for you' : 'Questions for you'}
           </SectionHeader>
-          {cur.checks.map((q, i) => (
-            <div key={i} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-3.5 py-2.5">
-              <div className="min-w-0 flex-[1_1_360px] text-body break-words select-text">
-                <Markdown text={q} />
+          {cur.checks.map((q, i) => {
+            const a = answers[i];
+            const thread = allExchanges.filter((e) => e.check === i);
+            const choice = (value: CheckAnswer, label: string) => (
+              <Button selected={a === value} aria-pressed={a === value} icon={a === value ? <Check size={14} aria-hidden /> : undefined} onClick={() => answer(i, value)}>
+                {label}
+              </Button>
+            );
+            return (
+              <div key={i} className="flex flex-col gap-3 rounded-xl border border-border bg-card px-3.5 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                  <div className="min-w-0 flex-[1_1_360px] text-body break-words select-text">
+                    <Markdown text={q} />
+                  </div>
+                  <span role="group" aria-label="Your answer" className="flex gap-1.5">
+                    {choice('yes', 'Looks right')}
+                    {choice('no', 'Needs a change')}
+                    {choice('unsure', 'Not sure')}
+                  </span>
+                </div>
+                {a === 'no' || a === 'unsure' ? (
+                  <CheckFollowUp
+                    key={`${cur.key}:${i}:${a}`}
+                    data={data}
+                    step={cur}
+                    index={i}
+                    value={a}
+                    note={answerNotes[i] ?? ''}
+                    onNote={saveNote(cur.key, i, q)}
+                    exchanges={thread}
+                    onShowChanges={showChanges}
+                    loadedAt={loadedAt}
+                    autoFocus={answered?.stepKey === cur.key && answered.index === i}
+                  />
+                ) : (
+                  thread.length > 0 && (
+                    <div className="flex flex-col gap-3 border-t border-border pt-3">
+                      <Thread data={data} exchanges={thread} onShowChanges={showChanges} loadedAt={loadedAt} />
+                    </div>
+                  )
+                )}
               </div>
-              <span role="group" aria-label="Your answer" className="flex gap-1.5">
-                <Button selected={answers[i] === 'yes'} aria-pressed={answers[i] === 'yes'} onClick={() => answer(i, 'yes')}>
-                  Looks right
-                </Button>
-                <Button selected={answers[i] === 'unsure'} aria-pressed={answers[i] === 'unsure'} onClick={() => answer(i, 'unsure')}>
-                  Not sure
-                </Button>
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </section>
       )}
 
@@ -612,13 +656,12 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
           data={data}
           step={cur}
           exchanges={stepExchanges}
-          draft={askDraft?.stepKey === cur.key ? askDraft.text : undefined}
-          onShowChanges={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() })}
+          onShowChanges={showChanges}
           loadedAt={loadedAt}
         />
       )}
 
-      {(commenting || stepComment) && <CommentBox key={`${cur.key}:${commentKey}`} initial={stepComment} onSave={(body) => patch({ type: 'comment', stepKey: cur.key, body })} />}
+      {(commenting || ownComment) && <CommentBox key={`${cur.key}:${commentKey}`} initial={stepComment} onSave={(body) => patch({ type: 'comment', stepKey: cur.key, body })} />}
       {error && <Notice tone="error">{error}</Notice>}
     </main>,
     <>

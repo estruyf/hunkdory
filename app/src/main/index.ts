@@ -9,7 +9,7 @@ import { Actions } from './actions.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
-import { addToStepComment, removeFromStepComments } from '../shared/comments.ts';
+import { addToStepComment, answerLine, removeFromStepComments, setAnswerLine } from '../shared/comments.ts';
 import { carryReviewed } from '../shared/order.ts';
 import type { ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/types.ts';
 
@@ -135,9 +135,14 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
     }
   } else if (patch.type === 'answer') {
     r.answers ??= {};
+    r.answerNotes ??= {};
     const forStep = (r.answers[patch.stepKey] ??= {});
+    const notes = (r.answerNotes[patch.stepKey] ??= {});
     if (patch.value) forStep[patch.index] = patch.value;
     else delete forStep[patch.index];
+    if (patch.value === 'no' && patch.note?.trim()) notes[patch.index] = patch.note.trim();
+    else if (patch.value !== 'no') delete notes[patch.index];
+    setAnswerLine(r, patch.stepKey, patch.question, answerLine(patch.question, patch.value, notes[patch.index]));
   }
 }
 
@@ -223,8 +228,9 @@ const api: ReviewerApi = {
   walkthroughJob: async (projectId, branch) => writer.job(projectId, branch),
   walkthroughJobs: async () => writer.jobsAll(),
   writeWalkthrough: (projectId, branch, opts) => writer.start(projectId, branch, opts),
+  updateWalkthrough: (projectId, branch) => writer.refresh(projectId, branch),
   cancelWalkthrough: async (projectId, branch) => writer.cancel(projectId, branch),
-  ask: (projectId, branch, stepKey, kind, text) => conversations.ask(projectId, branch, stepKey, kind, text),
+  ask: (projectId, branch, stepKey, kind, text, check) => conversations.ask(projectId, branch, stepKey, kind, text, check),
   fileLines: (projectId, branch, path, side, from, to) => projects.fileLines(projectId, branch, path, side, from, to),
   searchCode: (projectId, branch, query) => projects.searchCode(projectId, branch, query),
   shareWalkthrough: (projectId, branch) => writer.share(projectId, branch),
