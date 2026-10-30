@@ -1,7 +1,7 @@
-import { ChevronDown, ChevronUp, EyeOff, Plus, Search, Settings, Undo2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, EyeOff, Loader2, Plus, Search, Settings, Undo2 } from 'lucide-react';
 import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { Go } from '../App.tsx';
-import { Crumbs, Loading, plural } from '../components/ui.tsx';
+import { Crumbs, plural } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { ProjectIcon } from '../components/ProjectIcon.tsx';
 import { Button } from '../components/ui/Button.tsx';
@@ -86,6 +86,8 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
   const total = data.groups.reduce((n, g) => n + g.rows.length, 0);
   const filtered = !!data.query.trim() || data.people !== 'anyone' || data.project !== 'all';
   const shownProjects = data.projects.filter((p) => data.project === 'all' || p.id === data.project);
+  // The first scan: placeholders where the branches will be, so the page doesn't jump when they arrive.
+  const scanning = !data.loaded && data.loading;
 
   const peopleOptions = [
     { value: 'anyone' as PeopleFilter, label: 'Anyone' },
@@ -137,8 +139,14 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
       </ViewHeader>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-10 pb-14">
-          {!data.loaded && data.loading ? (
-            <Loading label="Checking agent branches…" />
+          {scanning ? (
+            <div role="status" className="flex flex-col gap-2">
+              <h1 className="flex items-center gap-2.5 text-hero font-semibold">
+                <Loader2 size={18} className="shrink-0 animate-spin text-accent-ink" aria-hidden />
+                Checking agent branches…
+              </h1>
+              <p className="text-body text-muted">Looking through {data.projects.length ? `your ${plural(data.projects.length, 'project')}` : 'your projects'} for branches waiting for your review.</p>
+            </div>
           ) : (
             <div className="flex flex-col gap-2">
               <h1 className="text-hero font-semibold">{waitingRows.length ? `${plural(waitingRows.length, 'branch', 'branches')} waiting for your review` : 'Nothing waiting for your review'}</h1>
@@ -188,6 +196,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
           </div>
 
           <div data-inbox-list className="flex flex-col gap-5" onKeyDown={onListKey}>
+            {scanning && <GroupSkeleton />}
             {data.loaded && total === 0 && <Notice>{filtered ? 'Nothing matches.' : 'Nothing waiting for you.'}</Notice>}
             {data.groups.map((g) =>
               g.rows.length === 0 ? null : <Group key={g.id} group={g} folded={g.foldable && !!folded[g.id]} onFold={() => setFolded((f) => ({ ...f, [g.id]: !f[g.id] }))} onIgnore={data.ignore} go={go} />
@@ -206,7 +215,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
             {shownProjects.length > 0 && (
               <ul className="m-0 flex list-none flex-col gap-px p-0">
                 {shownProjects.map((p) => (
-                  <ProjectRow key={p.id} project={p} scan={data.scans.find((x) => x.projectId === p.id)} waiting={waitingRows.filter((r) => r.projectId === p.id).length} go={go} />
+                  <ProjectRow key={p.id} project={p} scan={data.scans.find((x) => x.projectId === p.id)} scanning={scanning} waiting={waitingRows.filter((r) => r.projectId === p.id).length} go={go} />
                 ))}
               </ul>
             )}
@@ -300,8 +309,40 @@ function Row({ row, canIgnore, onIgnore, go }: { row: BranchRow; canIgnore: bool
   );
 }
 
+/** Stands in for To review during the first scan: the same header and row heights, with bars for the text. */
+const SKELETON_ROWS = [
+  ['w-[46%]', 'w-[28%]'],
+  ['w-[58%]', 'w-[34%]'],
+  ['w-[38%]', 'w-[24%]'],
+];
+
+function GroupSkeleton() {
+  const bar = 'inline-block h-2.5 animate-pulse rounded-full bg-border align-middle';
+  return (
+    <section className="flex flex-col gap-2" aria-hidden>
+      <SectionHeader className="h-6">To review</SectionHeader>
+      <ul className="m-0 flex list-none flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card p-0">
+        {SKELETON_ROWS.map(([title, meta], i) => (
+          <li key={i} className="flex items-center gap-3 px-3.5 py-2.5">
+            <span className="size-[22px] shrink-0 animate-pulse rounded-md bg-border" />
+            <span className="grid min-w-0 flex-1">
+              <span className="text-body">
+                <span className={`${bar} ${title}`} />
+              </span>
+              <span className="text-meta">
+                <span className={`${bar} h-2 ${meta}`} />
+              </span>
+            </span>
+            <span className={`${bar} h-2 w-9 shrink-0`} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** One project: what waits, and when nothing does, why, in numbers you can check. */
-function ProjectRow({ project, scan, waiting, go }: { project: Project; scan?: ProjectScan; waiting: number; go: Go }) {
+function ProjectRow({ project, scan, scanning, waiting, go }: { project: Project; scan?: ProjectScan; scanning: boolean; waiting: number; go: Go }) {
   const why: string[] = [];
   if (scan?.error) why.push(scan.error);
   else if (scan && !waiting) {
@@ -317,7 +358,7 @@ function ProjectRow({ project, scan, waiting, go }: { project: Project; scan?: P
       <ProjectIcon name={project.name} size={22} />
       <span className="grid min-w-0 flex-1">
         <span className="truncate text-body font-semibold">{project.name}</span>
-        <span className={`text-meta ${scan?.error ? 'text-error' : 'text-faint'}`}>{waiting ? `${plural(waiting, 'branch', 'branches')} to review` : why.join(' ') || 'Nothing waiting.'}</span>
+        <span className={`text-meta ${scan?.error ? 'text-error' : 'text-faint'}`}>{waiting ? `${plural(waiting, 'branch', 'branches')} to review` : why.join(' ') || (scanning ? 'Checking…' : 'Nothing waiting.')}</span>
       </span>
       <Button variant="quiet" size="sm" onClick={() => go({ name: 'pick', projectId: project.id })}>
         Review another branch
