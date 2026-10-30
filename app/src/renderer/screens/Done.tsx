@@ -2,6 +2,7 @@ import type { Go } from '../App.tsx';
 import { useEffect } from 'react';
 import { Crumbs, plural, rememberReview, useInbox } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
+import { Confetti } from '../components/Confetti.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Kbd } from '../components/ui/Kbd.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
@@ -38,6 +39,8 @@ export function Done({ go, projectId, branch, result }: { go: Go; projectId: str
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
+      {/* Something landed: a merge or a posted review. */}
+      {(kind === 'merge' || kind === 'github') && <Confetti />}
       <ViewHeader>
         <div className="min-w-0 flex-1">
           <Crumbs items={[{ label: heading }]} />
@@ -55,11 +58,12 @@ export function Done({ go, projectId, branch, result }: { go: Go; projectId: str
             </p>
           </div>
 
-          {decision?.github?.url && (
-            <div>
-              <Button onClick={() => window.api.openExternal(decision.github!.url!)}>Open the review on GitHub ↗</Button>
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {decision?.github?.url && <Button onClick={() => window.api.openExternal(decision.github!.url!)}>Open the review on GitHub ↗</Button>}
+            <Button shortcut="home" onClick={() => go({ name: 'home' })}>
+              Back to the inbox
+            </Button>
+          </div>
 
           {kind === 'send-back' && !decision?.github && (
             <Notice

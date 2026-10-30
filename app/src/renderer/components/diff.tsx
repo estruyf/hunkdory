@@ -249,7 +249,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
                 </button>
               </>
             )}
-          <div className="overflow-x-auto">{body}</div>
+          <div className="diff-scroll">{body}</div>
           {!all && base.length > MAX_ROWS && (
             <button type="button" className="diff-bar w-full text-left text-link hover:underline" onClick={() => setAll(true)}>
               Show {base.length - MAX_ROWS} more lines

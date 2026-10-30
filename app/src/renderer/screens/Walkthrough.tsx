@@ -13,7 +13,7 @@ import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { matches } from '../lib/shortcuts.ts';
 import { DiffHunk, type DiffMode } from '../components/diff.tsx';
-import { ChecksCard, StackBar } from '../components/github.tsx';
+import { ChecksCard, PrLink, StackBar } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { OUTSIDE_HINT, isReviewed } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, isCareful, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
@@ -237,6 +237,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
         <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: toPlan, shrink: true }, { label: here }]} />
         {progressBar}
       </div>
+      <PrLink data={data} />
       {search.button}
       <Button variant="quiet" icon={<ArrowLeft size={13} aria-hidden />} shortcut="review.plan" onClick={toPlan}>
         Plan

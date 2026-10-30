@@ -13,7 +13,7 @@ import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { matches } from '../lib/shortcuts.ts';
-import { StackBar, checksText, checksTone } from '../components/github.tsx';
+import { PrLink, StackBar, checksText, checksTone } from '../components/github.tsx';
 import { AgentTests, AskedFor, ReviewError } from './Review.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
@@ -199,11 +199,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
         <div className="min-w-0 flex-1">
           <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, shrink: true }]} />
         </div>
-        {data.pr && (
-          <Pill tone="muted" onClick={() => window.api.openExternal(data.pr!.url)} data-tooltip="Open on GitHub">
-            PR #{data.pr.number} ↗
-          </Pill>
-        )}
+        <PrLink data={data} />
         {search.button}
         <Button variant={allDone ? 'primary' : 'quiet'} shortcut="review.finish" onClick={toFinish}>
           Finish

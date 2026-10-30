@@ -12,6 +12,7 @@ import { FIELD, TEXTAREA } from '../components/ui/field.ts';
 import { matches } from '../lib/shortcuts.ts';
 import { ReviewError } from './Review.tsx';
 import { Markdown } from '../components/markdown.tsx';
+import { PrLink } from '../components/github.tsx';
 import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, defaultDrops, openItems } from '../../shared/plan.ts';
 import { reviewedNote } from '../../shared/comments.ts';
@@ -267,6 +268,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
         <div className="min-w-0 flex-1">
           <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: () => go({ name: 'plan', projectId: data.projectId, branch: data.branch }), shrink: true }, { label: 'Finish' }]} />
         </div>
+        <PrLink data={data} />
       </ViewHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">

@@ -25,6 +25,17 @@ export const checksTone = (checks: CheckItem[]): PillTone => {
   return n.fail ? 'error' : n.pending ? 'default' : 'ok';
 };
 
+/** "PR #12 ↗" in a review's header, opening the pull request on GitHub. Nothing for a branch without a PR. */
+export function PrLink({ data }: { data: ReviewData }) {
+  if (!data.pr) return null;
+  const { url, number } = data.pr;
+  return (
+    <Pill tone="muted" onClick={() => window.api.openExternal(url)} data-tooltip="Open on GitHub">
+      PR #{number} ↗
+    </Pill>
+  );
+}
+
 const DOT = { pass: 'bg-ok', fail: 'bg-error', pending: 'bg-faint', skipped: 'bg-faint' } as const;
 const TEXT = { error: 'text-error', ok: 'text-ok', default: 'text-text' } as Record<PillTone, string>;
 

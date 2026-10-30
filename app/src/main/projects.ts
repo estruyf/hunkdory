@@ -67,7 +67,7 @@ export class Projects {
   private wtv = new WtvRunner();
   private wtvNow = new WtvRunner();
   // `full` is false for data made for the inbox, without the rows of each hunk.
-  private cache = new Map<string, { key: string; data: ReviewData; full: boolean }>();
+  private cache = new Map<string, { key: string; pr: string; data: ReviewData; full: boolean }>();
   private store: Store;
   private generated: GeneratedWalkthroughs;
   private summaries: Summaries;
@@ -589,8 +589,12 @@ export class Projects {
     const { at, wt, key } = opts.prepared ?? (await this.prepare(project, d));
     const { root, baseSha, inTree, cwd } = at;
     const cacheId = `${project.id}::${d.branch.name}`;
+    // The PR comes and goes without a commit, as when you open one from Finish: a review read before it is stale.
+    // Its checks and update time change all the time without changing anything else, so they're taken fresh.
+    const p = d.branch.pr;
+    const prKey = p ? JSON.stringify([p.number, p.headRefOid, p.baseRefName, p.title, p.author, p.copilot]) : '';
     const hit = this.cache.get(cacheId);
-    if (!refresh && hit?.key === key && (hit.full || !lines)) return hit.data;
+    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p };
 
     const out = await runner.run({ cwd, baseSha, head: inTree ? null : d.branch.headRef, walkthrough: wt.value, lines });
     const r = out.result;
@@ -680,7 +684,7 @@ export class Projects {
       ok: r.ok,
       minutes: estimateMinutes(steps, r.hunks),
     };
-    this.cache.set(cacheId, { key, data, full: lines });
+    this.cache.set(cacheId, { key, pr: prKey, data, full: lines });
     return data;
   }
 

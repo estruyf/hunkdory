@@ -330,6 +330,9 @@ html[data-keyboard-nav] :is(button, a, summary, input, textarea, [contenteditabl
 
 /* Diffs: Switchboard's code surface and line tints, SF Mono at the ui size. */
 .diff { font-family: var(--font-mono); font-size: var(--text-ui); line-height: 20px; min-width: 560px; user-select: text; }
+/* Unified lines don't wrap: the diff is as wide as its longest line, so every row's tint runs under the text when you scroll sideways. */
+.diff-scroll { overflow-x: auto; container-type: inline-size; }
+.diff:not(.split) { width: max-content; min-width: max(100%, 560px); }
 .diff-row { display: flex; }
 .diff-row.add, .diff-cell.add { background: var(--sb-diff-added); }
 .diff-row.del, .diff-cell.del { background: var(--sb-diff-removed); }
@@ -348,7 +351,7 @@ html[data-keyboard-nav] :is(button, a, summary, input, textarea, [contenteditabl
 .diff-cell.empty { background: var(--sb-code-bg); }
 .diff.split .diff-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .diff.split { min-width: 0; }
-.diff-thread { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 10px 74px; background: var(--sb-bg); border-top: 1px solid var(--sb-border); border-bottom: 1px solid var(--sb-border); font-family: var(--font-sans); }
+.diff-thread { position: sticky; left: 0; width: 100cqw; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 10px 74px; background: var(--sb-bg); border-top: 1px solid var(--sb-border); border-bottom: 1px solid var(--sb-border); font-family: var(--font-sans); }
 .diff-bar { display: flex; gap: 16px; padding: 6px 12px; border-top: 1px solid var(--sb-border); background: var(--sb-code-bg); font-family: var(--font-sans); font-size: var(--text-ui); font-weight: 500; }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag, .hljs-meta .hljs-keyword { color: var(--hl-keyword); }
 .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: var(--hl-string); }
