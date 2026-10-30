@@ -89,6 +89,16 @@ test('the second attempt gets what the first one missed', () => {
   assert.ok(p.includes(JSON.stringify(previous, null, 2)));
 });
 
+test('after a change on the branch, the walkthrough is updated rather than written again', () => {
+  const previous = { intent: 'x', chapters: [{ title: 'Auth', why: 'y', hunks: ['h:0000000000'] }] };
+  const p = writerPrompt(input(), { previous, missing: [input().hunks[0]], phantom: [{ title: 'Auth', ref: 'h:0000000000' }], changed: true });
+  assert.match(p, /## Update the existing walkthrough\nThe branch changed[^\n]*Keep chapter titles and order where they still fit/);
+  assert.doesNotMatch(p, /Fix your first attempt/);
+  assert.match(p, /These hunks are in no chapter[^\n]*\nh:54b48929c1/);
+  assert.match(p, /These refs match no hunk any more[^\n]*\n- "Auth": h:0000000000/);
+  assert.ok(p.includes(JSON.stringify(previous, null, 2)));
+});
+
 test('tool calls become short progress lines', () => {
   assert.equal(describeTool('Bash', { command: 'git show refs/reviewer/pr/1:src/a.ts' }, '/r'), 'Reading src/a.ts');
   assert.equal(describeTool('Bash', { command: 'git diff abc def -- src/b.ts' }, '/r'), 'Reading src/b.ts');

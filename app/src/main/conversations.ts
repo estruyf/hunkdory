@@ -123,14 +123,24 @@ export class Conversations {
   private logDir: string;
   private wtvBin: string;
   private onChange: (r: ReviewState) => void;
+  private onBranchChanged: (projectId: string, branch: string) => Promise<unknown>;
   private runs = new Map<string, ClaudeRun>();
 
-  constructor(opts: { store: Store; projects: Projects; logDir: string; wtvBin: string; onChange: (r: ReviewState) => void }) {
+  constructor(opts: {
+    store: Store;
+    projects: Projects;
+    logDir: string;
+    wtvBin: string;
+    onChange: (r: ReviewState) => void;
+    /** A change finished: bring the walkthrough up to date with it. */
+    onBranchChanged?: (projectId: string, branch: string) => Promise<unknown>;
+  }) {
     this.store = opts.store;
     this.projects = opts.projects;
     this.logDir = opts.logDir;
     this.wtvBin = opts.wtvBin;
     this.onChange = opts.onChange;
+    this.onBranchChanged = opts.onBranchChanged ?? (async () => {});
   }
 
   private patch(projectId: string, branch: string, id: string, fn: (x: Exchange) => void) {
@@ -160,14 +170,22 @@ export class Conversations {
       r.exchanges = [...(r.exchanges ?? []), x];
     });
 
-    this.run(data, step, x, history).then(
-      (reply) => this.patch(projectId, branch, x.id, (e) => Object.assign(e, { status: 'done', reply, activity: null, finishedAt: new Date().toISOString() })),
-      (err: Error) =>
-        this.patch(projectId, branch, x.id, (e) => {
-          if (e.status !== 'running') return;
-          Object.assign(e, { status: 'failed', error: err.message, activity: null, finishedAt: new Date().toISOString() });
-        })
-    );
+    this.run(data, step, x, history)
+      .then(async (reply) => {
+        if (kind !== 'change') return reply;
+        // Before saying it's done, so the review knows the walkthrough is being updated when it offers the new diff.
+        this.patch(projectId, branch, x.id, (e) => e.status === 'running' && (e.activity = 'Checking the walkthrough against the new diff…'));
+        await this.onBranchChanged(projectId, branch).catch(() => {});
+        return reply;
+      })
+      .then(
+        (reply) => this.patch(projectId, branch, x.id, (e) => e.status === 'running' && Object.assign(e, { status: 'done', reply, activity: null, finishedAt: new Date().toISOString() })),
+        (err: Error) =>
+          this.patch(projectId, branch, x.id, (e) => {
+            if (e.status !== 'running') return;
+            Object.assign(e, { status: 'failed', error: err.message, activity: null, finishedAt: new Date().toISOString() });
+          })
+      );
     return r;
   }
 

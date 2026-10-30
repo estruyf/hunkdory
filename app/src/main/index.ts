@@ -71,6 +71,7 @@ const conversations = new Conversations({
   logDir,
   wtvBin,
   onChange: (review) => win?.webContents.send('review-state-changed', review),
+  onBranchChanged: (projectId, branch) => writer.refresh(projectId, branch),
 });
 const actions = new Actions({
   store,

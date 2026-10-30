@@ -27,6 +27,8 @@ import { askedLabel } from './Plan.tsx';
 
 export function Walkthrough({ go, data, initialState, stepKey, decision, group }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string }) {
   const [state, setState] = useState(initialState);
+  // A review reads the branch once, so this is how old the diff on screen is. "Show the new diff" remounts it.
+  const [loadedAt] = useState(() => new Date().toISOString());
   const plan = useMemo(() => buildPlan(data, state), [data, state.order]);
   const steps = plan.sequence;
   // Where you are comes from the route, so back and forward move between steps and decisions.
@@ -612,6 +614,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
           exchanges={stepExchanges}
           draft={askDraft?.stepKey === cur.key ? askDraft.text : undefined}
           onShowChanges={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() })}
+          loadedAt={loadedAt}
         />
       )}
 

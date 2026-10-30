@@ -47,9 +47,10 @@ export interface WriterInput {
   hunks: HunkView[];
 }
 
-/** What a first attempt missed, for the second one. */
+/** What a first attempt missed, for the second one. Or, with `changed`, what an earlier walkthrough no longer covers after the branch changed. */
 export interface WriterFeedback {
   previous: unknown;
+  changed?: boolean;
   missing: HunkView[];
   phantom: { title: string; ref: string }[];
 }
@@ -146,9 +147,15 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
     'Read as much of the diff as you need to explain it, then return the walkthrough as structured output. Do not change any files.'
   );
   if (feedback) {
-    lines.push('', '## Fix your first attempt', 'Your previous walkthrough is below. Return it again in full, corrected:');
+    if (feedback.changed) {
+      lines.push(
+        '',
+        '## Update the existing walkthrough',
+        'The branch changed after this walkthrough was written, so some of its refs point at hunks that are gone and new hunks are in no chapter. Return it again in full, updated for the diff as it is now. Keep chapter titles and order where they still fit, so the reviewer finds their place again, and update a `why` only where the change made it wrong:'
+      );
+    } else lines.push('', '## Fix your first attempt', 'Your previous walkthrough is below. Return it again in full, corrected:');
     if (feedback.missing.length) lines.push('', 'These hunks are in no chapter. Add them to the chapter they belong to, or a new one:', ...feedback.missing.map(hunkLine));
-    if (feedback.phantom.length) lines.push('', 'These refs match no hunk. Remove or fix them:', ...feedback.phantom.map((p) => `- "${p.title}": ${p.ref}`));
+    if (feedback.phantom.length) lines.push('', `These refs match no hunk${feedback.changed ? ' any more' : ''}. Remove or fix them:`, ...feedback.phantom.map((p) => `- "${p.title}": ${p.ref}`));
     lines.push('', '```json', JSON.stringify(feedback.previous, null, 2), '```');
   }
   return lines.join('\n');
@@ -206,10 +213,32 @@ export class Writer {
     if (data.walkthrough === 'agent') return null;
     if (opts.auto && (!data.writeWalkthroughs || data.walkthrough !== 'skeleton' || existing?.diffKey === diffKey(data))) return this.job(projectId, branch);
     if (!Object.keys(data.hunks).length) return null;
+    return this.launch(key, projectId, branch, data);
+  }
 
+  /**
+   * After Claude changed the branch from a review: Hunkdory's walkthrough points at hunks by id, so the changed code
+   * falls out of its steps. Brings it up to date, starting from the walkthrough as it is. Resolves once a run started,
+   * or with null when the walkthrough still covers the diff or isn't Hunkdory's.
+   */
+  async refresh(projectId: string, branch: string): Promise<WalkthroughJob | null> {
+    const key = id(projectId, branch);
+    if (this.jobs.get(key)?.status === 'running') return this.job(projectId, branch);
+    const data = await this.projects.review(projectId, branch);
+    const text = this.generated.read(projectId, branch);
+    if (data.walkthrough !== 'reviewer' || !text || !Object.keys(data.hunks).length) return null;
+    const { title, intent, chapters } = JSON.parse(text);
+    const previous = { title, intent, chapters };
+    const r = await this.projects.check(projectId, branch, previous);
+    const missing = r.buckets.unnarrated.map((h) => data.hunks[h]).filter(Boolean);
+    if (!missing.length && !r.buckets.phantom.length) return null;
+    return this.launch(key, projectId, branch, data, { previous, missing, phantom: r.buckets.phantom, changed: true });
+  }
+
+  private launch(key: string, projectId: string, branch: string, data: ReviewData, feedback?: WriterFeedback): WalkthroughJob | null {
     this.jobs.set(key, { projectId, branch, status: 'running', startedAt: new Date().toISOString(), finishedAt: null, activity: 'Starting Claude Code…', attempt: 1, diffKey: diffKey(data) });
     this.onChange(this.job(projectId, branch)!);
-    this.run(key, projectId, branch, data).catch((e) => {
+    this.run(key, projectId, branch, data, feedback).catch((e) => {
       if (this.jobs.get(key)?.status === 'running') this.update(key, { status: 'failed', finishedAt: new Date().toISOString(), activity: null, error: (e as Error).message });
     });
     return this.job(projectId, branch);
@@ -226,9 +255,10 @@ export class Writer {
     for (const child of this.children.values()) child.kill();
   }
 
-  private async run(key: string, projectId: string, branch: string, data: ReviewData) {
+  /** With `update`, starts from that walkthrough instead of from nothing. */
+  private async run(key: string, projectId: string, branch: string, data: ReviewData, update?: WriterFeedback) {
     const ctx = await this.projects.runContext(projectId, branch);
-    if (await this.useShared(key, projectId, branch, ctx.baseSha)) return;
+    if (!update && (await this.useShared(key, projectId, branch, ctx.baseSha))) return;
     const commits = (await g.tryGit(['log', '--reverse', '--format=%s', `${ctx.baseSha}..${ctx.headRef}`], ctx.root))?.split('\n').filter(Boolean) ?? [];
     const input: WriterInput = {
       branch,
@@ -242,9 +272,9 @@ export class Writer {
     };
 
     let walkthrough: Record<string, unknown> | null = null;
-    let feedback: WriterFeedback | undefined;
+    let feedback = update;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      this.update(key, { attempt, activity: attempt === 1 ? 'Reading the change…' : 'Covering the changes it missed…' });
+      this.update(key, { attempt, activity: attempt > 1 ? 'Covering the changes it missed…' : update ? 'Updating it for the new changes…' : 'Reading the change…' });
       const out = await this.claude(key, ctx.cwd, !ctx.inTree, writerPrompt(input, feedback));
       if (this.jobs.get(key)?.status !== 'running') return;
       walkthrough = { version: 1, ...out, base: ctx.baseSha, head: data.head, generatedBy: { tool: 'reviewer', at: new Date().toISOString() } };

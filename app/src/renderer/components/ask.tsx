@@ -8,6 +8,7 @@ import { Button } from './ui/Button.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
 import { TEXTAREA } from './ui/field.ts';
+import { useWalkthroughJobFor } from '../state/walkthroughs.ts';
 
 function since(from: string, to: string | null) {
   const s = Math.max(0, Math.round(((to ? Date.parse(to) : Date.now()) - Date.parse(from)) / 1000));
@@ -40,6 +41,7 @@ export function AskPanel({
   step,
   exchanges,
   onShowChanges,
+  loadedAt,
   draft,
 }: {
   data: ReviewData;
@@ -47,6 +49,8 @@ export function AskPanel({
   exchanges: Exchange[];
   /** Reloads the review after Claude changed the branch. */
   onShowChanges: () => void;
+  /** When the review on screen read the branch. */
+  loadedAt: string;
   /** A question to start from, like a check you weren't sure about. */
   draft?: string;
 }) {
@@ -57,10 +61,14 @@ export function AskPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const running = exchanges.some((e) => e.status === 'running');
-  useTick(running);
   const canChange = !!data.ask.change.by;
-  // The diff on screen is out of date once a change finished after the review loaded.
-  const changed = exchanges.some((e) => e.kind === 'change' && e.status === 'done');
+  // The diff on screen is out of date once a change finished after the review loaded. Hunkdory then updates its
+  // walkthrough so the new code lands in its step; until that's done, the new diff shows it in "Not in the walkthrough".
+  const job = useWalkthroughJobFor(data.projectId, data.branch);
+  const madeChange = exchanges.some((e) => e.kind === 'change' && e.status === 'done');
+  const updating = madeChange && job?.status === 'running' ? job : null;
+  useTick(running || !!updating);
+  const changed = madeChange && (updating || exchanges.some((e) => e.kind === 'change' && e.status === 'done' && (e.finishedAt ?? '') > loadedAt) || (!!job?.finishedAt && job.finishedAt > loadedAt));
 
   const send = async (kind: Exchange['kind']) => {
     setBusy(true);
@@ -111,13 +119,25 @@ export function AskPanel({
       {changed && (
         <Notice
           tone="info"
+          role="status"
+          icon={updating ? <Loader2 size={14} className="mt-0.5 animate-spin" aria-hidden /> : undefined}
           actions={
-            <Button size="sm" onClick={onShowChanges}>
-              Show the new diff
+            <Button size="sm" variant={updating ? 'quiet' : undefined} onClick={onShowChanges}>
+              {updating ? 'Show it now' : 'Show the new diff'}
             </Button>
           }
         >
-          <strong className="font-semibold">Claude changed the branch.</strong> The diff above is from before.
+          <strong className="font-semibold">Claude changed the branch.</strong>{' '}
+          {updating ? (
+            <>
+              Hunkdory is updating the walkthrough so the new code shows up in this step. Shown now, it sits under “Not in the walkthrough”.
+              <span className="block text-meta text-muted">
+                {updating.activity ?? 'Working…'} · {since(updating.startedAt, null)}
+              </span>
+            </>
+          ) : (
+            'The diff above is from before.'
+          )}
         </Notice>
       )}
 
