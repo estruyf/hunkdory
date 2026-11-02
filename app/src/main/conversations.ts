@@ -42,7 +42,8 @@ export interface AskInput {
   wtvCommand: string | null;
 }
 
-const FORMAT = 'Answer directly, in a few short paragraphs at most, in markdown. Point at code as path:line. If the code doesn\'t tell you, say so rather than guess.';
+const FORMAT =
+  "Answer directly, in a few short paragraphs at most, in markdown. Start with the short answer, in plain words for someone who didn't write this code, then the detail. Point at code as path:line. If the code doesn't tell you, say so rather than guess.";
 const SUMMARY = 'End with two or three sentences on what you changed, in markdown.';
 
 /** The message for the run. Pure, so it can be tested. */

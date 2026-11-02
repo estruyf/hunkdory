@@ -1,11 +1,13 @@
 # Hunkdory
 
-Review what your coding agents wrote, one step at a time.
+Understand what a branch or pull request is about, one step at a time.
 
-Hunkdory is a local macOS app for reviewing agent branches. Instead of a flat
-list of files, it shows the change as a story: what the agent was asked to do,
-then chapters in reading order, with the changes nobody explained pulled to the
-top. When you're done you merge, send it back to the agent, or discard it.
+Reviewing code you didn't write is hard, and harder when an agent wrote it.
+Hunkdory is a local macOS app that tells the change as a story: what was asked,
+what the change does in a sentence or two, then chapters in reading order that
+each explain one part in plain words. Ask Claude about any step, or have it make
+a change. The changes nobody explained are pulled to the top. When you're done
+you merge, send it back to the agent, or discard it.
 
 ## Why "Hunkdory"
 

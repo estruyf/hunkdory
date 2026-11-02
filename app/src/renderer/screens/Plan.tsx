@@ -399,6 +399,7 @@ function HowItWorks() {
   const [show, setShow] = usePref<boolean>('plan-how-it-works', true);
   if (!show) return null;
   const items = [
+    ['Understand', 'Start with what the change is about, below. Each step explains one part in plain words, and you can ask Claude about anything that isn’t clear.'],
     ['Decide', 'Make the calls only you can make, like keeping or dropping work you didn’t ask for.'],
     ['Read closely', 'Go through the steps that need attention, with the agent’s reason next to each change.'],
     ['Skim', 'Glance over the low-risk rest, a folder at a time. Every changed line is in some step, so nothing is hidden.'],

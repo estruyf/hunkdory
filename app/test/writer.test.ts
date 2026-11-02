@@ -57,6 +57,13 @@ test('the prompt lists every hunk to cover by id, with its risks, and leaves out
   assert.match(p, /`title` names the change like a pull request title: under 70 characters/);
 });
 
+test('the walkthrough is written for a reviewer new to the code, in plain words', () => {
+  const p = writerPrompt(input());
+  assert.match(p, /didn't write this code and may not know this part of the codebase/);
+  assert.match(p, /## How to write it\n- Write for someone new to this code\. Use plain words and short sentences\./);
+  assert.match(p, /`intent` is what the reviewer reads first: one or two short sentences/);
+});
+
 test('the run must return a short title next to the intent', () => {
   assert.deepEqual(WALKTHROUGH_SCHEMA.required, ['title', 'intent', 'chapters']);
 });

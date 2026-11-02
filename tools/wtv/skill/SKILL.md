@@ -18,13 +18,13 @@ real diff. Your job is to make the walkthrough complete and honest.
    ```json
    {
      "version": 1,
-     "intent": "One sentence: what this change is for",
+     "intent": "In plain words: what this change does and why",
      "base": "<base commit from wtv list>",
      "head": "<current HEAD sha>",
      "chapters": [
        {
          "title": "Short name of one idea",
-         "why": "Why this was needed, in one or two sentences",
+         "why": "What this part does and why it was needed, in one or two short sentences",
          "risk": "Optional: what could break, what to check",
          "checks": ["Optional: questions the reviewer should answer, one per item"],
          "hunks": ["h:54b48929c1", "src/retry.js", "src/sync.js:10-24"],
@@ -44,6 +44,13 @@ real diff. Your job is to make the walkthrough complete and honest.
 
 ## Rules
 
+- **Write for someone new to this code.** The reviewer didn't write it and may
+  not know this part of the codebase. Use plain words and short sentences. Say
+  what a change does for the app or its users before how the code does it, and
+  explain a project-specific name the first time you use it. Explain the idea;
+  don't list every identifier or file you touched, the hunks show those.
+- **`intent` is what the reviewer reads first.** One or two short sentences on
+  what the change does and why, not a list of everything in it.
 - **Every hunk belongs to a chapter.** Including the small, incidental ones:
   a changed constant, a removed assertion, a debug file, a config tweak. These
   are exactly what reviewers miss. If a change was not intended, revert it

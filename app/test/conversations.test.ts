@@ -56,6 +56,7 @@ test('a fresh question gets the branch, the step and the question, and must not 
   assert.match(p, /## The step: Longer token expiry\nLong syncs outlived the token\./);
   assert.match(p, /```diff\n--- src\/auth\/token\.js/);
   assert.match(p, /## The question\nWhy a day\?/);
+  assert.match(p, /Start with the short answer, in plain words/);
   assert.match(p, /Don't change any files\./);
 });
 

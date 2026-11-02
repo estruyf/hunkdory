@@ -93,6 +93,7 @@ export function writerPrompt(input: WriterInput, feedback?: WriterFeedback): str
   const lines = [
     `Write a review walkthrough for the branch "${input.branch}", which goes into ${input.baseName}.`,
     'A reviewer will read the change one chapter at a time, in your order. Each chapter says what changed and why, and covers specific hunks.',
+    "The reviewer didn't write this code and may not know this part of the codebase. The walkthrough is how they find out what the branch is about, so it has to be easy to follow.",
     '',
     '## Where the change is',
     whereSection(baseSha, headRef),
@@ -130,11 +131,18 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
     ...listed.map(hunkLine),
     ...(skipped ? ['', `${skipped} more hunk(s) are whitespace-only or generated files (lockfiles, build output). Leave those out.`] : []),
     '',
+    '## How to write it',
+    '- Write for someone new to this code. Use plain words and short sentences.',
+    '- Say what a change does for the app or its users before how the code does it.',
+    '- The first time you use a project-specific name (a function, a setting, a component), say in a few words what it is.',
+    "- Explain the idea, don't list every identifier, string or file that changed: the hunks show those.",
+    '',
     '## Rules',
     '- Every hunk above goes in exactly one chapter. Refer to hunks only by their `h:<id>`, exactly as listed.',
     '- One idea per chapter. If a "why" needs "and also", split the chapter. Put tests in the chapter of the code they test.',
     '- Order chapters for reading, not by file: start where behaviour enters (entry point, route, public function), then follow the data.',
-    "- `why` explains the reason in one or two sentences. You didn't write this code, so ground it in the code, commits and description. When you are inferring, say so (\"Likely to ...\"). Never invent a motive.",
+    '- A chapter `title` names its idea in a few plain words.',
+    "- `why` says what this part does and why it was needed, in one or two short sentences. You didn't write this code, so ground it in the code, commits and description. When you are inferring, say so (\"Likely to ...\"). Never invent a motive.",
     '- Fill `risk` for chapters with hunks tagged in brackets above: what could break and what to look at.',
     '- `checks` are short questions the reviewer should answer, especially about assumptions in the code.',
     input.prompt || input.pr?.body.trim()
@@ -142,7 +150,7 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
       : '- There is no stated request, so leave `outsideTask` out.',
     '- `notes` (optional) maps one of the chapter\'s refs to a one-line remark on that hunk.',
     '- `title` names the change like a pull request title: under 70 characters, no full stop.',
-    '- `intent` is one sentence: what the whole change is for.',
+    "- `intent` is what the reviewer reads first: one or two short sentences on what the branch does and why, that someone who hasn't seen the code understands. Not a list of everything in it.",
     '',
     'Read as much of the diff as you need to explain it, then return the walkthrough as structured output. Do not change any files.'
   );
