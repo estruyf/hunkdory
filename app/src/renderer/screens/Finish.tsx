@@ -55,6 +55,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   const [prTitle, setPrTitle] = useState(data.title);
   const [draft, setDraft] = useState(false);
   const opening = canOpenPr && openPr && pick === 'merge';
+  const [commitMessage, setCommitMessage] = useState(data.title);
 
   const reviewed = data.steps.filter((s) => isReviewed(s, state.reviewed)).length;
   const minutes = state.startedAt ? Math.max(1, Math.round((Date.now() - Date.parse(state.startedAt)) / 60000)) : null;
@@ -90,15 +91,17 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   const options: { id: Decision; title: string; detail: string; submit: string; disabled?: string }[] = [
     {
       id: 'merge',
-      title: data.prByYou ? 'Merge' : 'Approve and merge',
-      detail: data.prByYou
+      title: data.uncommitted ? 'Approve and commit' : data.prByYou ? 'Merge' : 'Approve and merge',
+      detail: data.uncommitted
+        ? `Commits the changes to ${data.branch} as they are, as one commit. Nothing is pushed. Your comments stay in Hunkdory.`
+        : data.prByYou
         ? `Merges your pull request #${data.pr!.number} into ${data.pr!.baseRefName}${comments.length ? `, with your ${plural(comments.length, 'comment')} on it` : ''}. GitHub doesn’t let you approve your own PR.`
         : data.pr
         ? `Approves pull request #${data.pr.number} on GitHub${comments.length ? ` with your ${plural(comments.length, 'comment')}` : ''} and merges it into ${data.pr.baseRefName}.`
         : canOpenPr && openPr
           ? `Pushes ${data.branch} and opens a pull request into ${base}, with your comments in the description. Nothing is merged yet.`
           : `Merge into ${base} as it is. Your comments stay in Hunkdory.`,
-      submit: data.prByYou ? 'Merge' : data.pr ? 'Approve & merge' : canOpenPr && openPr ? 'Approve & open PR' : 'Approve & merge',
+      submit: data.uncommitted ? 'Approve & commit' : data.prByYou ? 'Merge' : data.pr ? 'Approve & merge' : canOpenPr && openPr ? 'Approve & open PR' : 'Approve & merge',
     },
     ...(data.pr
       ? [
@@ -127,7 +130,11 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
     {
       id: 'discard',
       title: data.local ? 'Discard the branch' : 'Close this review',
-      detail: data.local ? 'Closes the change. The session stays in your history.' : 'Removes it from your inbox. Nothing changes in git or on GitHub.',
+      detail: data.local
+        ? 'Closes the change. The session stays in your history.'
+        : data.uncommitted
+          ? 'Removes it from your inbox until the changes do. Your edits stay as they are.'
+          : 'Removes it from your inbox. Nothing changes in git or on GitHub.',
       submit: data.local ? 'Discard' : 'Close review',
     },
   ];
@@ -143,7 +150,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
     setBusy(true);
     setError(null);
     try {
-      const res = await window.api.finish({ projectId: data.projectId, branch: data.branch, kind: pick, note, dropStepKeys: pick === 'send-back' ? [...drop] : [], commitFirst, deleteBranch, event, openPr: opening ? { title: prTitle.trim() || data.title, draft } : undefined });
+      const res = await window.api.finish({ projectId: data.projectId, branch: data.branch, kind: pick, note, dropStepKeys: pick === 'send-back' ? [...drop] : [], commitFirst, deleteBranch, event, openPr: opening ? { title: prTitle.trim() || data.title, draft } : undefined, commitMessage: data.uncommitted ? commitMessage : undefined });
       if (res.ok) go({ name: 'done', projectId: data.projectId, branch: data.branch, result: res });
       else if (res.needsCommit) setNeedsCommit(res.needsCommit);
       else setError(res.message);
@@ -192,6 +199,8 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   );
 
   const optionBody = (id: Decision) => {
+    if (id === 'merge' && data.uncommitted)
+      return <input className={FIELD} aria-label="Commit message" placeholder="Commit message" value={commitMessage} onChange={(e) => setCommitMessage(e.target.value)} />;
     if (id === 'merge' && canOpenPr)
       return (
         <>

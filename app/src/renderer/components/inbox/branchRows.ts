@@ -108,7 +108,7 @@ function doneRow(d: ReviewState, projectName: string): BranchRow {
     branch: d.branch,
     projectName,
     title: d.title,
-    meta: `${RESULT[d.status]} · ${projectName}`,
+    meta: `${d.decision?.commit ? 'Committed' : RESULT[d.status]} · ${projectName}`,
     who: '',
     problem: null,
     age: shortAge(d.decision?.at ?? null),

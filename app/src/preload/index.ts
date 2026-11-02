@@ -13,6 +13,8 @@ const methods: (keyof ReviewerApi)[] = [
   'checkGitHub',
   'listBranches',
   'trackBranch',
+  'listUncommitted',
+  'reviewUncommitted',
   'ignoreBranch',
   'listBases',
   'setBase',

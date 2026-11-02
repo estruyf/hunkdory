@@ -5,6 +5,7 @@ import type { Go } from '../App.tsx';
 import { Crumbs, LoadingPage, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
+import { buttonClass } from '../components/ui/buttonStyles.ts';
 import { Checkbox } from '../components/ui/Checkbox.tsx';
 import { Kbd } from '../components/ui/Kbd.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
@@ -46,8 +47,10 @@ function BasePicker({ data, onChanged, onError }: { data: ReviewData; onChanged:
   const [busy, setBusy] = useState(false);
   const options = [
     ...(data.baseChosen ? [{ value: AUTO_BASE, label: 'Let Hunkdory pick', hint: 'project base or PR base' }] : []),
+    // A checkout with edits can leave its commits out: just what isn't committed yet.
+    ...(data.dirty && !data.pr ? [{ value: data.branch, label: 'Its last commit', hint: 'uncommitted changes only' }] : []),
     // The current base stays listed even when it isn't a branch here, such as a PR's base.
-    ...(choices.value?.some((c) => c.name === data.baseRef) ? [] : [{ value: data.baseRef, label: data.baseRef }]),
+    ...(data.baseRef === data.branch || choices.value?.some((c) => c.name === data.baseRef) ? [] : [{ value: data.baseRef, label: data.baseRef }]),
     ...(choices.value ?? []).map((c) => ({ value: c.name, label: c.name, hint: plural(c.commits, 'commit') })),
   ];
   const pick = async (value: string) => {
@@ -70,8 +73,51 @@ function BasePicker({ data, onChanged, onError }: { data: ReviewData; onChanged:
       onChange={pick}
       disabled={busy}
       menuWidth={340}
-      className="-mx-1 rounded px-1 font-mono text-meta text-faint hover:bg-border/45 hover:text-text"
+      className={`${buttonClass({ variant: 'secondary', size: 'sm', iconOnly: false, filled: false, selected: false })} font-mono`}
     />
+  );
+}
+
+/** Uncommitted edits in the branch's folder: review them on their own, or go back to the whole branch. */
+function UncommittedNotice({ data, onChanged, onError }: { data: ReviewData; onChanged: () => void; onError: (message: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!data.dirty || data.pr || (data.uncommitted && !data.baseChosen)) return null;
+  const files = plural(data.dirtyFiles, 'file');
+  const set = async (base: string | null) => {
+    setBusy(true);
+    try {
+      await window.api.setBase(data.projectId, data.branch, base);
+      onError(null);
+      onChanged();
+    } catch (e) {
+      onError(cleanError(e));
+      setBusy(false);
+    }
+  };
+  return data.uncommitted ? (
+    <Notice
+      tone="info"
+      role="note"
+      actions={
+        <Button size="sm" disabled={busy} onClick={() => set(null)}>
+          Include its commits
+        </Button>
+      }
+    >
+      <strong className="font-semibold">Only the uncommitted changes.</strong> You're reviewing the {files} on <span className="font-mono">{data.branch}</span> that aren't committed yet, against its last commit.
+    </Notice>
+  ) : (
+    <Notice
+      tone="info"
+      role="note"
+      actions={
+        <Button size="sm" disabled={busy} onClick={() => set(data.branch)}>
+          Review only the uncommitted changes
+        </Button>
+      }
+    >
+      <strong className="font-semibold">{files} on <span className="font-mono">{data.branch}</span> {data.dirtyFiles === 1 ? "isn't" : "aren't"} committed yet.</strong> They're part of this review, on top of its commits.
+    </Notice>
   );
 }
 
@@ -211,8 +257,17 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-2">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint">
-              <span className="flex min-w-0 items-center gap-1 font-mono">
-                {data.branch} → <BasePicker data={data} onChanged={onReload} onError={setError} />
+              <span className="flex min-w-0 items-baseline gap-1 font-mono">
+                {/* The branch is what you're reviewing: it stands out from the grey line around it. */}
+                {data.uncommitted && !data.baseChosen ? (
+                  <>
+                    <span className="font-sans">Uncommitted on</span> <span className="truncate font-semibold text-text">{data.branch}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="truncate font-semibold text-text">{data.branch}</span> <span className="font-sans">compared with</span> <BasePicker data={data} onChanged={onReload} onError={setError} />
+                  </>
+                )}
               </span>
               <span>· {sizeText(data.files, data.added, data.removed)}</span>
               <span>· about {formatDuration(data.minutes)}</span>
@@ -226,7 +281,9 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                       ? `PR by ${data.pr.author}, updated ${timeAgo(data.pr.updatedAt).toLowerCase()}`
                       : data.author
                         ? `Last commit by ${data.author}`
-                        : 'No agent session found'}
+                        : data.uncommitted
+                          ? 'Not committed yet'
+                          : 'No agent session found'}
               </span>
               {data.pr && data.pr.checks.length > 0 && <Pill tone={checksTone(data.pr.checks)}>CI: {checksText(data.pr.checks)}</Pill>}
             </span>
@@ -266,6 +323,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
             </Notice>
           )}
 
+          <UncommittedNotice data={data} onChanged={onReload} onError={setError} />
           {data.stack && <StackBar data={data} go={go} />}
           <WalkthroughNotice data={data} w={w} />
 
@@ -286,7 +344,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
               }
             >
               <strong className="font-semibold">Too big for one sitting.</strong> About {formatDuration(data.minutes)} of reading. Smaller branches get a better review: ask the agent to split it{copied ? ' (paste the request into its session)' : ''}. Or take it over
-              several sittings: Hunkdory keeps your place.{!data.baseChosen && <> More than you expected? Check the branch it compares against, next to the branch name above.</>}
+              several sittings: Hunkdory keeps your place.{!data.baseChosen && !data.uncommitted && <> More than you expected? Check the branch it compares against, next to the branch name above.</>}
             </Notice>
           )}
 

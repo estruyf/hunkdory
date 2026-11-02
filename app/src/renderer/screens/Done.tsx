@@ -24,7 +24,7 @@ export function Done({ go, projectId, branch, result }: { go: Go; projectId: str
   const next = queue[0];
   const queueMinutes = queue.reduce((n, w) => n + w.minutes, 0);
 
-  const heading = kind === 'send-back' && decision?.github ? 'Sent back to Copilot' : HEADINGS[kind];
+  const heading = kind === 'send-back' && decision?.github ? 'Sent back to Copilot' : decision?.commit ? 'Committed' : HEADINGS[kind];
 
   // ⌘↵ reviews the next branch.
   useEffect(() => {

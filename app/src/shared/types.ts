@@ -34,6 +34,17 @@ export interface BaseChoice {
   commits: number;
 }
 
+/** A checkout with uncommitted work, for the branch picker: its edits can be reviewed on their own. */
+export interface UncommittedChoice {
+  branch: string;
+  /** The folder, with ~ for your home folder. */
+  path: string;
+  where: 'main' | 'worktree';
+  files: number;
+  /** It's in your inbox as uncommitted changes already: open it rather than add it. */
+  inInbox: boolean;
+}
+
 /** A branch you can pick to review, for the branch picker. */
 export interface BranchChoice {
   name: string;
@@ -157,6 +168,8 @@ export interface BranchInfo {
   /** Picked by you with "Review a branch". */
   tracked: boolean;
   dirtyFiles: number;
+  /** Only the uncommitted work on a base branch's checkout, against its last commit: no commits of its own to review. */
+  uncommitted: boolean;
   sessionIds: string[];
 }
 
@@ -286,6 +299,10 @@ export interface ReviewData {
   /** The commit under review, and whether uncommitted work is part of it. */
   headSha: string;
   dirty: boolean;
+  /** How many files aren't committed yet. */
+  dirtyFiles: number;
+  /** Only the uncommitted work on a base branch: approving it commits it there instead of merging. */
+  uncommitted: boolean;
   /** Pull requests this one sits on and that sit on it, bottom first. Null when it isn't stacked. */
   stack: { base: string; prs: StackEntry[] } | null;
   /** Where Hunkdory's walkthrough came from when a teammate shared it on the PR. */
@@ -355,6 +372,8 @@ export interface DecisionRecord {
   /** The branch as you saw it when you decided, to tell what changed when it comes back. */
   headSha?: string;
   hunkIds?: string[];
+  /** For uncommitted work you approved: the commit Hunkdory made of it. */
+  commit?: string;
   /**
    * For a review posted on GitHub. `url` is the review, null when nothing was posted (a merge with no
    * comments); `prUrl` is the pull request itself. Records from before `prUrl` existed don't have it.
@@ -464,6 +483,8 @@ export interface FinishRequest {
   dropStepKeys: string[];
   /** Merge only: commit uncommitted changes in the branch's worktree first. */
   commitFirst?: boolean;
+  /** Merge of uncommitted work on a base branch only: the message of the commit it becomes. */
+  commitMessage?: string;
   /** Discard only: also remove the worktree and delete the branch. */
   deleteBranch?: boolean;
   /** GitHub only: approve, request changes, or just comment. */
@@ -512,6 +533,10 @@ export interface ReviewerApi {
   checkGitHub(path: string): Promise<string>;
   listBranches(projectId: string): Promise<BranchChoice[]>;
   trackBranch(projectId: string, branch: string): Promise<void>;
+  /** Checkouts with uncommitted work, main folder first. */
+  listUncommitted(projectId: string): Promise<UncommittedChoice[]>;
+  /** Reviews only the uncommitted work on a checked-out branch, against its last commit. */
+  reviewUncommitted(projectId: string, branch: string): Promise<void>;
   /** Takes a branch out of the inbox, or (`on` false) brings it back. */
   ignoreBranch(projectId: string, branch: string, on: boolean): Promise<void>;
   /** Branches a review could compare against, the ones with the fewest commits to review first. */

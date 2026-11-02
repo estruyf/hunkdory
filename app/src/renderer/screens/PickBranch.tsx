@@ -7,6 +7,7 @@ import { Button } from '../components/ui/Button.tsx';
 import { Kbd } from '../components/ui/Kbd.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
 import { Pill } from '../components/ui/Pill.tsx';
+import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { FIELD_LG } from '../components/ui/field.ts';
 import { matches } from '../lib/shortcuts.ts';
@@ -19,6 +20,7 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
   const current = projectId ?? projects.value?.[0]?.id;
   // Wait for the project list, or an empty list flashes up as "no branches".
   const branches = useAsync(() => (current ? window.api.listBranches(current) : new Promise<never>(() => {})), [current]);
+  const uncommitted = useAsync(() => (current ? window.api.listUncommitted(current) : new Promise<never>(() => {})), [current]);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
@@ -37,6 +39,15 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  const pickUncommitted = async (name: string) => {
+    try {
+      await window.api.reviewUncommitted(current!, name);
+      go({ name: 'plan', projectId: current!, branch: name });
+    } catch (e) {
+      setError(cleanError(e));
+    }
+  };
 
   const pick = async (name: string) => {
     try {
@@ -59,7 +70,7 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
           <div className="flex flex-col gap-1.5">
             <h1 className="text-hero font-semibold">Review another branch</h1>
             <p className="text-body text-muted">
-              Any branch with commits on top of {project ? <span className="font-mono">{project.baseBranch}</span> : 'the base'}: yours, a colleague's, or an agent's. Remote branches are as fresh as your last fetch.
+              Any branch with commits on top of {project ? <span className="font-mono">{project.baseBranch}</span> : 'the base'}: yours, a colleague's, or an agent's. Or just the uncommitted changes in a folder. Remote branches are as fresh as your last fetch.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -73,6 +84,32 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
             </label>
           </div>
           {error && <Notice tone="error">{error}</Notice>}
+          {!!uncommitted.value?.length && (
+            <section className="flex flex-col gap-1.5">
+              <SectionHeader as="h2">Uncommitted changes</SectionHeader>
+              <p className="m-0 text-meta text-muted">Edits in a folder that aren't committed yet. Review just those, against the branch's last commit.</p>
+              <ul className="m-0 flex list-none flex-col gap-px p-0">
+                {uncommitted.value.map((u) => (
+                  <li key={u.path} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-2.5 py-2 hover:bg-border/45">
+                    <div className="flex min-w-0 flex-[1_1_420px] flex-col gap-0.5">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-ui font-semibold">
+                          Uncommitted on <span className="font-mono">{u.branch}</span>
+                        </span>
+                        <Pill tone="muted">{u.where === 'main' ? 'main folder' : 'worktree'}</Pill>
+                        {u.inInbox && <Pill tone="muted">In your inbox</Pill>}
+                      </span>
+                      <span className="truncate text-meta text-faint">
+                        {plural(u.files, 'file')} not committed · {u.path}
+                      </span>
+                    </div>
+                    {u.inInbox ? <Button onClick={() => go({ name: 'plan', projectId: current!, branch: u.branch })}>Open</Button> : <Button onClick={() => pickUncommitted(u.branch)}>Review changes</Button>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {!!uncommitted.value?.length && <SectionHeader as="h2">Branches</SectionHeader>}
           {branches.loading && <Loading label="Listing branches…" />}
           {branches.error && <Notice tone="error">{branches.error}</Notice>}
           {branches.value && !branches.loading && (

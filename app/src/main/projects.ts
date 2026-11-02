@@ -16,7 +16,7 @@ import { projectName, toWatch, withProjectName, type Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
 import type { Summaries, Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
-import type { BaseChoice, BranchChoice, BranchInfo, CodeSearchResult, FoundFolder, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -202,6 +202,29 @@ export class Projects {
     return list;
   }
 
+  /** Every checkout with uncommitted work, main folder first. */
+  async listUncommitted(projectId: string): Promise<UncommittedChoice[]> {
+    const project = this.store.project(projectId);
+    const trees = await g.worktrees(project.path);
+    const open = new Set((await this.discover(project)).items.filter((d) => d.branch.uncommitted).map((d) => d.branch.name));
+    const list: UncommittedChoice[] = [];
+    for (const t of trees) {
+      if (!t.branch) continue;
+      const files = (await g.dirtyFiles(t.path).catch(() => [])).length;
+      if (files) list.push({ branch: t.branch, path: tilde(t.path), where: t.path === project.path ? 'main' : 'worktree', files, inInbox: open.has(t.branch) });
+    }
+    return list;
+  }
+
+  /** Reviews only what isn't committed on a checked-out branch: it compares against its own last commit, and stays in the inbox whatever the watch rules. */
+  async reviewUncommitted(projectId: string, branch: string): Promise<void> {
+    const project = this.store.project(projectId);
+    if ((await this.discover(project, branch)).items.find((x) => x.branch.name === branch)?.branch.uncommitted) return;
+    this.store.addProject({ ...project, tracked: [...new Set([...(project.tracked ?? []), branch])], ignored: (project.ignored ?? []).filter((b) => b !== branch) });
+    this.store.reopenReview(projectId, branch);
+    await this.setBase(projectId, branch, branch);
+  }
+
   /** Branches the review could compare against: each with the branch's commits that aren't on it, fewest first. */
   async listBases(projectId: string, branch: string): Promise<BaseChoice[]> {
     const { project, d } = await this.find(projectId, branch);
@@ -222,6 +245,8 @@ export class Projects {
 
   /** Compares one branch against `base`, whatever the project's base. `null` goes back to Hunkdory's pick. */
   async setBase(projectId: string, branch: string, base: string | null) {
+    const now = (await this.find(projectId, branch)).d.branch;
+    if (now.uncommitted && !now.baseChosen) throw new Error(`These are the uncommitted changes on ${branch}: they always compare against its last commit.`);
     const before = this.store.project(projectId);
     if (base && !(await g.refExists(before.path, base))) throw new Error(`Branch ${base} not found`);
     const save = (bases: Record<string, string>) => {
@@ -350,10 +375,41 @@ export class Projects {
           pr,
           tracked: tracked.has(name),
           dirtyFiles: dirty,
+          // Compared against its own last commit: only what isn't committed yet.
+          uncommitted: chosen === name,
           sessionIds: match?.sessions.map((s) => s.id) ?? [],
         },
         match,
       });
+    }
+
+    // Uncommitted work on a base branch, like an agent that edited main in your main folder: just those edits, against the last commit.
+    if (project.watch.anyBranch) {
+      for (const tree of trees) {
+        const name = tree.branch;
+        if (!name || !exclude.has(name) || names.has(name) || skipped(name)) continue;
+        if (opts.only && name !== opts.only) continue;
+        const dirty = (await g.dirtyFiles(tree.path)).length;
+        if (!dirty) continue;
+        out.push({
+          branch: {
+            projectId: project.id,
+            name,
+            checkout: { kind: tree.path === root ? 'main' : 'worktree', path: tree.path },
+            baseRef: name,
+            baseName: name,
+            baseChosen: false,
+            headRef: name,
+            headSha: tree.head,
+            pr: null,
+            tracked: false,
+            dirtyFiles: dirty,
+            uncommitted: true,
+            sessionIds: [],
+          },
+          match: null,
+        });
+      }
     }
     return out;
   }
@@ -392,6 +448,7 @@ export class Projects {
           pr,
           tracked: false,
           dirtyFiles: 0,
+          uncommitted: false,
           sessionIds: match?.sessions.map((s) => s.id) ?? [],
         },
         match,
@@ -419,7 +476,9 @@ export class Projects {
     let text: string | null = null;
     if (d.branch.checkout.kind !== 'none') {
       const file = join(d.branch.checkout.path, '.review', 'walkthrough.json');
-      if (existsSync(file)) text = readFileSync(file, 'utf8');
+      // On a base branch, a committed walkthrough is about work merged long ago: only one written for these edits counts.
+      const forThis = !d.branch.uncommitted || !!(await g.tryGit(['status', '--porcelain', '--untracked-files=all', '--', '.review/walkthrough.json'], d.branch.checkout.path))?.trim();
+      if (forThis && existsSync(file)) text = readFileSync(file, 'utf8');
     } else {
       text = await g.tryGit(['show', `${d.branch.headRef}:.review/walkthrough.json`], root);
     }
@@ -638,7 +697,10 @@ export class Projects {
     // its one-sentence intent is too long for a title, so that's a last resort.
     const authorTitle = source === 'agent' ? (shortTitle ?? intent) : null;
     const reviewerTitle = source === 'reviewer' ? shortTitle : null;
-    const title = authorTitle ?? d.branch.pr?.title ?? d.match?.origin.title ?? promptTitle ?? reviewerTitle ?? subject ?? intent ?? d.branch.name;
+    // The last commit on a base branch says nothing about edits made after it.
+    const title = d.branch.uncommitted
+      ? (authorTitle ?? reviewerTitle ?? intent ?? `Uncommitted changes on ${d.branch.name}`)
+      : (authorTitle ?? d.branch.pr?.title ?? d.match?.origin.title ?? promptTitle ?? reviewerTitle ?? subject ?? intent ?? d.branch.name);
 
     const shared = (wt.value as { shared?: { url: string; by: string } } | null)?.shared;
     const me = d.branch.pr ? await gh.login(root).catch(() => null) : null;
@@ -647,6 +709,8 @@ export class Projects {
       agent: d.match ? 'claude-code' : d.branch.pr?.copilot ? 'copilot' : null,
       headSha: d.branch.headSha,
       dirty: d.branch.dirtyFiles > 0,
+      dirtyFiles: d.branch.dirtyFiles,
+      uncommitted: d.branch.uncommitted,
       stack: await this.stack(project, d),
       sharedWalkthrough: source === 'reviewer' && shared ? shared : null,
       repo: project.github,
@@ -667,8 +731,8 @@ export class Projects {
       pr: d.branch.pr,
       githubLogin: me,
       prByYou: !!d.branch.pr && d.branch.pr.author === me,
-      local: !d.branch.pr && d.branch.headRef === d.branch.name && (await g.refExists(root, `refs/heads/${d.branch.name}`)),
-      author: d.match ? null : author || null,
+      local: !d.branch.pr && !d.branch.uncommitted && d.branch.headRef === d.branch.name && (await g.refExists(root, `refs/heads/${d.branch.name}`)),
+      author: d.match || d.branch.uncommitted ? null : author || null,
       walkthrough: source,
       intent,
       title,
@@ -732,21 +796,30 @@ export class Projects {
     const items = await Promise.all(
       found.map(async (d): Promise<InboxItem | null> => {
         const state = this.store.review(project.id, d.branch.name);
-        if (state?.status === 'discarded' || state?.status === 'merged') return null;
+        const finished = state?.status === 'discarded' || state?.status === 'merged' || state?.status === 'reviewed';
+        if (!d.branch.uncommitted && (state?.status === 'discarded' || state?.status === 'merged')) return null;
         // After you reviewed or sent it back, it only needs you again once it changed.
         const decidedOn = state?.decision?.headSha;
-        const updatedSinceReview = !!decidedOn && decidedOn !== d.branch.headSha;
-        if (state?.status === 'reviewed' && !updatedSinceReview) return null;
+        let updatedSinceReview = !!decidedOn && decidedOn !== d.branch.headSha;
+        if (!d.branch.uncommitted && state?.status === 'reviewed' && !updatedSinceReview) return null;
+        // Uncommitted work has no commit to tell rounds apart: it's done while every edit in it is one you finished with.
+        if (d.branch.uncommitted && finished) {
+          const seen = new Set(state.decision?.hunkIds ?? []);
+          const now = await this.reviewFor(project, d, { lines: false }).catch(() => null);
+          if (now && Object.keys(now.hunks).every((id) => seen.has(id))) return null;
+          updatedSinceReview = true;
+        }
         const pr = d.branch.pr;
-        const who = d.match ? `Claude Code${d.match.sessions.length > 1 ? ` · ${d.match.sessions.length} sessions` : ''}` : pr?.copilot ? 'GitHub Copilot' : pr ? `by ${pr.author}` : 'No agent session';
+        const who = d.match ? `Claude Code${d.match.sessions.length > 1 ? ` · ${d.match.sessions.length} sessions` : ''}` : pr?.copilot ? 'GitHub Copilot' : pr ? `by ${pr.author}` : d.branch.uncommitted ? 'Uncommitted changes' : 'No agent session';
         const id = `${project.id}::${d.branch.name}`;
         listed.add(id);
         // A local branch is "opened" by whoever made its newest commit; one git call also gives its date.
-        const [authorName, authorEmail, committed] = pr ? [] : ((await g.tryGit(['log', '-1', '--format=%an%x00%ae%x00%cI', d.branch.headRef], project.path))?.trim().split('\0') ?? []);
+        // Uncommitted work is on this Mac, so it's yours, and as new as its newest edit.
+        const [authorName, authorEmail, committed] = pr ? [] : d.branch.uncommitted ? [undefined, undefined, await lastEdit((d.branch.checkout as { path: string }).path)] : ((await g.tryGit(['log', '-1', '--format=%an%x00%ae%x00%cI', d.branch.headRef], project.path))?.trim().split('\0') ?? []);
         const you = await gitUser;
         const prAuthor = pr && pr.author !== 'unknown' ? pr.author : null;
         const openedBy = pr ? prAuthor : authorName || null;
-        const openedByYou = pr ? !!prAuthor && prAuthor === (await me) : (!!you.email && authorEmail?.toLowerCase() === you.email) || (!!you.name && authorName === you.name);
+        const openedByYou = pr ? !!prAuthor && prAuthor === (await me) : d.branch.uncommitted || (!!you.email && authorEmail?.toLowerCase() === you.email) || (!!you.name && authorName === you.name);
         const base: InboxItem = {
           projectId: project.id,
           projectName: project.name,
@@ -785,7 +858,8 @@ export class Projects {
             sum = summarize(await this.reviewFor(project, d, { refresh, lines: false, prepared }));
             this.summaries.set(id, key, sum);
           }
-          return { ...base, ...sum, title: base.title === d.branch.name ? sum.title : base.title, agent: sum.author && !d.match && !pr ? `by ${sum.author}` : base.agent };
+          // Uncommitted work is newer than any session's title or commit on the branch.
+          return { ...base, ...sum, title: base.title === d.branch.name || d.branch.uncommitted ? sum.title : base.title, agent: sum.author && !d.match && !pr ? `by ${sum.author}` : base.agent };
         } catch (e) {
           return { ...base, error: (e as Error).message };
         }
@@ -813,6 +887,17 @@ function foldDuplicates(items: Discovered[]): Discovered[] {
 async function chosenBase(project: Project, branch: string): Promise<string | null> {
   const base = project.bases?.[branch];
   return base && (await g.refExists(project.path, base)) ? base : null;
+}
+
+/** When the newest uncommitted edit in a checkout was made. */
+async function lastEdit(path: string): Promise<string | undefined> {
+  let at = 0;
+  for (const f of await g.dirtyFiles(path)) {
+    try {
+      at = Math.max(at, statSync(join(path, f)).mtimeMs);
+    } catch {}
+  }
+  return at ? new Date(at).toISOString() : undefined;
 }
 
 async function firstRef(root: string, refs: string[]): Promise<string | null> {

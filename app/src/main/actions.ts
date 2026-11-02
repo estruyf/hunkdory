@@ -143,6 +143,7 @@ export class Actions {
     this.seen = { headSha: data.headSha, hunkIds: Object.keys(data.hunks) };
     try {
       if (req.kind === 'merge' && data.pr) return await this.mergePr(req, data, state, summary);
+      if (req.kind === 'merge' && data.uncommitted) return await this.commit(req, data, summary);
       if (req.kind === 'merge' && req.openPr) return await this.openPr(req, data, state, summary);
       if (req.kind === 'merge') return await this.merge(req, data, summary);
       if (req.kind === 'github') return await this.postReview(req, data, state, summary);
@@ -238,6 +239,20 @@ export class Actions {
     return null;
   }
 
+  /** Uncommitted work on a base branch has nothing to merge: approving it commits it where it is. */
+  private async commit(req: FinishRequest, data: ReviewData, summary: ReviewState['summary']): Promise<FinishResult> {
+    const { d } = await this.projects.find(req.projectId, req.branch);
+    if (d.branch.checkout.kind === 'none') throw new Error(`${req.branch} isn't checked out on this Mac anymore.`);
+    const path = d.branch.checkout.path;
+    if ((await g.currentBranch(path)) !== req.branch) throw new Error(`The folder with these changes is no longer on ${req.branch}. Reload the review.`);
+    await g.git(['add', '-A', '--', '.', ':(exclude).review'], path);
+    await g.git(['commit', '-m', req.commitMessage?.trim() || data.title, '-m', 'Reviewed with Hunkdory.'], path);
+    const sha = (await g.git(['rev-parse', '--short', 'HEAD'], path)).trim();
+    const message = `Committed ${d.branch.dirtyFiles} file${d.branch.dirtyFiles === 1 ? '' : 's'} to ${req.branch} as ${sha}. Nothing was pushed.`;
+    const review = this.record(req, 'merged', 'ok', message, summary, { commit: sha });
+    return { ok: true, message, review };
+  }
+
   private async merge(req: FinishRequest, data: ReviewData, summary: ReviewState['summary']): Promise<FinishResult> {
     const { project, d } = await this.projects.find(req.projectId, req.branch);
     if (d.branch.pr) throw new Error(`This is pull request #${d.branch.pr.number}. Merge it on GitHub.`);
@@ -320,7 +335,7 @@ export class Actions {
     let message = 'Closed this review. Nothing changed in git: the branch and any session are still there.';
     if (req.deleteBranch) {
       const { project, d } = await this.projects.find(req.projectId, req.branch);
-      if (d.branch.pr || d.branch.headRef !== req.branch || !(await g.refExists(project.path, `refs/heads/${req.branch}`))) {
+      if (d.branch.pr || d.branch.uncommitted || d.branch.headRef !== req.branch || !(await g.refExists(project.path, `refs/heads/${req.branch}`))) {
         throw new Error(`${req.branch} isn't a local branch, so Hunkdory won't delete it. Discard without deleting.`);
       }
       if (d.branch.checkout.kind === 'main') throw new Error(`Your main folder has ${req.branch} checked out, so it can't be deleted. Switch branches first.`);
