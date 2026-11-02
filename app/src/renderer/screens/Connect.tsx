@@ -13,7 +13,7 @@ import { Select } from '../components/ui/Select.tsx';
 import { FIELD, FIELD_LG } from '../components/ui/field.ts';
 import { matches } from '../lib/shortcuts.ts';
 import { FoundOnThisMac } from '../components/found.tsx';
-import type { Project, RepoCheck, Watch } from '../../shared/types.ts';
+import type { AssistantChoice, Project, RepoCheck, Watch } from '../../shared/types.ts';
 
 /** Connect a new project, or change one you connected before (`projectId`). */
 export function Connect({ go, initialPath, projectId, back }: { go: Go; initialPath?: string; projectId?: string; back: Route }) {
@@ -30,6 +30,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const [pullRequests, setPullRequests] = useState(false);
   const [github, setGithub] = useState<string | null>(null);
   const [writeWalkthroughs, setWriteWalkthroughs] = useState<boolean | undefined>(undefined);
+  const [assistants, setAssistants] = useState<AssistantChoice[]>([]);
+  // null until the assistant list loaded, then a new project defaults to the first one installed.
+  const [assistant, setAssistant] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [githubError, setGithubError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +40,14 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   // New projects keep the details folded away: the defaults suit most repos.
   const [advanced, setAdvanced] = useState(!!projectId);
   const [removing, setRemoving] = useState(false);
+
+  useEffect(() => {
+    window.api.listAssistants().then((as) => {
+      setAssistants(as);
+      // A new project defaults to the first one installed: Claude Code, then Manual.
+      setAssistant((a) => a ?? as.find((x) => x.available)?.id ?? as[0]?.id ?? 'claude-code');
+    });
+  }, []);
 
   // Editing: start from the saved settings.
   useEffect(() => {
@@ -49,6 +60,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       setPath(p.path);
       setGithub(p.github ?? null);
       setWriteWalkthroughs(p.writeWalkthroughs);
+      setAssistant(p.assistant ?? 'claude-code');
       setAnyBranch(p.watch.anyBranch);
       setUsePattern(p.watch.pattern !== null);
       if (p.watch.pattern) setPattern(p.watch.pattern);
@@ -101,11 +113,12 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
     setSaving(true);
     setError(null);
     const w: Watch = { anyBranch, pattern: usePattern ? pattern : null, pullRequests };
+    const assistantInput = assistant ?? 'claude-code';
     try {
       if (existing) {
-        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs });
+        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput });
         rememberProjectName(saved.id, saved.name);
-      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs });
+      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput });
       go({ name: 'home' });
     } catch (e) {
       setError(cleanError(e));
@@ -196,26 +209,64 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
             {ok && !check!.sessionCount && <p className="text-meta text-muted">No sessions yet in ~/.claude or any ~/.claude-* folder. Reviews still work, with less context: no prompt and no agent reasons.</p>}
           </Section>
 
-          <Section title="How should Hunkdory split changes into steps?">
-            <RadioGroup label="Walkthroughs" className="flex flex-col gap-2">
-              {[
-                { on: true, title: 'Let Claude write a walkthrough', note: '(recommended)', detail: 'Steps by intent, with a reason for each. For a branch that opens without one, Claude Code reads the diff, the commits and the session. Like any Claude Code run, that goes to Anthropic.' },
-                { on: false, title: 'One step per file, fully offline', note: '', detail: 'Nothing is sent anywhere. You can still ask for a walkthrough on a branch when you want one.' },
-              ].map((o) => (
-                <div key={String(o.on)} className={`rounded-xl border p-3.5 ${writeWalkthroughs === o.on ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'}`}>
-                  <Radio checked={writeWalkthroughs === o.on} tabbable={writeWalkthroughs === o.on || (writeWalkthroughs === undefined && o.on)} onSelect={() => setWriteWalkthroughs(o.on)}>
+          <Section title="Who does the work?">
+            <RadioGroup label="Assistant" className="flex flex-col gap-2">
+              {assistants.map((a) => (
+                <div key={a.id} className={`rounded-xl border p-3.5 ${assistant === a.id ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'} ${a.available ? '' : 'opacity-60'}`}>
+                  <Radio
+                    checked={assistant === a.id}
+                    disabled={!a.available}
+                    tabbable={assistant === a.id}
+                    onSelect={() => {
+                      setAssistant(a.id);
+                      // ACP agents aren't isolated the way Claude Code and Copilot's runs are: default auto-writing off rather than asking.
+                      if (a.id.startsWith('acp:') && writeWalkthroughs === undefined) setWriteWalkthroughs(false);
+                    }}
+                  >
                     <span className="flex flex-col gap-0.5">
-                      <span className="text-body font-semibold">
-                        {o.title} {o.note && <span className="font-normal text-muted">{o.note}</span>}
+                      <span className="text-body font-semibold">{a.name}</span>
+                      <span className="text-ui text-muted">
+                        {!a.available ? a.reason : a.id === 'manual' ? "No AI. Hunkdory never sends this project's code anywhere." : 'Writes walkthroughs, answers questions on a step and makes changes you ask for.'}
                       </span>
-                      <span className="text-ui text-muted">{o.detail}</span>
                     </span>
                   </Radio>
                 </div>
               ))}
             </RadioGroup>
-            {writeWalkthroughs === undefined && <p className="text-meta text-muted">Not chosen yet: Hunkdory asks the first time a branch opens without a walkthrough.</p>}
+            {assistant?.startsWith('acp:') && (
+              <Notice tone="info">Unlike Claude Code and Copilot, Hunkdory can't stop this agent from loading the repo's own config (an AGENTS.md, its MCP servers, …) when it runs.</Notice>
+            )}
           </Section>
+
+          {assistant !== 'manual' && (
+            <Section title="How should Hunkdory split changes into steps?">
+              <RadioGroup label="Walkthroughs" className="flex flex-col gap-2">
+                {[
+                  {
+                    on: true,
+                    title: `Let ${assistants.find((a) => a.id === assistant)?.name ?? 'Claude'} write a walkthrough`,
+                    note: assistant?.startsWith('acp:') ? '' : '(recommended)',
+                    detail: `Steps by intent, with a reason for each. For a branch that opens without one, ${assistants.find((a) => a.id === assistant)?.name ?? 'Claude Code'} reads the diff, the commits and the session.${
+                      assistant === 'copilot' ? ' Like any Copilot run, that goes to GitHub.' : assistant === 'claude-code' ? ' Like any Claude Code run, that goes to Anthropic.' : ''
+                    }`,
+                  },
+                  { on: false, title: 'One step per file, fully offline', note: '', detail: 'Nothing is sent anywhere. You can still ask for a walkthrough on a branch when you want one.' },
+                ].map((o) => (
+                  <div key={String(o.on)} className={`rounded-xl border p-3.5 ${writeWalkthroughs === o.on ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'}`}>
+                    <Radio checked={writeWalkthroughs === o.on} tabbable={writeWalkthroughs === o.on || (writeWalkthroughs === undefined && o.on)} onSelect={() => setWriteWalkthroughs(o.on)}>
+                      <span className="flex flex-col gap-0.5">
+                        <span className="text-body font-semibold">
+                          {o.title} {o.note && <span className="font-normal text-muted">{o.note}</span>}
+                        </span>
+                        <span className="text-ui text-muted">{o.detail}</span>
+                      </span>
+                    </Radio>
+                  </div>
+                ))}
+              </RadioGroup>
+              {writeWalkthroughs === undefined && <p className="text-meta text-muted">Not chosen yet: Hunkdory asks the first time a branch opens without a walkthrough.</p>}
+            </Section>
+          )}
 
           <section className="flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3">
             <SectionHeader as="h2" toggle={{ expanded: advanced, onToggle: () => setAdvanced(!advanced) }}>

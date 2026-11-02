@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { integrationBranches, matchesPattern, matchSessions, withCheckoutFallback } from '../src/main/match.ts';
+import { integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback } from '../src/main/match.ts';
 import type { SessionInfo } from '../src/shared/types.ts';
 
 const session = (id: string, startedAt: string, branches: [string, string, string?][], originalBranch: string | null = null): SessionInfo => ({
   id,
   file: `/${id}.jsonl`,
+  agent: 'claude-code',
   configDir: '/home/.claude',
   cwd: '/repo',
   branches: branches.map(([name, lastSeen, firstSeen]) => ({ name, firstSeen: firstSeen ?? lastSeen, lastSeen })),
@@ -77,4 +78,42 @@ test('a session that only saw "HEAD" belongs to the branch checked out where it 
   assert.deepEqual(e.branches.map((b) => b.name), ['worktree-x'], 'the deepest checkout wins');
   assert.deepEqual(f.branches, [], 'never attributed to an integration branch');
   assert.equal(kept, a, 'sessions that recorded branches are left alone');
+});
+
+test('matchSessions marks a branch "probable" only when every session on it was guessed', () => {
+  const guess = session('g', '2026-10-28T09:00:00Z', [['feat/guess', '2026-10-28T10:00:00Z']]);
+  const real = session('r', '2026-10-28T09:00:00Z', [['feat/mixed', '2026-10-28T10:00:00Z']]);
+  const guessed = session('g2', '2026-10-28T09:00:00Z', [['feat/mixed', '2026-10-28T11:00:00Z']]);
+  const m = matchSessions([guess, real, guessed], { exists: () => true, exclude: new Set(), probable: new Set(['g', 'g2']) });
+  assert.equal(m.get('feat/guess')!.probable, true, 'only a guessed session: probable');
+  assert.equal(m.get('feat/mixed')!.probable, false, 'one confirmed session: not probable, even with a guess alongside it');
+});
+
+test('weakMatchMainFolder guesses the one branch whose commits overlap the session window and was checked out then', () => {
+  const s = { ...session('h', '2026-10-28T09:00:00Z', []), startedAt: '2026-10-28T09:00:00Z', endedAt: '2026-10-28T09:30:00Z' };
+  const checkouts = [
+    { at: '2026-10-28T08:00:00Z', branch: 'feat/x' },
+    { at: '2026-10-28T10:00:00Z', branch: 'main' },
+  ];
+  const ranges = new Map([['feat/x', { first: '2026-10-28T09:05:00Z', last: '2026-10-28T09:10:00Z' }]]);
+  const m = weakMatchMainFolder([s], checkouts, ranges);
+  assert.deepEqual(m.get('feat/x')?.map((x) => x.id), ['h']);
+});
+
+test('weakMatchMainFolder leaves a session unmatched when more than one branch fits, or when the reflog disagrees', () => {
+  const s = { ...session('h', '2026-10-28T09:00:00Z', []), startedAt: '2026-10-28T09:00:00Z', endedAt: '2026-10-28T09:30:00Z' };
+  const checkouts = [
+    { at: '2026-10-28T08:00:00Z', branch: 'feat/x' },
+    { at: '2026-10-28T08:30:00Z', branch: 'feat/y' },
+    { at: '2026-10-28T09:05:00Z', branch: 'feat/x' },
+  ];
+  const bothFit = new Map([
+    ['feat/x', { first: '2026-10-28T09:05:00Z', last: '2026-10-28T09:10:00Z' }],
+    ['feat/y', { first: '2026-10-28T09:06:00Z', last: '2026-10-28T09:11:00Z' }],
+  ]);
+  assert.equal(weakMatchMainFolder([s], checkouts, bothFit).size, 0, 'ambiguous: no guess at all');
+
+  const notCheckedOutThen = [{ at: '2026-10-28T20:00:00Z', branch: 'feat/x' }]; // checked out after the session ended
+  const oneRange = new Map([['feat/x', { first: '2026-10-28T09:05:00Z', last: '2026-10-28T09:10:00Z' }]]);
+  assert.equal(weakMatchMainFolder([s], notCheckedOutThen, oneRange).size, 0, "commits overlap but the reflog says it wasn't checked out then");
 });

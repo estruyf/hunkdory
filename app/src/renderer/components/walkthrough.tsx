@@ -190,6 +190,8 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
   const running = job?.status === 'running';
   useTick(running);
   if (data.walkthrough === 'agent') return null;
+  // Manual projects have no assistant to write or rewrite a walkthrough with.
+  const manual = !data.assistant;
 
   if (running) {
     const what = data.walkthrough === 'reviewer' ? 'Rewriting the walkthrough' : 'Hunkdory is writing a walkthrough for this branch';
@@ -237,9 +239,11 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
                 {sharing === 'busy' ? 'Sharing…' : shared || sharing.startsWith('https://') ? 'Share again' : `Share on PR #${data.pr.number}`}
               </Button>
             )}
-            <Button size="sm" onClick={w.write}>
-              Rewrite
-            </Button>
+            {!manual && (
+              <Button size="sm" onClick={w.write}>
+                Rewrite
+              </Button>
+            )}
           </>
         }
       >
@@ -259,7 +263,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
     );
   }
 
-  if (allowed === null && !job) {
+  if (!manual && allowed === null && !job) {
     const answer = async (on: boolean) => {
       setAllowed(on);
       await window.api.setWriteWalkthroughs(data.projectId, on);
@@ -289,13 +293,19 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
     <Notice
       tone="caution"
       actions={
-        <Button size="sm" onClick={w.write}>
-          {failed ? 'Try again' : 'Write one'}
-        </Button>
+        manual ? undefined : (
+          <Button size="sm" onClick={w.write}>
+            {failed ? 'Try again' : 'Write one'}
+          </Button>
+        )
       }
     >
       <strong className="font-semibold">No walkthrough on this branch.</strong> The steps are one per file, without reasons.{' '}
-      {failed ? <>Hunkdory couldn't write one: {failed}</> : job?.status === 'cancelled' ? 'You stopped Hunkdory writing one.' : ''}
+      {manual
+        ? "This project is set to Manual, so Hunkdory won't write one."
+        : failed
+          ? <>Hunkdory couldn't write one: {failed}</>
+          : job?.status === 'cancelled' ? 'You stopped Hunkdory writing one.' : ''}
     </Notice>
   );
 }

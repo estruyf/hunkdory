@@ -14,6 +14,9 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { SessionInfo, TestRun } from '../../shared/types.ts';
+import { TEST_CMD, shortCommand, testResult, withoutHeredocs } from './testcmd.ts';
+
+export { testResult } from './testcmd.ts';
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), '.claude');
 
@@ -47,42 +50,7 @@ export function encodeProjectPath(path: string): string {
 const INJECTED = /<(ide_opened_file|ide_selection|system-reminder|browser_instruction|ide_diagnostics)>[\s\S]*?<\/\1>/g;
 const NOT_A_PROMPT = /^(<local-command-std(out|err)>|<task-notification>|<bash-(input|stdout|stderr)>|\[Request interrupted|Caveat: The messages below)/;
 
-/**
- * A test runner in command position: at the start, or after &&, ;, | or (, optionally behind npx and env vars.
- * So `cd x && npm test | tail` counts, and `grep -rn "vitest"` doesn't.
- */
-const TEST_CMD =
-  /(?:^|[;&|(]\s*)(?:\w+=\S+\s+)*(?:npx\s+)?(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|(?:\.\/)?(?:node_modules\/\.bin\/)?(?:vitest|jest|pytest|mocha)\b|playwright\s+test\b|(?:go|dotnet|cargo)\s+test\b|node\s+(?:--\S+\s+)*--test\b|(?:gulp|heft)\s+test\b)/m;
-
-/** A command without its heredoc bodies: a script fed to python3 can mention npm test without running it. */
-function withoutHeredocs(cmd: string) {
-  const out: string[] = [];
-  let end: string | null = null;
-  for (const line of cmd.split('\n')) {
-    if (end) {
-      if (line.trim() === end) end = null;
-      continue;
-    }
-    out.push(line);
-    end = line.match(/<<-?\s*['"]?(\w+)['"]?/)?.[1] ?? null;
-  }
-  return out.join('\n');
-}
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-const FAILED = /\b[1-9]\d*\s+(?:failed|failing|failures?)\b|ℹ fail [1-9]|^\s*FAIL\b|✖|npm ERR!|Tests?:\s+[1-9]\d* failed/im;
-const PASSED = /\b[1-9]\d*\s+(?:passed|passing)\b|ℹ pass [1-9]|^\s*PASS\b|✔|\bAll tests passed\b|^ok\b/im;
-
-/** Passed, failed or unknown, from the exit status and the output that came back. */
-export function testResult(isError: boolean, output: string): TestRun['result'] {
-  if (isError || FAILED.test(output)) return 'failed';
-  return PASSED.test(output) ? 'passed' : 'unknown';
-}
-
-/** The interesting part of a command: without a leading `cd somewhere &&`, on one line. */
-function shortCommand(cmd: string) {
-  const line = cmd.replace(/^\s*cd\s+\S+\s*&&\s*/, '').split('\n')[0].trim();
-  return line.length > 90 ? `${line.slice(0, 87)}…` : line;
-}
 
 /** A content block of a message: text, a tool call, or a tool's result. */
 interface Block {
@@ -205,6 +173,7 @@ export function parseTranscript(text: string, file: string, id: string, configDi
   return {
     id,
     file,
+    agent: 'claude-code',
     configDir,
     cwd,
     branches: [...branches].map(([name, seen]) => ({ name, ...seen })),

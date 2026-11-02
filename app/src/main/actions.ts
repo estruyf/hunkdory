@@ -1,13 +1,12 @@
 // Finishing a review: merge locally, send back to the agent, or discard.
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, closeSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as g from './git.ts';
 import * as gh from './github.ts';
 import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
-import { shellEnv, which } from './shellEnv.ts';
-import { DEFAULT_CONFIG_DIR } from './sessions/claude.ts';
+import { which, shellEnv } from './shellEnv.ts';
+import { assistantFor } from './assistants/index.ts';
 import { reviewedNote } from '../shared/comments.ts';
 import type { Comment, DecisionRecord, FinishRequest, FinishResult, HunkView, ReviewData, ReviewState, Step } from '../shared/types.ts';
 
@@ -147,7 +146,8 @@ export class Actions {
       if (req.kind === 'merge' && req.openPr) return await this.openPr(req, data, state, summary);
       if (req.kind === 'merge') return await this.merge(req, data, summary);
       if (req.kind === 'github') return await this.postReview(req, data, state, summary);
-      if (req.kind === 'send-back' && data.agent === 'copilot') return await this.postReview({ ...req, event: 'REQUEST_CHANGES' }, data, state, summary, true);
+      // A Copilot session on this Mac is resumed directly; only a GitHub coding-agent PR (no local session) goes through a review comment.
+      if (req.kind === 'send-back' && data.agent === 'copilot' && !data.session) return await this.postReview({ ...req, event: 'REQUEST_CHANGES' }, data, state, summary, true);
       if (req.kind === 'send-back') return await this.sendBack(req, data, state, summary);
       return await this.discard(req, summary);
     } catch (e) {
@@ -283,51 +283,36 @@ export class Actions {
   }
 
   private async sendBack(req: FinishRequest, data: ReviewData, state: ReviewState, summary: ReviewState['summary']): Promise<FinishResult> {
+    if (!data.assistant) throw new Error("This project is set to Manual, so there's no assistant to send this back to.");
     const session = data.session;
-    if (!session) throw new Error('No Claude Code session is linked to this branch, so there is nothing to resume.');
+    if (!session) throw new Error('No session is linked to this branch, so there is nothing to resume.');
     if (!existsSync(session.cwd)) throw new Error(`The session ran in ${session.cwd}, which no longer exists.`);
     if (!state.comments.length && !req.dropStepKeys.length && !req.note.trim()) throw new Error('Add a comment, a note, or a step to drop first.');
 
+    // The session's own CLI handles it, whatever the project is set to today.
+    const assistant = assistantFor({ assistant: session.agent });
     const env = { ...(await shellEnv()) };
-    // Sessions from another config dir (~/.claude-work, ...) only resume with that dir set.
-    if (session.configDir && session.configDir !== DEFAULT_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = session.configDir;
-    else delete env.CLAUDE_CONFIG_DIR;
-    const claude = await which('claude', env);
-    if (!claude) throw new Error('Could not find the "claude" command. Is Claude Code installed?');
     const wtv = (await which('wtv', env)) ? 'wtv' : `node ${this.wtvBin}`;
     const prompt = sendBackPrompt(data, state, req, `${wtv} verify`);
 
     mkdirSync(this.logDir, { recursive: true });
     const logFile = join(this.logDir, `${session.id}-${Date.now()}.jsonl`);
-    const fd = openSync(logFile, 'a');
-    const args = [
-      '--resume', session.id,
-      '--print', prompt,
-      '--output-format', 'stream-json',
-      '--verbose',
-      // Edits are allowed so the agent can fix things. Shell access is limited to the verifier and read-only git.
-      '--permission-mode', 'acceptEdits',
-      '--allowedTools', `Bash(${wtv} *)`, 'Bash(git status*)', 'Bash(git diff*)', 'Bash(git log*)', 'Bash(git show*)',
-    ];
-    const child = spawn(claude, args, { cwd: session.cwd, env, detached: true, stdio: ['ignore', fd, fd] });
-    closeSync(fd);
-    child.unref();
+    const { pid } = await assistant.sendBack({
+      session: { id: session.id, cwd: session.cwd, configDir: session.configDir },
+      prompt,
+      logFile,
+      allowBash: [assistant.id === 'copilot' ? `shell(${wtv} *)` : `Bash(${wtv} *)`],
+      onExit: (ok, message) => {
+        this.store.updateReview(req.projectId, req.branch, (r) => {
+          if (!r.decision || r.decision.logFile !== logFile) return;
+          r.decision.result = ok ? 'ok' : 'failed';
+          r.decision.message = message;
+        });
+        this.onChange();
+      },
+    });
 
-    const review = this.record(req, 'sent-back', 'running', `Resumed the Claude Code session with your feedback.`, summary, { logFile, pid: child.pid });
-    child.on('exit', (code) => {
-      this.store.updateReview(req.projectId, req.branch, (r) => {
-        if (!r.decision || r.decision.logFile !== logFile) return;
-        r.decision.result = code === 0 ? 'ok' : 'failed';
-        r.decision.message = code === 0 ? 'The agent finished working on your feedback.' : `The agent run stopped with exit code ${code}. See the log for details.`;
-      });
-      this.onChange();
-    });
-    child.on('error', (e) => {
-      this.store.updateReview(req.projectId, req.branch, (r) => {
-        if (r.decision?.logFile === logFile) Object.assign(r.decision, { result: 'failed', message: e.message });
-      });
-      this.onChange();
-    });
+    const review = this.record(req, 'sent-back', 'running', `Resumed the ${assistant.name} session with your feedback.`, summary, { logFile, pid });
     return { ok: true, message: review.decision!.message, review };
   }
 

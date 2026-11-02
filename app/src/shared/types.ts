@@ -20,11 +20,19 @@ export interface Project {
   ignored?: string[];
   /** Bases you picked for one branch, by branch name. They win over the project's base and a PR's. */
   bases?: Record<string, string>;
+  /** A Copilot session you said wasn't really this branch's (a "probably" match you unlinked). Claude Code sessions don't need this: it only ever knows the branches it actually ran on. */
+  dismissedSessions?: string[];
   /**
    * Whether Hunkdory may have Claude Code write a walkthrough when a branch opens without one.
    * Unset until you answer: until then nothing is sent to Claude unless you click "Write one".
    */
   writeWalkthroughs?: boolean;
+  /**
+   * Who does the work: write walkthroughs, answer questions, make changes, send work back.
+   * Unset means 'claude-code', so projects connected before this existed keep working. An ACP agent's id
+   * is `acp:<the agent's id in AppSettings.acpAgents>`.
+   */
+  assistant?: string;
   addedAt: string;
 }
 
@@ -126,9 +134,11 @@ export interface TestRun {
 export interface SessionInfo {
   id: string;
   file: string;
-  /** Claude Code config dir the session lives in. Resuming needs CLAUDE_CONFIG_DIR set to it unless it's ~/.claude. */
-  configDir: string;
-  /** Last working directory the session ran in. `claude --resume` must run from here. */
+  /** Which CLI this session belongs to. Resuming and the config dir below only mean anything for Claude Code. */
+  agent: 'claude-code' | 'copilot';
+  /** Claude Code config dir the session lives in. Resuming needs CLAUDE_CONFIG_DIR set to it unless it's ~/.claude. Null for Copilot. */
+  configDir: string | null;
+  /** Last working directory the session ran in. `claude --resume`/`copilot --resume` must run from here. */
   cwd: string;
   /** Every branch the session ran on, ordered by last use, with when it was first and last seen. */
   branches: { name: string; firstSeen: string; lastSeen: string }[];
@@ -284,6 +294,8 @@ export interface ReviewData {
   title: string;
   prompt: string | null;
   session: SessionInfo | null;
+  /** The session is a guess, not a sure match: Copilot CLI doesn't record which branch it ran on, unlike Claude Code. */
+  sessionProbable: boolean;
   sessionCount: number;
   files: number;
   added: number;
@@ -309,6 +321,8 @@ export interface ReviewData {
   sharedWalkthrough: { url: string; by: string } | null;
   /** The linked GitHub repo ("owner/name"), or null when the project has none. */
   repo: string | null;
+  /** The assistant this project uses for walkthroughs, questions and changes. Null for Manual: no AI involved. */
+  assistant: { id: string; name: string } | null;
 }
 
 /** A question about a step, or a change you asked Claude to make there, with how it went. */
@@ -338,7 +352,7 @@ export interface Exchange {
 
 /** What "Ask Claude" can do on a branch, and why not when it can't. */
 export interface AskAbility {
-  question: { by: Exchange['by'] };
+  question: { by: Exchange['by'] } | { by: null; reason: string };
   change: { by: Exchange['by']; where: string } | { by: null; reason: string };
 }
 
@@ -507,9 +521,19 @@ export interface FinishResult {
 /** How the app looks. System follows macOS; Light and Dark override it. */
 export type Theme = 'system' | 'light' | 'dark';
 
+/** One agent speaking the Agent Client Protocol, configured once and usable by any project. */
+export interface AcpAgentConfig {
+  id: string;
+  name: string;
+  command: string;
+  args: string[];
+}
+
 /** App-wide settings, kept in the store next to your projects. */
 export interface AppSettings {
   theme: Theme;
+  /** ACP agents you've added (Gemini, codex-acp, or anything else), for any project to pick as its assistant. */
+  acpAgents: AcpAgentConfig[];
 }
 
 /** What to put in a bug report. */
@@ -521,11 +545,22 @@ export interface AppInfo {
   os: string;
 }
 
+/** One assistant Hunkdory can be connected to, for the Connect screen's choice. */
+export interface AssistantChoice {
+  id: string;
+  name: string;
+  available: boolean;
+  /** Why it's disabled, when it is. */
+  reason?: string;
+}
+
 export interface ReviewerApi {
   listProjects(): Promise<Project[]>;
   checkFolder(path: string): Promise<RepoCheck>;
   chooseFolder(): Promise<string | null>;
   foundOnThisMac(): Promise<FoundFolder[]>;
+  /** Every assistant Hunkdory can be connected to, with whether it's installed. */
+  listAssistants(): Promise<AssistantChoice[]>;
   addProject(input: ProjectInput): Promise<Project>;
   updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project>;
   removeProject(id: string): Promise<void>;
@@ -541,6 +576,8 @@ export interface ReviewerApi {
   reviewUncommitted(projectId: string, branch: string): Promise<void>;
   /** Takes a branch out of the inbox, or (`on` false) brings it back. */
   ignoreBranch(projectId: string, branch: string, on: boolean): Promise<void>;
+  /** Says a "probably" Copilot session match isn't this branch's, or (`on` false) brings it back. */
+  unlinkSession(projectId: string, sessionId: string, on: boolean): Promise<void>;
   /** Branches a review could compare against, the ones with the fewest commits to review first. */
   listBases(projectId: string, branch: string): Promise<BaseChoice[]>;
   /** Compares one branch against `base`, whatever the project's base. `null` goes back to Hunkdory's pick. */
@@ -571,6 +608,9 @@ export interface ReviewerApi {
   settings(): Promise<AppSettings>;
   /** Applies the theme to the window right away and keeps it for the next launch. */
   setTheme(theme: Theme): Promise<AppSettings>;
+  /** Adds (or, with `id` set, replaces) an ACP agent in app settings. */
+  setAcpAgent(agent: Omit<AcpAgentConfig, 'id'> & { id?: string }): Promise<AppSettings>;
+  removeAcpAgent(id: string): Promise<AppSettings>;
   appInfo(): Promise<AppInfo>;
 }
 
@@ -583,6 +623,8 @@ export interface ProjectInput {
   github: string | null;
   /** Left out: keep what the project had. */
   writeWalkthroughs?: boolean;
+  /** Left out: keep what the project had. */
+  assistant?: string;
 }
 
 export type ReviewPatch =

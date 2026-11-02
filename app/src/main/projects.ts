@@ -9,13 +9,15 @@ import type { WtvJob, WtvOutput } from './wtv-worker.ts';
 import * as g from './git.ts';
 import { pathKey } from './paths.ts';
 import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './sessions/claude.ts';
+import { belongsTo as copilotBelongsTo, readCopilotSessions } from './sessions/copilot.ts';
 import * as gh from './github.ts';
-import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, withCheckoutFallback, type BranchSessions } from './match.ts';
+import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback, type BranchSessions } from './match.ts';
 import { attention, buildSteps, estimateMinutes } from './steps.ts';
 import { projectName, toWatch, withProjectName, type Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
 import type { Summaries, Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
+import { assistantFor } from './assistants/index.ts';
 import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
@@ -86,9 +88,12 @@ export class Projects {
     if (!root) return { ...empty, error: 'Not a git repository' };
     const [baseBranch, branches, remote, trees] = await Promise.all([g.detectBaseBranch(root), g.localBranches(root), g.remoteUrl(root), g.worktrees(root)]);
     const roots = [root, ...trees.map((t) => t.path)];
-    const sessions = readSessions(sessionDirsFor(roots)).filter((s) => belongsTo(s, roots));
+    const claudeSessions = readSessions(sessionDirsFor(roots)).filter((s) => belongsTo(s, roots));
+    const copilotSessions = readCopilotSessions().filter((s) => copilotBelongsTo(s, roots));
     const perDir = new Map<string, number>();
-    for (const s of sessions) perDir.set(s.configDir, (perDir.get(s.configDir) ?? 0) + 1);
+    for (const s of claudeSessions) perDir.set(s.configDir!, (perDir.get(s.configDir!) ?? 0) + 1);
+    const sources = [...perDir].map(([dir, n]) => ({ dir: tilde(dir), sessions: n }));
+    if (copilotSessions.length) sources.push({ dir: 'GitHub Copilot', sessions: copilotSessions.length });
     return {
       path: full,
       isRepo: true,
@@ -96,8 +101,8 @@ export class Projects {
       baseBranch,
       branches,
       remote,
-      sessionSources: [...perDir].map(([dir, n]) => ({ dir: tilde(dir), sessions: n })).sort((a, b) => b.sessions - a.sessions),
-      sessionCount: sessions.length,
+      sessionSources: sources.sort((a, b) => b.sessions - a.sessions),
+      sessionCount: claudeSessions.length + copilotSessions.length,
     };
   }
 
@@ -150,6 +155,7 @@ export class Projects {
       watch: toWatch(input.watch),
       github: input.github,
       writeWalkthroughs: input.writeWalkthroughs,
+      assistant: input.assistant,
       addedAt: new Date().toISOString(),
     };
     this.store.addProject(project);
@@ -159,7 +165,15 @@ export class Projects {
   async updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project> {
     const project = this.store.project(id);
     await this.validate(project.path, input);
-    const updated: Project = { ...withProjectName(project, input.name), baseBranch: input.baseBranch, watch: toWatch(input.watch), github: input.github, writeWalkthroughs: input.writeWalkthroughs ?? project.writeWalkthroughs, remote: await g.remoteUrl(project.path) };
+    const updated: Project = {
+      ...withProjectName(project, input.name),
+      baseBranch: input.baseBranch,
+      watch: toWatch(input.watch),
+      github: input.github,
+      writeWalkthroughs: input.writeWalkthroughs ?? project.writeWalkthroughs,
+      assistant: input.assistant ?? project.assistant,
+      remote: await g.remoteUrl(project.path),
+    };
     this.store.addProject(updated);
     // Bases and watch rules change what every review looks like, and the name is on every one.
     for (const k of [...this.cache.keys()]) if (k.startsWith(`${id}::`)) this.cache.delete(k);
@@ -272,6 +286,14 @@ export class Projects {
     this.scanning = null;
   }
 
+  /** A "probably" Copilot session match (see `weakMatchMainFolder`) you said wasn't really this branch's. */
+  unlinkSession(projectId: string, sessionId: string, on: boolean) {
+    const project = this.store.project(projectId);
+    const rest = (project.dismissedSessions ?? []).filter((id) => id !== sessionId);
+    this.store.addProject({ ...project, dismissedSessions: on ? [...rest, sessionId] : rest });
+    this.scanning = null;
+  }
+
   async trackBranch(projectId: string, branch: string): Promise<void> {
     // Picking a branch you ignored brings it back.
     const short = branch.replace(/^[^/]+\//, '');
@@ -289,17 +311,55 @@ export class Projects {
     this.store.reopenReview(projectId, branch);
   }
 
+  /**
+   * Every session on this Mac that may belong to `project`: Claude Code's and Copilot's, matched to
+   * branches where that's a hard fact (a worktree's path, or Claude's own per-message branch), plus a
+   * guess for Copilot sessions that ran in the main folder instead of a worktree (see `weakMatchMainFolder`
+   * in match.ts). `probable` holds the ids of sessions that are only a guess, so a branch matched only
+   * through them can be shown as "probably" and unlinked.
+   */
+  private async allSessions(project: Project, trees: g.Worktree[]): Promise<{ sessions: SessionInfo[]; found: number; probable: Set<string> }> {
+    const root = project.path;
+    const roots = [root, ...trees.map((t) => t.path)];
+    const claudeFound = readSessions(sessionDirsFor(roots)).filter((s) => belongsTo(s, roots));
+    const copilotFound = readCopilotSessions().filter((s) => copilotBelongsTo(s, roots));
+    const exclude = integrationBranches([...claudeFound, ...copilotFound], project.baseBranch);
+    const claudeSessions = withCheckoutFallback(claudeFound, trees, exclude);
+    // A Copilot session that ran in the repo's own folder, not a worktree, can't be told apart by its cwd
+    // alone from an old one that ran there on a different branch: only a genuine worktree is a hard match.
+    let copilotSessions = withCheckoutFallback(copilotFound, trees.filter((t) => t.path !== root), exclude);
+    const dismissed = new Set(project.dismissedSessions ?? []);
+    const probable = new Set<string>();
+    const guessable = copilotSessions.filter((s) => s.cwd === root && !s.branches.length && !dismissed.has(s.id));
+    if (guessable.length) {
+      const localNames = await g.localBranches(root);
+      const [checkouts, ranges] = await Promise.all([
+        g.reflogCheckouts(root),
+        Promise.all(localNames.map(async (b) => [b, await g.commitTimeRange(root, b)] as const)),
+      ]);
+      const commitRanges = new Map(ranges.filter((r): r is [string, { first: string; last: string }] => !!r[1]));
+      const weak = weakMatchMainFolder(guessable, checkouts, commitRanges);
+      const branchOf = new Map<string, string>();
+      for (const [branch, list] of weak) for (const s of list) branchOf.set(s.id, branch);
+      copilotSessions = copilotSessions.map((s) => {
+        const branch = branchOf.get(s.id);
+        if (!branch) return s;
+        probable.add(s.id);
+        return { ...s, branches: [{ name: branch, firstSeen: s.startedAt ?? '', lastSeen: s.endedAt ?? s.startedAt ?? '' }] };
+      });
+    }
+    return { sessions: [...claudeSessions, ...copilotSessions], found: claudeFound.length + copilotFound.length, probable };
+  }
+
   /** What needs a review in a project, plus counts that explain an empty inbox. */
   /** `only` narrows the work to one branch, for opening a review without scanning the whole project. */
   async discover(project: Project, only?: string): Promise<{ items: Discovered[]; scan: ProjectScan }> {
     const root = project.path;
     const [trees, branches] = await Promise.all([g.worktrees(root), g.localBranches(root)]);
-    const roots = [root, ...trees.map((t) => t.path)];
-    const found = readSessions(sessionDirsFor(roots)).filter((s) => belongsTo(s, roots));
-    const exclude = integrationBranches(found, project.baseBranch);
-    const sessions = withCheckoutFallback(found, trees, exclude);
+    const { sessions, found, probable } = await this.allSessions(project, trees);
+    const exclude = integrationBranches(sessions, project.baseBranch);
     const exists = new Set(branches);
-    const scan: ProjectScan = { projectId: project.id, sessions: found.length, branchesSeen: 0, gone: 0, upToDate: 0, waiting: 0, pullRequests: null };
+    const scan: ProjectScan = { projectId: project.id, sessions: found, branchesSeen: 0, gone: 0, upToDate: 0, waiting: 0, pullRequests: null };
 
     // Every branch a session touched, whether it still exists or not, for the scan.
     const seen = new Set(sessions.flatMap((s) => s.branches.map((b) => b.name)).filter((b) => !exclude.has(b)));
@@ -311,10 +371,10 @@ export class Projects {
     const prs = !project.github
       ? []
       : project.watch.pullRequests
-        ? await this.discoverPullRequests(project, sessions, exclude, scan, only)
-        : await this.discoverPullRequests(project, sessions, exclude, scan, only, (p) => p.copilot);
+        ? await this.discoverPullRequests(project, sessions, exclude, scan, only, undefined, probable)
+        : await this.discoverPullRequests(project, sessions, exclude, scan, only, (p) => p.copilot, probable);
     const skip = new Set(prs.map((d) => d.branch.name));
-    let items = [...prs, ...(await this.discoverBranches(project, sessions, branches, trees, exclude, scan, { skip, only }))];
+    let items = [...prs, ...(await this.discoverBranches(project, sessions, branches, trees, exclude, scan, { skip, only }, probable))];
     if (!only) items = foldDuplicates(items);
     scan.waiting = items.length;
     return { items, scan };
@@ -327,12 +387,13 @@ export class Projects {
     trees: g.Worktree[],
     exclude: Set<string>,
     scan: ProjectScan,
-    opts: { skip?: Set<string>; only?: string } = {}
+    opts: { skip?: Set<string>; only?: string } = {},
+    probable?: Set<string>
   ): Promise<Discovered[]> {
     const root = project.path;
     const exists = new Set(branches);
     // Look up sessions by branch name even when only the remote branch is left.
-    const matched = matchSessions(sessions, { exists: () => true, exclude });
+    const matched = matchSessions(sessions, { exists: () => true, exclude, probable });
     // Agent or person, any branch counts; a session on it adds the prompt and reasoning.
     const pattern = project.watch.pattern;
     const watched = (b: string) => project.watch.anyBranch || (!!pattern && matchesPattern(b, pattern));
@@ -415,7 +476,7 @@ export class Projects {
   }
 
   /** Every open pull request, fetched into refs/reviewer/*. A local session on the PR's branch adds the prompt and send back. */
-  private async discoverPullRequests(project: Project, sessions: SessionInfo[], exclude: Set<string>, scan: ProjectScan, only?: string, filter?: (p: PullRequest) => boolean): Promise<Discovered[]> {
+  private async discoverPullRequests(project: Project, sessions: SessionInfo[], exclude: Set<string>, scan: ProjectScan, only?: string, filter?: (p: PullRequest) => boolean, probable?: Set<string>): Promise<Discovered[]> {
     const root = project.path;
     let prs: PullRequest[];
     try {
@@ -426,7 +487,7 @@ export class Projects {
       return [];
     }
     if (!filter) scan.pullRequests = prs.length;
-    const matched = matchSessions(sessions, { exists: () => true, exclude });
+    const matched = matchSessions(sessions, { exists: () => true, exclude, probable });
     const out: Discovered[] = [];
     for (const pr of prs) {
       if (only && pr.headRefName !== only) continue;
@@ -704,9 +765,11 @@ export class Projects {
 
     const shared = (wt.value as { shared?: { url: string; by: string } } | null)?.shared;
     const me = d.branch.pr ? await gh.login(root).catch(() => null) : null;
+    const assistant = assistantFor(project);
     const data: ReviewData = {
-      ask: askAbility(session, d.branch),
-      agent: d.match ? 'claude-code' : d.branch.pr?.copilot ? 'copilot' : null,
+      ask: askAbility(session, d.branch, assistant.id === 'manual'),
+      assistant: assistant.id === 'manual' ? null : { id: assistant.id, name: assistant.name },
+      agent: d.match ? d.match.origin.agent : d.branch.pr?.copilot ? 'copilot' : null,
       headSha: d.branch.headSha,
       dirty: d.branch.dirtyFiles > 0,
       dirtyFiles: d.branch.dirtyFiles,
@@ -738,6 +801,7 @@ export class Projects {
       title,
       prompt,
       session,
+      sessionProbable: d.match?.probable ?? false,
       sessionCount: d.match?.sessions.length ?? 0,
       files: r.files,
       added: r.hunks.reduce((n, h) => n + h.added.length, 0),
@@ -810,7 +874,16 @@ export class Projects {
           updatedSinceReview = true;
         }
         const pr = d.branch.pr;
-        const who = d.match ? `Claude Code${d.match.sessions.length > 1 ? ` · ${d.match.sessions.length} sessions` : ''}` : pr?.copilot ? 'GitHub Copilot' : pr ? `by ${pr.author}` : d.branch.uncommitted ? 'Uncommitted changes' : 'No agent session';
+        const agentName = (a: 'claude-code' | 'copilot') => (a === 'copilot' ? 'GitHub Copilot' : 'Claude Code');
+        const who = d.match
+          ? `${d.match.probable ? 'Probably ' : ''}${agentName(d.match.origin.agent)}${d.match.sessions.length > 1 ? ` · ${d.match.sessions.length} sessions` : ''}`
+          : pr?.copilot
+            ? 'GitHub Copilot'
+            : pr
+              ? `by ${pr.author}`
+              : d.branch.uncommitted
+                ? 'Uncommitted changes'
+                : 'No agent session';
         const id = `${project.id}::${d.branch.name}`;
         listed.add(id);
         // A local branch is "opened" by whoever made its newest commit; one git call also gives its date.

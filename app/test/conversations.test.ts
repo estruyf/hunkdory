@@ -100,3 +100,19 @@ test('who can answer and change depends on the session and the checkout', () => 
   assert.equal(none.change.by, null);
   assert.match((none.change as { reason: string }).reason, /isn't checked out on this Mac/);
 });
+
+test('a Manual project has no assistant to ask, whatever the session or checkout', () => {
+  const dir = mkdtempSync(`${tmpdir()}/reviewer-`);
+  const session = { cwd: dir } as SessionInfo;
+  const r = askAbility(session, { checkout: { kind: 'worktree', path: dir }, pr: null }, true);
+  assert.equal(r.question.by, null);
+  assert.equal(r.change.by, null);
+  assert.match((r.question as { reason: string }).reason, /set to Manual/);
+  assert.match((r.change as { reason: string }).reason, /set to Manual/);
+});
+
+test('a Copilot session can\'t be forked: a question runs fresh, but a change still continues the session', () => {
+  const dir = mkdtempSync(`${tmpdir()}/reviewer-`);
+  const session = { cwd: dir, agent: 'copilot' } as SessionInfo;
+  assert.deepEqual(askAbility(session, { checkout: { kind: 'none' }, pr: null }), { question: { by: 'fresh' }, change: { by: 'session', where: dir } });
+});

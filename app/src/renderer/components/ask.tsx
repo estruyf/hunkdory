@@ -26,13 +26,13 @@ function useTick(on: boolean) {
 
 function who(data: ReviewData, kind: Exchange['kind']): string {
   const a = data.ask;
+  const name = data.assistant?.name ?? 'The assistant';
   if (kind === 'question') {
-    return a.question.by === 'session-copy'
-      ? 'The agent that wrote this branch answers, from a copy of its session. It can’t change anything.'
-      : 'Claude answers from the code. It can’t change anything.';
+    if (!a.question.by) return (a.question as { reason: string }).reason;
+    return a.question.by === 'session-copy' ? 'The agent that wrote this branch answers, from a copy of its session. It can’t change anything.' : `${name} answers from the code. It can’t change anything.`;
   }
   if (!a.change.by) return a.change.reason;
-  return a.change.by === 'session' ? `The agent’s own session makes the change, in ${a.change.where}.` : `Claude edits the files in ${a.change.where}. Nothing is committed.`;
+  return a.change.by === 'session' ? `The agent’s own session makes the change, in ${a.change.where}.` : `${name} edits the files in ${a.change.where}. Nothing is committed.`;
 }
 
 /** What you just sent, shown until Hunkdory has it on record: reading the branch first can take a few seconds. */
@@ -181,9 +181,13 @@ export function AskPanel({
     if (!(await ask(kind, sent))) setText(sent);
   };
 
+  // Manual: no assistant to ask, so there's no box, not just a disabled one.
+  if (!data.ask.question.by) return null;
+  const name = data.assistant?.name ?? 'the assistant';
+
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4" aria-label="Ask Claude about this step">
-      <SectionHeader as="h2">Ask Claude about this step</SectionHeader>
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4" aria-label={`Ask ${name} about this step`}>
+      <SectionHeader as="h2">Ask {name} about this step</SectionHeader>
 
       <Thread data={data} exchanges={exchanges} pending={pending} onShowChanges={onShowChanges} loadedAt={loadedAt} />
 
@@ -248,6 +252,7 @@ export function CheckFollowUp({
   const [text, setText] = useState(change ? note : question);
   const { send, busy, pending, error } = useSend(data, step, index);
   const canChange = !!data.ask.change.by;
+  const canAsk = !!data.ask.question.by;
   const changeRunning = exchanges.some((e) => e.kind === 'change' && e.status === 'running');
 
   // The note goes with your review: saved shortly after typing stops, and when you leave.
@@ -275,7 +280,9 @@ export function CheckFollowUp({
     save();
     await send('change', text.trim() ? `${question}\n\n${text.trim()}` : question);
   };
-  const disabled = busy || (change ? !canChange || changeRunning : !text.trim());
+  const disabled = busy || (change ? !canChange || changeRunning : !text.trim() || !canAsk);
+
+  const name = data.assistant?.name ?? 'the assistant';
 
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-3">
@@ -304,12 +311,12 @@ export function CheckFollowUp({
           disabled={disabled}
           aria-busy={busy}
           onClick={submit}
-          data-tooltip={change && !canChange ? who(data, 'change') : undefined}
+          data-tooltip={change ? (!canChange ? who(data, 'change') : undefined) : !canAsk ? who(data, 'question') : undefined}
         >
-          {busy ? (change ? 'Starting…' : 'Asking…') : change ? 'Ask Claude to change it' : 'Ask'}
+          {busy ? (change ? 'Starting…' : 'Asking…') : change ? `Ask ${name} to change it` : 'Ask'}
         </Button>
         <span className="min-w-0 flex-1 text-meta text-muted">
-          {change ? <>Goes with your review as “Needs a change”, whether or not Claude changes it now. {canChange ? who(data, 'change') : ''}</> : who(data, 'question')}
+          {change ? <>Goes with your review as “Needs a change”, whether or not {name} changes it now. {canChange ? who(data, 'change') : ''}</> : who(data, 'question')}
         </span>
       </div>
       {error && <Notice tone="error">{error}</Notice>}

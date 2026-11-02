@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { existsSync, renameSync } from 'node:fs';
 import { Store } from './store.ts';
 import { Projects } from './projects.ts';
+import { allAssistants, setAcpAgents } from './assistants/index.ts';
 import { Summaries } from './summaries.ts';
 import { Actions } from './actions.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
@@ -44,6 +45,7 @@ if (process.env.REVIEWER_USER_DATA) app.setPath('userData', process.env.REVIEWER
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const store = new Store(join(app.getPath('userData'), 'store.json'));
+setAcpAgents(store.settings().acpAgents);
 const generated = new GeneratedWalkthroughs(join(app.getPath('userData'), 'walkthroughs'));
 const projects = new Projects(store, generated, new Summaries(join(app.getPath('userData'), 'inbox-summaries.json')));
 const logDir = join(app.getPath('userData'), 'agent-runs');
@@ -156,6 +158,16 @@ const api: ReviewerApi = {
     nativeTheme.themeSource = theme;
     return store.updateSettings({ theme });
   },
+  setAcpAgent: async (agent) => {
+    const settings = store.setAcpAgent(agent);
+    setAcpAgents(settings.acpAgents);
+    return settings;
+  },
+  removeAcpAgent: async (id) => {
+    const settings = store.removeAcpAgent(id);
+    setAcpAgents(settings.acpAgents);
+    return settings;
+  },
   appInfo: async () => ({ version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, os: `${process.platform === 'darwin' ? `macOS ${process.getSystemVersion()}` : `${process.platform} ${release()}`} (${process.arch})` }),
   listProjects: async () => store.projects(),
   checkFolder: (path) => projects.checkFolder(path),
@@ -164,6 +176,10 @@ const api: ReviewerApi = {
     return res.canceled ? null : res.filePaths[0];
   },
   foundOnThisMac: async () => projects.foundOnThisMac(),
+  listAssistants: async () => Promise.all(allAssistants().map(async (a) => {
+    const r = await a.available();
+    return { id: a.id, name: a.name, available: r.ok, ...(r.ok ? {} : { reason: r.reason }) };
+  })),
   addProject: (input) => projects.addProject(input),
   updateProject: (id, input) => projects.updateProject(id, input),
   removeProject: async (id) => store.removeProject(id),
@@ -174,6 +190,7 @@ const api: ReviewerApi = {
   listUncommitted: (projectId) => projects.listUncommitted(projectId),
   reviewUncommitted: (projectId, branch) => projects.reviewUncommitted(projectId, branch),
   ignoreBranch: async (projectId, branch, on) => projects.ignoreBranch(projectId, branch, on),
+  unlinkSession: async (projectId, sessionId, on) => projects.unlinkSession(projectId, sessionId, on),
   listBases: (projectId, branch) => projects.listBases(projectId, branch),
   setBase: async (projectId, branch, base) => {
     await projects.setBase(projectId, branch, base);

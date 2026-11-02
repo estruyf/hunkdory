@@ -274,7 +274,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
               <span>
                 ·{' '}
                 {data.session
-                  ? `Claude Code session, ${timeAgo(data.session.endedAt).toLowerCase()}`
+                  ? `${data.sessionProbable ? 'Probably a ' : 'A '}${data.session.agent === 'copilot' ? 'GitHub Copilot' : 'Claude Code'} session, ${timeAgo(data.session.endedAt).toLowerCase()}`
                   : data.agent === 'copilot' && data.pr
                     ? `GitHub Copilot, updated ${timeAgo(data.pr.updatedAt).toLowerCase()}`
                     : data.pr
@@ -285,6 +285,18 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                           ? 'Not committed yet'
                           : 'No agent session found'}
               </span>
+              {data.session && data.sessionProbable && (
+                <button
+                  type="button"
+                  className="text-link hover:underline"
+                  onClick={async () => {
+                    await window.api.unlinkSession(data.projectId, data.session!.id, true);
+                    onReload();
+                  }}
+                >
+                  Not this session? Unlink
+                </button>
+              )}
               {data.pr && data.pr.checks.length > 0 && <Pill tone={checksTone(data.pr.checks)}>CI: {checksText(data.pr.checks)}</Pill>}
             </span>
             <h1 className="text-hero font-semibold">{allDone ? 'All done. Time to wrap up.' : headline(plan.decisions.length, plan.careful.length, plan.skim.length)}</h1>
@@ -457,7 +469,7 @@ function HowItWorks() {
   const [show, setShow] = usePref<boolean>('plan-how-it-works', true);
   if (!show) return null;
   const items = [
-    ['Understand', 'Start with what the change is about, below. Each step explains one part in plain words, and you can ask Claude about anything that isn’t clear.'],
+    ['Understand', 'Start with what the change is about, below. Each step explains one part in plain words, and you can ask about anything that isn’t clear.'],
     ['Decide', 'Make the calls only you can make, like keeping or dropping work you didn’t ask for.'],
     ['Read closely', 'Go through the steps that need attention, with the agent’s reason next to each change.'],
     ['Skim', 'Glance over the low-risk rest, a folder at a time. Every changed line is in some step, so nothing is hidden.'],

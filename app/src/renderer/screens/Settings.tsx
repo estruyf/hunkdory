@@ -13,13 +13,20 @@ import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { FIELD } from '../components/ui/field.ts';
 import type { DiffMode } from '../components/diff.tsx';
-import type { AppInfo, Theme } from '../../shared/types.ts';
+import type { AcpAgentConfig, AppInfo, Theme } from '../../shared/types.ts';
 
 const THEMES: { value: Theme; label: string; hint: string }[] = [
   { value: 'light', label: 'Light', hint: 'Always light' },
   { value: 'dark', label: 'Dark', hint: 'Always dark' },
   { value: 'system', label: 'System', hint: 'Follows macOS' },
 ];
+
+/** One-click starting points for agents that speak ACP; "Custom…" opens the form below empty instead. */
+const ACP_PRESETS: { label: string; name: string; command: string; args: string[] }[] = [
+  { label: 'Gemini', name: 'Gemini', command: 'gemini', args: ['--acp'] },
+  { label: 'Codex', name: 'Codex', command: 'npx', args: ['-y', '@zed-industries/codex-acp'] },
+];
+
 
 /** The app's own settings, review defaults, and a way into each project's settings. */
 export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
@@ -45,8 +52,14 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
   const [howItWorks, setHowItWorks] = usePref<boolean>('plan-how-it-works', true);
   const [theme, setTheme] = useState<Theme | null>(null);
   const [copied, setCopied] = useState(false);
+  const [addingAgent, setAddingAgent] = useState(false);
+  const [agentForm, setAgentForm] = useState({ name: '', command: '', args: '' });
+  const [acpAgents, setAcpAgents] = useState<AcpAgentConfig[]>([]);
   useEffect(() => {
-    if (settings.value) setTheme(settings.value.theme);
+    if (settings.value) {
+      setTheme(settings.value.theme);
+      setAcpAgents(settings.value.acpAgents);
+    }
   }, [settings.value]);
 
   // The main process applies it to the window at once; the CSS follows prefers-color-scheme.
@@ -59,6 +72,24 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
     await navigator.clipboard.writeText(versionText(info.value!));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const addPreset = (p: (typeof ACP_PRESETS)[number]) => setAgentForm({ name: p.name, command: p.command, args: p.args.join(' ') });
+
+  const saveAgent = async () => {
+    const name = agentForm.name.trim();
+    const command = agentForm.command.trim();
+    if (!name || !command) return;
+    const args = agentForm.args.trim().split(/\s+/).filter(Boolean);
+    const next = await window.api.setAcpAgent({ name, command, args });
+    setAcpAgents(next.acpAgents);
+    setAgentForm({ name: '', command: '', args: '' });
+    setAddingAgent(false);
+  };
+
+  const removeAgent = async (id: string) => {
+    const next = await window.api.removeAcpAgent(id);
+    setAcpAgents(next.acpAgents);
   };
 
   return (
@@ -117,6 +148,62 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
             <Checkbox checked={howItWorks} onChange={setHowItWorks}>
               Show “How a review works” on the plan
             </Checkbox>
+          </Card>
+
+          <Card title="AI assistants">
+            <p className="text-ui text-muted">
+              Claude Code and GitHub Copilot work out of the box. Add any other agent that speaks the Agent Client Protocol (ACP), like Gemini CLI or Codex, so a project can pick it instead.
+            </p>
+            {acpAgents.length > 0 && (
+              <ul className="m-0 flex list-none flex-col gap-px p-0">
+                {acpAgents.map((a) => (
+                  <li key={a.id} className="flex items-center gap-3 rounded-lg px-1 py-1.5">
+                    <span className="grid min-w-0 flex-1">
+                      <span className="truncate text-body font-semibold">{a.name}</span>
+                      <span className="truncate font-mono text-meta text-faint">
+                        {a.command} {a.args.join(' ')}
+                      </span>
+                    </span>
+                    <Button variant="quiet" iconOnly aria-label={`Remove ${a.name}`} icon={<X size={14} aria-hidden />} onClick={() => removeAgent(a.id)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+            {addingAgent ? (
+              <div className="flex flex-col gap-2 rounded-lg border border-edge p-3">
+                <div className="flex flex-wrap gap-2">
+                  {ACP_PRESETS.map((p) => (
+                    <Button key={p.label} onClick={() => addPreset(p)}>
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+                <label className="flex flex-col gap-1 text-ui">
+                  Name
+                  <input className={`${FIELD} w-full max-w-sm`} value={agentForm.name} onChange={(e) => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="Gemini" />
+                </label>
+                <label className="flex flex-col gap-1 text-ui">
+                  Command
+                  <input className={`${FIELD} w-full max-w-sm font-mono`} value={agentForm.command} onChange={(e) => setAgentForm({ ...agentForm, command: e.target.value })} placeholder="gemini" />
+                </label>
+                <label className="flex flex-col gap-1 text-ui">
+                  Arguments
+                  <input className={`${FIELD} w-full max-w-sm font-mono`} value={agentForm.args} onChange={(e) => setAgentForm({ ...agentForm, args: e.target.value })} placeholder="--acp" />
+                </label>
+                <div className="flex gap-2">
+                  <Button variant="primary" onClick={saveAgent}>
+                    Add
+                  </Button>
+                  <Button onClick={() => setAddingAgent(false)}>Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Button variant="quiet" icon={<Plus size={14} aria-hidden />} onClick={() => setAddingAgent(true)}>
+                  Add an agent
+                </Button>
+              </div>
+            )}
           </Card>
 
           <Card title="Projects">

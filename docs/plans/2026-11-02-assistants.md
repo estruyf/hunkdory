@@ -97,6 +97,19 @@ First, two checks. Write down what you find in this file.
    - If one does and no flag stops it: refuse to auto-write walkthroughs for a branch that adds or changes those files, and say why.
    - Otherwise: let it run, behind the same consent as today.
 
+**What was found (CLI 1.0.93-1, on macOS):**
+
+1. **Event format.** `--output-format json` writes one JSON object per line (JSONL), each with a `type`. The ones that matter:
+   - `session.info`, `user.message`: at the start.
+   - `assistant.message` (non-ephemeral): the agent's message, with `data.content` (empty until the final one for that turn) and `data.toolRequests: [{ name, arguments }]` for any tool calls it's making. Tool names confirmed: `bash` (`{ command, description }`), `view` (`{ path }`), `grep` (`{ pattern, output_mode, -n, ... }`), `glob` (`{ pattern }`), `edit` (`{ path, old_str, new_str }`), `create` (`{ path, file_text }`).
+   - `tool.execution_start` / `tool.execution_complete` (non-ephemeral): confirm a call ran, with `success: false` and no `result` when a tool was refused (no separate "denied" event type - the run's final message explains why in plain words).
+   - `result` (last line): `{ exitCode, sessionId, usage }`. `exitCode !== 0` is the only reliable "this run failed" signal; a refused tool call doesn't fail the run by itself.
+   - Lots of `ephemeral: true` events (`*_delta`, `session.background_tasks_changed`, …) are streaming noise - safe to ignore.
+   - There's no `--json-schema` flag. Structured output has to be asked for in the prompt and parsed from the final `assistant.message`'s `content`, same as `copilot.ts` does.
+   - Fixtures saved under `app/test/fixtures/copilot-*.jsonl` for: a read-only run, an edit run, a run exercising `view`/`grep`/`glob`, a run creating a file, a denied-tool run, and a run asked for a plain JSON reply.
+
+2. **Repo config.** Made a temp repo with an `AGENTS.md` containing an instruction-injection marker, and a workspace `.mcp.json` defining a throwaway MCP server. With `--no-custom-instructions --disable-builtin-mcps`, neither loads: `copilot instruction list` confirms AGENTS.md is a repo instruction source, but a run with `--no-custom-instructions` didn't follow its injected instruction; `session.mcp_servers_loaded` only ever listed the built-in GitHub MCP server (disabled by the flag), never the workspace one - Copilot doesn't appear to trust-prompt or silently load workspace MCP servers from `-p` mode at all, flag or not. There's also no hooks mechanism in the Copilot CLI (nothing like Claude Code's `.claude/settings.json` hooks) to guard against. So: same consent as today, no extra refusal needed for Slice 3.
+
 Then `assistants/copilot.ts`:
 
 - Base flags:

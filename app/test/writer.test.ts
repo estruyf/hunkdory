@@ -7,7 +7,7 @@ import { buildFixture } from '../../tools/wtv/test/fixture.mjs';
 import { normalizeWalkthrough, verify } from '../../tools/wtv/src/verify.mjs';
 import { buildSteps } from '../src/main/steps.ts';
 import { GeneratedWalkthroughs, WALKTHROUGH_SCHEMA, writerPrompt, type WriterInput } from '../src/main/writer.ts';
-import { describeTool } from '../src/main/claudeRun.ts';
+import { describeTool } from '../src/main/assistants/claude.ts';
 import type { HunkView } from '../src/shared/types.ts';
 
 const hunk = (id: string, path: string, extra: Partial<HunkView> = {}): HunkView => ({

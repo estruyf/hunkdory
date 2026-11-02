@@ -3,11 +3,11 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ISOLATED, READ_GIT, runClaude, type ClaudeRun } from './claudeRun.ts';
+import { assistantFor } from './assistants/index.ts';
+import type { AssistantRun } from './assistants/types.ts';
 import * as g from './git.ts';
 import * as gh from './github.ts';
 import type { Projects } from './projects.ts';
-import { shellEnv, which } from './shellEnv.ts';
 import type { HunkView, ReviewData, WalkthroughJob } from '../shared/types.ts';
 
 /** Walkthroughs Hunkdory wrote, one JSON file per branch. */
@@ -181,7 +181,7 @@ export class Writer {
   private logDir: string;
   private onChange: (job: WalkthroughJob) => void;
   private jobs = new Map<string, WalkthroughJob & { diffKey: string }>();
-  private children = new Map<string, ClaudeRun>();
+  private children = new Map<string, AssistantRun>();
 
   constructor(opts: { projects: Projects; generated: GeneratedWalkthroughs; logDir: string; onChange: (job: WalkthroughJob) => void }) {
     this.projects = opts.projects;
@@ -218,7 +218,7 @@ export class Writer {
     const existing = this.jobs.get(key);
     if (existing?.status === 'running') return this.job(projectId, branch);
     const data = await this.projects.review(projectId, branch);
-    if (data.walkthrough === 'agent') return null;
+    if (data.walkthrough === 'agent' || !data.assistant) return null;
     if (opts.auto && (!data.writeWalkthroughs || data.walkthrough !== 'skeleton' || existing?.diffKey === diffKey(data))) return this.job(projectId, branch);
     if (!Object.keys(data.hunks).length) return null;
     return this.launch(key, projectId, branch, data);
@@ -244,7 +244,7 @@ export class Writer {
   }
 
   private launch(key: string, projectId: string, branch: string, data: ReviewData, feedback?: WriterFeedback): WalkthroughJob | null {
-    this.jobs.set(key, { projectId, branch, status: 'running', startedAt: new Date().toISOString(), finishedAt: null, activity: 'Starting Claude Code…', attempt: 1, diffKey: diffKey(data) });
+    this.jobs.set(key, { projectId, branch, status: 'running', startedAt: new Date().toISOString(), finishedAt: null, activity: `Starting ${data.assistant?.name ?? 'the assistant'}…`, attempt: 1, diffKey: diffKey(data) });
     this.onChange(this.job(projectId, branch)!);
     this.run(key, projectId, branch, data, feedback).catch((e) => {
       if (this.jobs.get(key)?.status === 'running') this.update(key, { status: 'failed', finishedAt: new Date().toISOString(), activity: null, error: (e as Error).message });
@@ -283,7 +283,7 @@ export class Writer {
     let feedback = update;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       this.update(key, { attempt, activity: attempt > 1 ? 'Covering the changes it missed…' : update ? 'Updating it for the new changes…' : 'Reading the change…' });
-      const out = await this.claude(key, ctx.cwd, !ctx.inTree, writerPrompt(input, feedback));
+      const out = await this.claude(key, ctx.cwd, !ctx.inTree, writerPrompt(input, feedback), data.assistant?.id);
       if (this.jobs.get(key)?.status !== 'running') return;
       walkthrough = { version: 1, ...out, base: ctx.baseSha, head: data.head, generatedBy: { tool: 'reviewer', at: new Date().toISOString() } };
 
@@ -339,25 +339,17 @@ export class Writer {
     return { url };
   }
 
-  /** One headless Claude Code run. Resolves with its structured output. */
-  private async claude(key: string, cwd: string, gitOnly: boolean, prompt: string): Promise<Record<string, unknown>> {
-    const env = { ...(await shellEnv()) };
-    const claude = await which('claude', env);
-    if (!claude) throw new Error('Could not find the "claude" command. Is Claude Code installed?');
-    const run = runClaude({
-      claude,
+  /** One headless run. Resolves with its structured output. */
+  private async claude(key: string, cwd: string, gitOnly: boolean, prompt: string, assistantId?: string): Promise<Record<string, unknown>> {
+    const assistant = assistantFor({ assistant: assistantId });
+    const run = await assistant.run({
       cwd,
-      env,
+      prompt,
+      access: gitOnly ? 'git-only' : 'read',
+      session: null,
+      schema: WALKTHROUGH_SCHEMA,
       logFile: join(this.logDir, `walkthrough-${Date.now()}.jsonl`),
       timeoutMs: TIMEOUT_MS,
-      args: [
-        '--print', prompt,
-        '--json-schema', JSON.stringify(WALKTHROUGH_SCHEMA),
-        // Read-only: git, plus the files themselves when the branch is checked out.
-        '--tools', ...(gitOnly ? ['Bash'] : ['Bash', 'Read', 'Grep', 'Glob']),
-        '--allowedTools', ...READ_GIT, ...(gitOnly ? [] : ['Read', 'Grep', 'Glob']),
-        ...ISOLATED,
-      ],
       onActivity: (activity) => {
         if (this.jobs.get(key)?.status === 'running') this.update(key, { activity });
       },
@@ -365,7 +357,7 @@ export class Writer {
     this.children.set(key, run);
     try {
       const out = await run.done;
-      if (!out.structured) throw new Error("Claude Code didn't return a walkthrough.");
+      if (!out.structured) throw new Error(`${assistant.name} didn't return a walkthrough.`);
       return out.structured;
     } catch (e) {
       if (this.jobs.get(key)?.status !== 'running') return {};

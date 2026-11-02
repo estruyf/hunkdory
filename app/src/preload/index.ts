@@ -6,6 +6,7 @@ const methods: (keyof ReviewerApi)[] = [
   'checkFolder',
   'chooseFolder',
   'foundOnThisMac',
+  'listAssistants',
   'addProject',
   'updateProject',
   'removeProject',
@@ -16,6 +17,7 @@ const methods: (keyof ReviewerApi)[] = [
   'listUncommitted',
   'reviewUncommitted',
   'ignoreBranch',
+  'unlinkSession',
   'listBases',
   'setBase',
   'openExternal',
@@ -36,6 +38,8 @@ const methods: (keyof ReviewerApi)[] = [
   'shareWalkthrough',
   'settings',
   'setTheme',
+  'setAcpAgent',
+  'removeAcpAgent',
   'appInfo',
 ];
 

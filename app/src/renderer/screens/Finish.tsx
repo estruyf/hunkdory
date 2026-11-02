@@ -37,7 +37,11 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   const outside = data.steps.filter((s) => s.outsideTask);
   const [drop, setDrop] = useState<Set<string>>(() => new Set(defaultDrops(data.steps, state.settled)));
   const comments = state.comments.filter((c) => c.body.trim());
-  const agent = data.session ? 'claude' : data.agent === 'copilot' ? 'copilot' : null;
+  // Resuming a local session needs the project's own CLI; sending a Copilot coding-agent PR back is a
+  // GitHub comment, so it's offered whatever the project's assistant is set to.
+  const prCopilot = data.agent === 'copilot' && !data.session;
+  const localAgent = !data.assistant || !data.session ? null : data.session.agent === 'copilot' ? 'copilot' : 'claude';
+  const agent = prCopilot ? 'copilot' : localAgent;
   const open = openItems(buildPlan(data, state), state);
   const [pick, setPick] = useState<Decision>(() => (agent && (comments.length || drop.size) ? 'send-back' : data.pr ? 'github' : agent ? 'send-back' : 'merge'));
   const [event, setEvent] = useState<GitHubEvent>(() => (open.fixes.length ? 'REQUEST_CHANGES' : comments.length || data.prByYou ? 'COMMENT' : 'APPROVE'));
@@ -113,7 +117,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
           },
         ]
       : []),
-    agent === 'copilot'
+    prCopilot
       ? {
           id: 'send-back' as const,
           title: 'Send back to Copilot',
@@ -123,9 +127,9 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
       : {
           id: 'send-back' as const,
           title: 'Send back to the agent',
-          detail: `Resumes the Claude Code session with ${comments.length ? `your ${plural(comments.length, 'comment')}` : 'your note'}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
+          detail: `Resumes the agent's session with ${comments.length ? `your ${plural(comments.length, 'comment')}` : 'your note'}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
           submit: 'Send back',
-          disabled: agent ? undefined : 'No Claude Code session on this Mac worked on this branch, so there is no agent to send it back to.',
+          disabled: agent ? undefined : !data.assistant ? "This project is set to Manual, so there's no assistant to send it back to." : 'No session on this Mac worked on this branch, so there is no agent to send it back to.',
         },
     {
       id: 'discard',

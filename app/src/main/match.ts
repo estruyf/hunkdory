@@ -8,6 +8,8 @@ export interface BranchSessions {
   /** The session in which the branch first appeared. Its first prompt is "what you asked for". */
   origin: SessionInfo;
   lastSeen: string;
+  /** Every session here came from a guess (see `weakMatchMainFolder`), not a worktree or a recorded branch. */
+  probable: boolean;
 }
 
 const lastSeenOn = (s: SessionInfo, branch: string) => s.branches.find((b) => b.name === branch)?.lastSeen ?? '';
@@ -17,10 +19,11 @@ const firstSeenOn = (s: SessionInfo, branch: string) => s.branches.find((b) => b
  * Group sessions by the branches they ran on.
  * `exists` filters out branches that were deleted since; `exclude` drops base and
  * integration branches (main, dev, and any branch a worktree was created from).
+ * `probable` marks sessions that were only guessed at (see `weakMatchMainFolder`), not recorded or in a worktree.
  */
 export function matchSessions(
   sessions: SessionInfo[],
-  opts: { exists: (branch: string) => boolean; exclude: Set<string> }
+  opts: { exists: (branch: string) => boolean; exclude: Set<string>; probable?: Set<string> }
 ): Map<string, BranchSessions> {
   const byBranch = new Map<string, SessionInfo[]>();
   for (const s of sessions) {
@@ -35,7 +38,54 @@ export function matchSessions(
     const recent = [...list].sort((a, b) => lastSeenOn(b, branch).localeCompare(lastSeenOn(a, branch)));
     // Not simply the oldest session: an old session can wander onto a branch long after it was made.
     const origin = [...list].sort((a, b) => firstSeenOn(a, branch).localeCompare(firstSeenOn(b, branch)))[0];
-    out.set(branch, { branch, sessions: recent, origin, lastSeen: lastSeenOn(recent[0], branch) });
+    out.set(branch, { branch, sessions: recent, origin, lastSeen: lastSeenOn(recent[0], branch), probable: list.every((s) => opts.probable?.has(s.id)) });
+  }
+  return out;
+}
+
+export interface ReflogCheckout {
+  /** ISO timestamp of the checkout. */
+  at: string;
+  /** Branch checked out from that point until the next entry here (or until now, for the last one). */
+  branch: string;
+}
+
+/** Whether `branch` was the one checked out, by the reflog, at any point overlapping [from, to]. */
+function checkedOutDuring(checkouts: ReflogCheckout[], branch: string, from: string, to: string): boolean {
+  const sorted = [...checkouts].sort((a, b) => a.at.localeCompare(b.at));
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i].branch !== branch) continue;
+    const start = sorted[i].at;
+    const end = sorted[i + 1]?.at ?? '9999-12-31T23:59:59.999Z';
+    if (start <= to && end >= from) return true;
+  }
+  return false;
+}
+
+/**
+ * Copilot CLI sessions that ran in the repo's main folder (not a worktree) don't say which branch they
+ * were on, and the folder moves to another branch once they end: unlike a worktree's path, its cwd alone
+ * doesn't say which branch a past session belongs to. Guess one from the reflog: the single branch whose
+ * own commits overlap the session's active window, and that the reflog says was checked out there during
+ * that window. More than one branch fitting is worse than no guess, so it's left unmatched.
+ * Pure, so it can be tested without a real reflog; projects.ts supplies `checkouts` and `commitRanges`.
+ */
+export function weakMatchMainFolder(
+  sessions: SessionInfo[],
+  checkouts: ReflogCheckout[],
+  commitRanges: Map<string, { first: string; last: string }>
+): Map<string, SessionInfo[]> {
+  const out = new Map<string, SessionInfo[]>();
+  for (const s of sessions) {
+    if (!s.startedAt) continue;
+    const from = s.startedAt;
+    const to = s.endedAt ?? s.startedAt;
+    const fits: string[] = [];
+    for (const [branch, range] of commitRanges) {
+      if (to < range.first || from > range.last) continue;
+      if (checkedOutDuring(checkouts, branch, from, to)) fits.push(branch);
+    }
+    if (fits.length === 1) out.set(fits[0], [...(out.get(fits[0]) ?? []), s]);
   }
   return out;
 }

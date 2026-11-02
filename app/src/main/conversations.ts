@@ -3,9 +3,9 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { ISOLATED, READ_GIT, runClaude, type ClaudeRun } from './claudeRun.ts';
-import { DEFAULT_CONFIG_DIR } from './sessions/claude.ts';
-import { shellEnv, which } from './shellEnv.ts';
+import { assistantFor } from './assistants/index.ts';
+import type { AssistantRun } from './assistants/types.ts';
+import { which, shellEnv } from './shellEnv.ts';
 import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
 import { clip, whereSection } from './writer.ts';
@@ -97,20 +97,19 @@ export function askPrompt(a: AskInput): string {
   return lines.join('\n');
 }
 
-/** Claude Code's environment, pointed at the config dir a session lives in. */
-export async function claudeEnv(session: SessionInfo | null): Promise<{ env: NodeJS.ProcessEnv; claude: string }> {
-  const env = { ...(await shellEnv()) };
-  // Sessions from another config dir (~/.claude-work, ...) only resume with that dir set.
-  if (session?.configDir && session.configDir !== DEFAULT_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = session.configDir;
-  else if (session) delete env.CLAUDE_CONFIG_DIR;
-  const claude = await which('claude', env);
-  if (!claude) throw new Error('Could not find the "claude" command. Is Claude Code installed?');
-  return { env, claude };
-}
-
-/** Who answers questions and makes changes on a branch. */
-export function askAbility(session: SessionInfo | null, branch: Pick<BranchInfo, 'checkout' | 'pr'>): AskAbility {
-  if (session && existsSync(session.cwd)) return { question: { by: 'session-copy' }, change: { by: 'session', where: session.cwd } };
+/** Who answers questions and makes changes on a branch. `manual` is the project's own choice: no assistant at all. */
+export function askAbility(session: SessionInfo | null, branch: Pick<BranchInfo, 'checkout' | 'pr'>, manual = false): AskAbility {
+  if (manual) {
+    const reason = "This project is set to Manual, so there's no assistant to ask.";
+    return { question: { by: null, reason }, change: { by: null, reason } };
+  }
+  if (session && existsSync(session.cwd)) {
+    // Claude Code can fork a session (`--resume --fork-session`), so a question doesn't disturb it.
+    // Copilot CLI can't fork, so a question there is a fresh run instead, with the session's own
+    // first prompt folded into the question's context (askPrompt's 'fresh' branch does this).
+    const canFork = session.agent !== 'copilot';
+    return { question: { by: canFork ? 'session-copy' : 'fresh' }, change: { by: 'session', where: session.cwd } };
+  }
   if (branch.checkout.kind !== 'none') return { question: { by: 'fresh' }, change: { by: 'fresh', where: branch.checkout.path } };
   return {
     question: { by: 'fresh' },
@@ -125,7 +124,7 @@ export class Conversations {
   private wtvBin: string;
   private onChange: (r: ReviewState) => void;
   private onBranchChanged: (projectId: string, branch: string) => Promise<unknown>;
-  private runs = new Map<string, ClaudeRun>();
+  private runs = new Map<string, AssistantRun>();
 
   constructor(opts: {
     store: Store;
@@ -209,7 +208,7 @@ export class Conversations {
       if (!r.exchanges?.some((e) => e.status === 'running')) continue;
       this.store.updateReview(r.projectId, r.branch, (r) => {
         for (const e of r.exchanges ?? []) {
-          if (e.status === 'running') Object.assign(e, { status: 'failed', error: 'Hunkdory closed before Claude finished.', activity: null });
+          if (e.status === 'running') Object.assign(e, { status: 'failed', error: 'Hunkdory closed before the assistant finished.', activity: null });
         }
       });
     }
@@ -218,8 +217,10 @@ export class Conversations {
   private async run(data: ReviewData, step: Step, x: Exchange, history: Exchange[]): Promise<string> {
     const ctx = await this.projects.runContext(data.projectId, data.branch);
     const session = x.by === 'fresh' ? null : data.session!;
-    const { env, claude } = await claudeEnv(session);
-    const wtv = (await which('wtv', env)) ? 'wtv' : `node ${this.wtvBin}`;
+    // A session's own CLI handles it, whatever the project is set to today: resuming a Copilot session
+    // with Claude Code (or back) would just fail to find it.
+    const assistant = assistantFor({ assistant: session?.agent ?? data.assistant?.id });
+    const wtv = (await which('wtv', await shellEnv())) ? 'wtv' : `node ${this.wtvBin}`;
     // A change only happens where the branch is checked out (or in the session's folder), so it never reads through git refs.
     const headRef = x.kind === 'question' && !ctx.inTree ? ctx.headRef : null;
     const prompt = askPrompt({
@@ -238,29 +239,15 @@ export class Conversations {
       wtvCommand: data.walkthrough === 'agent' ? `${wtv} verify` : null,
     });
 
-    const readTools = headRef ? ['Bash'] : ['Bash', 'Read', 'Grep', 'Glob'];
-    const readAllowed = [...READ_GIT, ...(headRef ? [] : ['Read', 'Grep', 'Glob'])];
-    let cwd = ctx.cwd;
-    let args: string[];
-    if (x.by === 'session-copy') {
-      // A copy of the session: the agent remembers why it did things, and the original session stays as it was.
-      cwd = session!.cwd;
-      args = ['--resume', session!.id, '--fork-session', '--no-session-persistence', '--print', prompt, '--tools', 'Bash', 'Read', 'Grep', 'Glob', '--allowedTools', ...READ_GIT, 'Read', 'Grep', 'Glob'];
-    } else if (x.by === 'session') {
-      // Same as sending a review back: the session itself goes on, and may edit files.
-      cwd = session!.cwd;
-      args = ['--resume', session!.id, '--print', prompt, '--permission-mode', 'acceptEdits', '--allowedTools', `Bash(${wtv} *)`, ...READ_GIT];
-    } else if (x.kind === 'question') {
-      args = ['--print', prompt, '--tools', ...readTools, '--allowedTools', ...readAllowed, ...ISOLATED];
-    } else {
-      args = ['--print', prompt, '--permission-mode', 'acceptEdits', '--tools', 'Bash', 'Read', 'Grep', 'Glob', 'Edit', 'Write', '--allowedTools', ...READ_GIT, ...ISOLATED];
-    }
-
-    const run = runClaude({
-      claude,
+    const cwd = session ? session.cwd : ctx.cwd;
+    const access = x.by === 'session' || x.kind === 'change' ? 'edit' : headRef ? 'git-only' : 'read';
+    const run = await assistant.run({
       cwd,
-      env,
-      args,
+      prompt,
+      access,
+      session: session ? { id: session.id, mode: x.by === 'session-copy' ? 'copy' : 'continue', configDir: session.configDir } : null,
+      allowBash: x.by === 'session' ? [assistant.id === 'copilot' ? `shell(${wtv} *)` : `Bash(${wtv} *)`] : undefined,
+      headRef,
       logFile: join(this.logDir, `${x.kind}-${Date.now()}.jsonl`),
       timeoutMs: TIMEOUT_MS,
       onActivity: (activity) => this.patch(data.projectId, data.branch, x.id, (e) => e.status === 'running' && (e.activity = activity)),
@@ -268,7 +255,7 @@ export class Conversations {
     this.runs.set(x.id, run);
     try {
       const out = await run.done;
-      return out.text.trim() || (x.kind === 'question' ? '(Claude finished without an answer.)' : '(Claude finished without saying what it changed.)');
+      return out.text.trim() || (x.kind === 'question' ? `(${assistant.name} finished without an answer.)` : `(${assistant.name} finished without saying what it changed.)`);
     } finally {
       this.runs.delete(x.id);
     }

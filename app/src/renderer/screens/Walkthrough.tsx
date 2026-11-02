@@ -672,9 +672,9 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
       <Button size="lg" shortcut="review.comment" onClick={openComment}>
         Comment
       </Button>
-      {!asking && !stepExchanges.length && (
+      {!asking && !stepExchanges.length && data.ask.question.by && (
         <Button size="lg" shortcut="review.ask" onClick={openAsk}>
-          Ask Claude
+          Ask {data.assistant?.name ?? 'the assistant'}
         </Button>
       )}
       {dec ? (

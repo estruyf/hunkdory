@@ -70,6 +70,25 @@ export async function worktrees(root: string): Promise<Worktree[]> {
   return list;
 }
 
+/** Every "checkout: moving from X to Y" entry in HEAD's reflog, oldest first. Used to guess which branch an old Copilot main-folder session ran on. */
+export async function reflogCheckouts(root: string): Promise<{ at: string; branch: string }[]> {
+  const out = await tryGit(['reflog', 'show', 'HEAD', '--date=iso-strict', '--format=%cd %gs'], root);
+  if (!out) return [];
+  const list: { at: string; branch: string }[] = [];
+  for (const line of out.split('\n')) {
+    const m = line.match(/^(\S+)\s+checkout: moving from \S+ to (.+)$/);
+    if (m) list.push({ at: m[1], branch: m[2] });
+  }
+  return list.reverse();
+}
+
+/** A branch's own first and last commit times, oldest and newest. Null for a branch that doesn't exist. */
+export async function commitTimeRange(root: string, branch: string): Promise<{ first: string; last: string } | null> {
+  const out = await tryGit(['log', '--format=%cI', branch], root);
+  const lines = out?.trim().split('\n').filter(Boolean) ?? [];
+  return lines.length ? { first: lines[lines.length - 1], last: lines[0] } : null;
+}
+
 /** Files with uncommitted changes, ignoring the review folder. */
 export async function dirtyFiles(cwd: string): Promise<string[]> {
   const out = await git(['status', '--porcelain', '-z', '--untracked-files=all', '--', '.', ':(exclude).review'], cwd);

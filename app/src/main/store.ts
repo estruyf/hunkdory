@@ -1,7 +1,7 @@
 // Review state in one JSON file. Small, readable, and written atomically.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
-import type { AppSettings, Project, ReviewState, Watch } from '../shared/types.ts';
+import type { AcpAgentConfig, AppSettings, Project, ReviewState, Watch } from '../shared/types.ts';
 
 interface Data {
   version: 1;
@@ -11,7 +11,7 @@ interface Data {
   settings?: Partial<AppSettings>;
 }
 
-const DEFAULT_SETTINGS: AppSettings = { theme: 'system' };
+const DEFAULT_SETTINGS: AppSettings = { theme: 'system', acpAgents: [] };
 
 const empty = (): Data => ({ version: 1, projects: [], reviews: {} });
 
@@ -71,13 +71,25 @@ export class Store {
   }
 
   settings(): AppSettings {
-    return { ...DEFAULT_SETTINGS, ...this.data.settings };
+    return { ...DEFAULT_SETTINGS, ...this.data.settings, acpAgents: this.data.settings?.acpAgents ?? DEFAULT_SETTINGS.acpAgents };
   }
 
   updateSettings(patch: Partial<AppSettings>): AppSettings {
     this.data.settings = { ...this.data.settings, ...patch };
     this.save();
     return this.settings();
+  }
+
+  /** Adds a new ACP agent (random id) or, with `id` set to an existing one, replaces it. */
+  setAcpAgent(agent: { id?: string } & Omit<AcpAgentConfig, 'id'>): AppSettings {
+    const agents = this.settings().acpAgents;
+    const id = agent.id ?? `${Date.now()}`;
+    const next = agents.some((a) => a.id === id) ? agents.map((a) => (a.id === id ? { ...agent, id } : a)) : [...agents, { ...agent, id }];
+    return this.updateSettings({ acpAgents: next });
+  }
+
+  removeAcpAgent(id: string): AppSettings {
+    return this.updateSettings({ acpAgents: this.settings().acpAgents.filter((a) => a.id !== id) });
   }
 
   projects(): Project[] {
