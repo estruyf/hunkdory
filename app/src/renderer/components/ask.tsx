@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Exchange, ReviewData, Step } from '../../shared/types.ts';
 import { Markdown } from './markdown.tsx';
 import { modKey } from '../lib/shortcuts.ts';
@@ -35,12 +35,18 @@ function who(data: ReviewData, kind: Exchange['kind']): string {
   return a.change.by === 'session' ? `The agent’s own session makes the change, in ${a.change.where}.` : `Claude edits the files in ${a.change.where}. Nothing is committed.`;
 }
 
+/** What you just sent, shown until Hunkdory has it on record: reading the branch first can take a few seconds. */
+export interface PendingAsk {
+  kind: Exchange['kind'];
+  text: string;
+}
+
 /** Asking Claude from one step, or from one of its questions. */
 function useSend(data: ReviewData, step: Step, check?: number) {
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
   const send = async (kind: Exchange['kind'], text: string) => {
-    setBusy(true);
+    setPending({ kind, text: text.trim() });
     setError(null);
     try {
       await window.api.ask(data.projectId, data.branch, step.key, kind, text, check);
@@ -49,14 +55,34 @@ function useSend(data: ReviewData, step: Step, check?: number) {
       setError(cleanError(e));
       return false;
     } finally {
-      setBusy(false);
+      setPending(null);
     }
   };
-  return { send, busy, error };
+  return { send, busy: !!pending, pending, error };
+}
+
+function Asked({ kind, text }: PendingAsk) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-meta text-faint">{kind === 'question' ? 'You asked' : 'You asked for a change'}</span>
+      <div className="text-body break-words select-text">
+        <Markdown text={text} />
+      </div>
+    </div>
+  );
+}
+
+function Working({ children }: { children: ReactNode }) {
+  return (
+    <div role="status" aria-live="polite" className="flex items-center gap-2 text-ui text-muted">
+      <Loader2 size={13} className="shrink-0 animate-spin text-accent-ink" aria-hidden />
+      {children}
+    </div>
+  );
 }
 
 /** What you asked and what came back, and the way to the new diff once Claude changed the branch. */
-export function Thread({ data, exchanges, onShowChanges, loadedAt }: { data: ReviewData; exchanges: Exchange[]; onShowChanges: () => void; loadedAt: string }) {
+export function Thread({ data, exchanges, pending, onShowChanges, loadedAt }: { data: ReviewData; exchanges: Exchange[]; pending?: PendingAsk | null; onShowChanges: () => void; loadedAt: string }) {
   const running = exchanges.some((e) => e.status === 'running');
   // The diff on screen is out of date once a change finished after the review loaded. Hunkdory then updates its
   // walkthrough so the new code lands in its step; until that's done, the new diff shows it in "Not in the walkthrough".
@@ -70,22 +96,16 @@ export function Thread({ data, exchanges, onShowChanges, loadedAt }: { data: Rev
     <>
       {exchanges.map((e) => (
         <div key={e.id} className="flex flex-col gap-2 border-b border-border pb-3">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-meta text-faint">{e.kind === 'question' ? 'You asked' : 'You asked for a change'}</span>
-            <div className="text-body break-words select-text">
-              <Markdown text={e.text} />
-            </div>
-          </div>
+          <Asked kind={e.kind} text={e.text} />
           {e.status === 'running' && (
-            <div role="status" aria-live="polite" className="flex items-center gap-2 text-ui text-muted">
-              <Loader2 size={13} className="shrink-0 animate-spin text-accent-ink" aria-hidden />
+            <Working>
               <span className="min-w-0 flex-1 break-words">
                 {e.activity ?? 'Working…'} · {since(e.at, null)}
               </span>
               <Button variant="quiet" size="sm" onClick={() => window.api.cancelExchange(data.projectId, data.branch, e.id)}>
                 Stop
               </Button>
-            </div>
+            </Working>
           )}
           {e.status === 'done' && (
             <div className="rounded-lg bg-code px-3 py-2 text-body break-words select-text">
@@ -96,6 +116,16 @@ export function Thread({ data, exchanges, onShowChanges, loadedAt }: { data: Rev
           {e.status === 'cancelled' && <p className="text-ui text-muted">You stopped this.</p>}
         </div>
       ))}
+
+      {/* Gone as soon as the real one is in the thread, which can be a moment before the send returns. */}
+      {pending && !exchanges.some((e) => e.status === 'running' && e.kind === pending.kind && e.text === pending.text) && (
+        <div className="flex flex-col gap-2 border-b border-border pb-3">
+          <Asked {...pending} />
+          <Working>
+            <span className="min-w-0 flex-1 break-words">Reading the branch before Claude starts…</span>
+          </Working>
+        </div>
+      )}
 
       {changed && (
         <Notice
@@ -142,17 +172,20 @@ export function AskPanel({
   loadedAt: string;
 }) {
   const [text, setText] = useState('');
-  const { send: ask, busy, error } = useSend(data, step);
+  const { send: ask, busy, pending, error } = useSend(data, step);
   const canChange = !!data.ask.change.by;
+  // The box empties right away: what you sent shows in the thread. It comes back if sending fails.
   const send = async (kind: Exchange['kind']) => {
-    if (await ask(kind, text)) setText('');
+    const sent = text;
+    setText('');
+    if (!(await ask(kind, sent))) setText(sent);
   };
 
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4" aria-label="Ask Claude about this step">
       <SectionHeader as="h2">Ask Claude about this step</SectionHeader>
 
-      <Thread data={data} exchanges={exchanges} onShowChanges={onShowChanges} loadedAt={loadedAt} />
+      <Thread data={data} exchanges={exchanges} pending={pending} onShowChanges={onShowChanges} loadedAt={loadedAt} />
 
       <textarea
         aria-label="Your question or change"
@@ -213,7 +246,7 @@ export function CheckFollowUp({
   const change = value === 'no';
   // A question starts from the one on screen; a change from what you said should change.
   const [text, setText] = useState(change ? note : question);
-  const { send, busy, error } = useSend(data, step, index);
+  const { send, busy, pending, error } = useSend(data, step, index);
   const canChange = !!data.ask.change.by;
   const changeRunning = exchanges.some((e) => e.kind === 'change' && e.status === 'running');
 
@@ -234,7 +267,9 @@ export function CheckFollowUp({
 
   const submit = async () => {
     if (!change) {
-      if (await send('question', text)) setText('');
+      const sent = text;
+      setText('');
+      if (!(await send('question', sent))) setText(sent);
       return;
     }
     save();
@@ -244,7 +279,7 @@ export function CheckFollowUp({
 
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-3">
-      <Thread data={data} exchanges={exchanges} onShowChanges={onShowChanges} loadedAt={loadedAt} />
+      <Thread data={data} exchanges={exchanges} pending={pending} onShowChanges={onShowChanges} loadedAt={loadedAt} />
       <textarea
         aria-label={change ? 'What should change' : 'Your question'}
         rows={2}

@@ -170,6 +170,8 @@ export class Conversations {
     const r = this.store.updateReview(projectId, branch, (r) => {
       r.exchanges = [...(r.exchanges ?? []), x];
     });
+    // On screen now, not once Claude says what it's doing first.
+    this.onChange(r);
 
     this.run(data, step, x, history)
       .then(async (reply) => {
