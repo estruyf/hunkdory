@@ -844,6 +844,7 @@ export class Projects {
             return o ? { branch: o.branch.name, pr: o.branch.pr?.number ?? null } : null;
           })(),
           tracked: !!d.branch.tracked,
+          uncommitted: d.branch.uncommitted,
           review: state ? { status: state.status, reviewedSteps: Object.keys(state.reviewed).length } : null,
           ignored: ignored.has(d.branch.name),
         };

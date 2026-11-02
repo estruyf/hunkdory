@@ -85,11 +85,12 @@ export function formatDuration(min: number): string {
 export const tooBig = (w: { minutes: number; steps: number }) => w.minutes > 120 || w.steps > 60;
 
 /**
- * The inbox in the order to pick it up: reviews you started, then ones updated since your review,
- * then the rest by size (failing CI after passing), with changes too big for one sitting last.
+ * The inbox in the order to pick it up: reviews you started, then uncommitted work (it waits on you
+ * to commit it) and ones updated since your review, then the rest by size (failing CI after passing),
+ * with changes too big for one sitting last.
  */
-export function suggestedOrder<T extends { minutes: number; steps: number; updatedSinceReview: boolean; updatedAt: string | null; review: { status: string; reviewedSteps: number } | null; checks: { state: string }[] }>(items: T[]): T[] {
-  const group = (w: T) => (w.review?.status === 'open' && w.review.reviewedSteps > 0 ? 0 : w.updatedSinceReview ? 1 : tooBig(w) ? 3 : 2);
+export function suggestedOrder<T extends { minutes: number; steps: number; updatedSinceReview: boolean; uncommitted?: boolean; updatedAt: string | null; review: { status: string; reviewedSteps: number } | null; checks: { state: string }[] }>(items: T[]): T[] {
+  const group = (w: T) => (w.review?.status === 'open' && w.review.reviewedSteps > 0 ? 0 : w.updatedSinceReview || w.uncommitted ? 1 : tooBig(w) ? 3 : 2);
   const failing = (w: T) => Number(w.checks.some((c) => c.state === 'fail'));
   return [...items].sort((a, b) => group(a) - group(b) || failing(a) - failing(b) || a.minutes - b.minutes || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
 }

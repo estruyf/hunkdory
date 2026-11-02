@@ -152,7 +152,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
               <h1 className="text-hero font-semibold">{waitingRows.length ? `${plural(waitingRows.length, 'branch', 'branches')} waiting for your review` : 'Nothing waiting for your review'}</h1>
               <p className="text-body text-muted">
                 {waitingRows.length
-                  ? `About ${formatDuration(minutes)} in all, listed in the order to take them: what changed since your review first, then the smallest.`
+                  ? `About ${formatDuration(minutes)} in all, listed in the order to take them: ${data.waiting.some((w) => w.uncommitted && waitingKeys.has(`${w.projectId}:${w.branch}`)) ? 'uncommitted changes and ' : ''}what changed since your review first, then the smallest.`
                   : 'Agents keep working while you look away: new branches show up here as they come in.'}
               </p>
               {first && waitingRows.length > 0 && (

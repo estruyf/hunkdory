@@ -23,16 +23,17 @@ test('a branch that contains another inbox branch builds on it', () => {
   assert.deepEqual([...buildsOn(heads, unique)], [['perf/flicker-fixes', 'perf/flicker']]);
 });
 
-test('the suggested order: started, updated, small to large with failing CI later, too big last', () => {
+test('the suggested order: started, uncommitted and updated, small to large with failing CI later, too big last', () => {
   const list = [
     item('huge', { minutes: 900, steps: 290 }),
+    item('uncommitted', { minutes: 30, uncommitted: true }),
     item('small-failing', { minutes: 5, checks: [{ state: 'fail' }] }),
     item('medium', { minutes: 45 }),
     item('small', { minutes: 10 }),
     item('updated', { minutes: 60, updatedSinceReview: true }),
     item('started', { minutes: 300, review: { status: 'open', reviewedSteps: 2 } }),
   ];
-  assert.deepEqual(suggestedOrder(list).map((w) => w.name), ['started', 'updated', 'small', 'medium', 'small-failing', 'huge']);
+  assert.deepEqual(suggestedOrder(list).map((w) => w.name), ['started', 'uncommitted', 'updated', 'small', 'medium', 'small-failing', 'huge']);
 });
 
 test('durations read as minutes, then hours', () => {

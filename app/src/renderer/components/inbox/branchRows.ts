@@ -62,12 +62,14 @@ const inProgress = (w: InboxItem) => !!w.review && w.review.reviewedSteps > 0 &&
 function waitingRow(w: InboxItem, who: string): BranchRow {
   const failing = w.checks.some((c) => c.state === 'fail');
   const started = inProgress(w);
+  // Uncommitted work has no branch of its own to tell it by: say whose folder it's in.
+  const what = w.uncommitted ? `Uncommitted on ${w.branch}` : null;
   const left = started ? Math.max(1, Math.round(w.minutes * (1 - w.review!.reviewedSteps / Math.max(1, w.steps)))) : w.minutes;
   const parts = w.error
     ? []
     : started
-      ? [`${formatDuration(left)} left`, `step ${w.review!.reviewedSteps} of ${w.steps}`]
-      : [w.updatedSinceReview ? 'Updated since your review' : 'New', `about ${formatDuration(left)}${tooBig(w) ? ', too big for one sitting' : ''}`];
+      ? [...(what ? [what] : []), `${formatDuration(left)} left`, `step ${w.review!.reviewedSteps} of ${w.steps}`]
+      : [what ?? (w.updatedSinceReview ? 'Updated since your review' : 'New'), `about ${formatDuration(left)}${tooBig(w) ? ', too big for one sitting' : ''}`];
   parts.push(w.projectName);
   if (w.pr) parts.push(`PR #${w.pr.number}${w.pr.isDraft ? ' (draft)' : ''}`);
   return {

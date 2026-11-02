@@ -438,6 +438,8 @@ export interface InboxItem {
   buildsOn: { branch: string; pr: number | null } | null;
   /** You ignored it. Its size, steps and flags aren't worked out. */
   ignored: boolean;
+  /** Only the uncommitted work in the branch's folder, against its last commit. */
+  uncommitted: boolean;
   error?: string;
 }
 
