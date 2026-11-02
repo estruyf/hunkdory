@@ -9,6 +9,34 @@ each explain one part in plain words. Ask Claude about any step, or have it make
 a change. The changes nobody explained are pulled to the top. When you're done
 you merge, send it back to the agent, or discard it.
 
+![Hunkdory: a 23-file agent branch told as a story, a question answered by Claude, and a merge](docs/hunkdory.gif)
+
+## How it works
+
+1. **Inbox.** Hunkdory finds the branches your coding agents make in the repos
+   you use with Claude Code, open pull requests (Copilot's too), and
+   uncommitted changes. New ones show up as they come in.
+2. **The plan.** Opening one shows what was asked, what the change does, and
+   its steps sorted into three groups: *Decide* (calls only you can make, like
+   work you didn't ask for), *Read closely*, and *Skim* (the low-risk rest,
+   grouped by folder). A branch without a walkthrough gets one from Claude
+   Code, written from the diff, the commits and the agent's session.
+3. **The steps.** One step at a time, with the reason next to each change.
+   Comment on a line, ask Claude about the step, or ask it to change the code.
+4. **Finish.** Merge, open a pull request, post your review on GitHub, send it
+   back to the agent with your comments, or discard it.
+
+Hunkdory runs on your Mac. It only sends code to Claude when you let it write a
+walkthrough, ask a question, or send work back.
+
+## What you need
+
+- macOS and git.
+- [Claude Code](https://claude.com/claude-code) for walkthroughs, questions and
+  sending work back. Reviews still work without it, with less context.
+- The [GitHub CLI](https://cli.github.com), signed in with `gh auth login`, for
+  pull requests.
+
 ## Why "Hunkdory"
 
 "Hunky-dory" means that a situation is very satisfactory, pleasant, or going
@@ -23,7 +51,6 @@ really hunky-dory?
 - `app/`: the Electron + React app.
 - `tools/wtv/`: the `wtv` CLI that checks an agent's walkthrough against the
   real diff. The app uses it as its engine. See [its README](tools/wtv/README.md).
-- `design/`: the design screens.
 
 ## Run it
 
