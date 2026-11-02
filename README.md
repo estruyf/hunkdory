@@ -41,5 +41,35 @@ npm run open:mac    # open the packaged app
 ```
 
 The build signs with the Developer ID certificate in your keychain if it finds
-one. Set `CSC_IDENTITY_AUTO_DISCOVERY=false` to skip signing. Notarization is
-not set up.
+one. Set `CSC_IDENTITY_AUTO_DISCOVERY=false` to skip signing. It notarizes when
+`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` are set.
+
+## Releasing
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds,
+signs and notarizes the app, then attaches the `.dmg` and `.zip` to a GitHub
+release.
+
+1. Draft a release on GitHub with a tag like `v0.1.0`. The tag sets the app's
+   version, so `app/package.json` doesn't need a bump.
+2. Tick **Set as a pre-release** for early versions (`v0.1.0-beta.1`, or any
+   version you don't want to call stable). A release that isn't a pre-release
+   must be tagged on `main`.
+3. Publish it. The files are attached once the build and its checks pass. When
+   the release has no notes, GitHub's generated notes are filled in.
+
+To try it without publishing anything, run the workflow by hand (Actions →
+Release → Run workflow). The signed build is kept as a workflow artifact for
+a week.
+
+The workflow needs these repository secrets, the same ones Seshboard uses:
+
+| Secret | What it is |
+| --- | --- |
+| `MAC_CERTIFICATE_P12_BASE64` | The Developer ID Application certificate and its private key, exported as `.p12` and base64-encoded |
+| `MAC_CERTIFICATE_PASSWORD` | The `.p12`'s password |
+| `APPLE_ID` | The Apple ID used for notarization |
+| `APPLE_APP_SPECIFIC_PASSWORD` | An app-specific password for that Apple ID |
+| `APPLE_TEAM_ID` | The team ID of the certificate |
+
+Without them the run fails: nothing is ever attached unsigned.

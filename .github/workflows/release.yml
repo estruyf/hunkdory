@@ -1,0 +1,180 @@
+# Builds Hunkdory for a GitHub release and attaches it.
+#
+# Runs when a release is published on GitHub (for a tag like v0.1.0):
+# - mac: builds the app on an Apple Silicon runner, signs and notarises it, and checks both, giving the .dmg and
+#   the .zip (arm64 only, like electron-builder.yml);
+# - publish: only once the build passed its checks, attaches its files to the release. When the build fails,
+#   nothing is attached. Re-run the failed job to retry.
+# The version comes from the tag: the app's About panel and the file names say what the release says.
+#
+# Releases and pre-releases: a release (v1.2.3) must be tagged on main. A pre-release (v0.1.0-beta.1, or any
+# version marked as one) may come from any branch. Hunkdory has no in-app updater yet, so nobody is updated to
+# either: people download them from the releases page.
+#
+# Dry run: run this workflow by hand (Actions → Release → Run workflow). The app is built, signed, notarised and
+# checked, with a version like 0.1.0-dryrun.42, and kept as a workflow artifact for a week. Nothing is published.
+#
+# Nothing is ever attached unsigned: without the signing secrets the run fails. See README → Releasing.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    name: Build, sign and notarise the Mac app
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      DRY_RUN: ${{ github.event_name != 'release' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Version from the tag
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ "$DRY_RUN" == "true" ]; then
+            # A suffix no release carries, so a dry run's build is never mistaken for a release.
+            version="$(node -p "require('./app/package.json').version")-dryrun.$GITHUB_RUN_NUMBER"
+            echo "::notice::Dry run: building $version. Nothing is published."
+          else
+            version="${TAG#v}"
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::The release tag '$TAG' is not a version like v1.2.3."
+              exit 1
+            fi
+            if [[ "$version" == *-* ]] && [ "$PRERELEASE" != "true" ]; then
+              echo "::error::$TAG has a pre-release version; publish it as a pre-release."
+              exit 1
+            fi
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Check a release comes from main
+        if: env.DRY_RUN != 'true' && !github.event.release.prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          # "behind" or "identical": the tagged commit is in main's history. Asked of the API, since the checkout is shallow.
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$SHA" --jq .status 2>/dev/null || echo missing)
+          if [ "$status" != "behind" ] && [ "$status" != "identical" ]; then
+            echo "::error::$TAG must come from main, but its commit $SHA is not on main ($status). Tag a commit on main, or publish it as a pre-release."
+            exit 1
+          fi
+
+      # The root has no dependencies of its own; everything is in app/, and wtv has none.
+      - name: Install
+        run: npm ci --prefix app
+
+      # The tests make real git repositories and commits.
+      - name: Git identity for the tests
+        run: |
+          git config --global user.name "Hunkdory CI"
+          git config --global user.email "ci@hunkdory.invalid"
+
+      - name: Typecheck and unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Build, sign and notarise
+        env:
+          # Developer ID Application certificate and its private key, exported as .p12 and base64-encoded.
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          # Notarisation with an app-specific password (electron-builder notarises when these are set).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$CSC_LINK" ] || [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::error::Signing secrets are missing, and nothing is attached unsigned. See README → Releasing."
+            exit 1
+          fi
+          # The app's version (About panel, file names) is the release's.
+          (cd app && npm pkg set version="$VERSION")
+          # The publish job attaches the files; electron-builder must not try to on its own when it sees a tag.
+          npm --prefix app run dist:mac -- --publish never
+
+      - name: Check the signature and notarisation
+        run: |
+          app=app/dist/mac-arm64/Hunkdory.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          spctl -a -vv "$app" 2>&1 | tee spctl.txt
+          grep -q "source=Notarized Developer ID" spctl.txt
+
+      - name: Check the files
+        run: |
+          cd app/dist
+          ls -la
+          ls "Hunkdory-$VERSION-arm64.dmg" "Hunkdory-$VERSION-arm64-mac.zip" >/dev/null
+
+      - name: Keep the build for the publish job
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-mac
+          path: |
+            app/dist/*.dmg
+            app/dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Attach the build to the release
+    needs: [mac]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Only this job can write to the release; the build job, which runs the repo's code and dependencies, can't.
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Download the build
+        uses: actions/download-artifact@v7
+        with:
+          name: release-mac
+          path: dist
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          ls -la
+          gh release upload "$TAG" *.dmg *.zip --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Fill in empty release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.release.body }}
+        run: |
+          if [ -n "$(echo "$BODY" | tr -d '[:space:]')" ]; then
+            echo "The release has notes; leaving them."
+            exit 0
+          fi
+          # No changelog yet: GitHub's own notes, from the pull requests and commits since the previous release.
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body > notes.md
+          gh release edit "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"

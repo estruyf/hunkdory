@@ -35,6 +35,12 @@ mac:
     - target: zip
       arch: [arm64]
 
+  # Signing: electron-builder finds your "Developer ID Application" identity in the keychain on its own, or takes
+  # CSC_LINK in CI. Notarisation runs when APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID are set.
+  hardenedRuntime: true
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+
   # The zip; the dmg sets its own name below.
   artifactName: ${productName}-${version}-${arch}-mac.${ext}
 
