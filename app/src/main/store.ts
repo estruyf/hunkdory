@@ -11,7 +11,7 @@ interface Data {
   settings?: Partial<AppSettings>;
 }
 
-const DEFAULT_SETTINGS: AppSettings = { theme: 'system', acpAgents: [] };
+const DEFAULT_SETTINGS: AppSettings = { theme: 'system', editor: null, acpAgents: [] };
 
 const empty = (): Data => ({ version: 1, projects: [], reviews: {} });
 

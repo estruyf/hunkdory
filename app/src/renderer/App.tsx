@@ -17,6 +17,7 @@ import { PlanScreen } from './screens/Plan.tsx';
 import { Settings } from './screens/Settings.tsx';
 import { rememberReview } from './components/ui.tsx';
 import type { FinishResult, ReviewData, ReviewState } from '../shared/types.ts';
+import type { LineRef } from './components/diff.tsx';
 
 export type Route =
   | { name: 'welcome' }
@@ -27,7 +28,7 @@ export type Route =
   | { name: 'plan'; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }
   // `decision` is set while you go through the decisions: the step shown is the one the decision is about.
   // `group` shows a whole skim folder on one page.
-  | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; group?: string; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number }
+  | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; group?: string; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number; focus?: LineRef }
   | { name: 'finish'; projectId: string; branch: string }
   | { name: 'done'; projectId: string; branch: string; result: FinishResult; stack?: ReviewData['stack'] };
 
@@ -188,7 +189,7 @@ function view(route: Route, go: Go, hasProjects: boolean, inbox: InboxData) {
       return <PlanScreen key={`${route.projectId}:${route.branch}`} go={go} projectId={route.projectId} branch={route.branch} preloaded={route.preloaded} />;
     case 'review':
       // A new `reload` remounts the review, so it reads the branch again.
-      return <Review key={`${route.projectId}:${route.branch}:${route.reload ?? ''}`} go={go} projectId={route.projectId} branch={route.branch} stepKey={route.stepKey} decision={route.decision} group={route.group} preloaded={route.preloaded} />;
+      return <Review key={`${route.projectId}:${route.branch}:${route.reload ?? ''}`} go={go} projectId={route.projectId} branch={route.branch} stepKey={route.stepKey} decision={route.decision} group={route.group} focus={route.focus} preloaded={route.preloaded} />;
     case 'finish':
       return <Finish go={go} projectId={route.projectId} branch={route.branch} />;
     case 'done':

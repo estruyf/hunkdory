@@ -1,7 +1,7 @@
 // The step walkthrough: one step at a time, read top to bottom, with one clear next action.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { ArrowLeft, Check, Columns2, Rows2 } from 'lucide-react';
+import { ArrowLeft, Check, Columns2, MessageSquare, Rows2 } from 'lucide-react';
 import { Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, useMediaQuery, usePref } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
@@ -12,12 +12,14 @@ import { Pill } from '../components/ui/Pill.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { matches } from '../lib/shortcuts.ts';
-import { DiffHunk, type DiffMode } from '../components/diff.tsx';
-import { ChecksCard, PrLink, StackBar } from '../components/github.tsx';
+import { DiffHunk, isLine, type Anchor, type DiffMode, type LineRef } from '../components/diff.tsx';
+import { GitHubThreadCard, askDraft } from '../components/githubThreads.tsx';
+import { placeThreads } from '../../shared/threads.ts';
+import { ChecksCard, PrLink, PushToPrNotice, StackBar } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { OUTSIDE_HINT, isReviewed } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, isCareful, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
-import type { CheckAnswer, ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
+import type { CheckAnswer, GitHubThread, ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 import { answerLine } from '../../shared/comments.ts';
 import { AskPanel, CheckFollowUp, Thread } from '../components/ask.tsx';
 import { Markdown } from '../components/markdown.tsx';
@@ -26,7 +28,7 @@ import { EmptyStepNotice, WalkthroughBar } from '../components/walkthrough.tsx';
 import { AgentTests, AskedFor, CommentBox, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
 
-export function Walkthrough({ go, data, initialState, stepKey, decision, group }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string }) {
+export function Walkthrough({ go, data, initialState, stepKey, decision, group, focus }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string; focus?: LineRef }) {
   const [state, setState] = useState(initialState);
   const latestState = useRef(state);
   latestState.current = state;
@@ -44,6 +46,15 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   const selKey = dec ? (stepKey && dec.stepKeys.includes(stepKey) ? stepKey : dec.stepKeys[0]) : (stepKey ?? startKey);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  // What the Ask box opens with, from a GitHub comment; `n` opens a fresh box for each one.
+  const [draft, setDraft] = useState<{ text: string; n: number } | null>(null);
+  // Checking the PR out gives a change somewhere to happen. The code is the same, so the branch isn't read again.
+  const [checkedOut, setCheckedOut] = useState<string | null>(null);
+  const askData = useMemo<ReviewData>(() => (checkedOut ? { ...data, ask: { ...data.ask, change: { by: 'fresh', where: checkedOut } } } : data), [data, checkedOut]);
+  const checkout = async () => setCheckedOut(await window.api.checkoutPullRequest(data.projectId, data.branch));
+  // What people said on GitHub, kept here: replying or resolving changes it without reading the branch again.
+  const [feedback, setFeedback] = useState(data.github);
+  const placed = useMemo(() => placeThreads(feedback?.threads ?? [], data.hunks), [feedback, data.hunks]);
   // The question you just answered "Needs a change" or "Not sure", so its box takes the focus.
   const [answered, setAnswered] = useState<{ stepKey: string; index: number } | null>(null);
   const [commenting, setCommenting] = useState(false);
@@ -89,15 +100,16 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
     }
   };
 
-  const at = (to: { stepKey?: string; decision?: string; group?: string }) => go({ name: 'review', projectId: data.projectId, branch: data.branch, ...to });
+  const at = (to: { stepKey?: string; decision?: string; group?: string; focus?: LineRef }) => go({ name: 'review', projectId: data.projectId, branch: data.branch, ...to });
   const select = (key: string) => at({ stepKey: key });
   const decide = (d: PlanDecision) => at({ decision: d.id, stepKey: d.stepKeys[0] });
   const toPlan = () => go({ name: 'plan', projectId: data.projectId, branch: data.branch });
-  const search = useCodeSearch(data, (key) => select(key));
+  const search = useCodeSearch(data, (key, focus) => at({ stepKey: key, focus }));
 
   // A new place starts with the comment and question boxes closed.
   useEffect(() => {
     setAsking(false);
+    setDraft(null);
     setCommenting(false);
   }, [selKey, decision]);
 
@@ -109,7 +121,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   };
   const nextDecision = () => (plan.decisions[decPos + 1] ? decide(plan.decisions[decPos + 1]) : pastDecisions());
   const prevDecision = () => (decPos > 0 ? decide(plan.decisions[decPos - 1]) : toPlan());
-  const keys = useRef({ looksGood: () => {}, groupDone: () => {} });
+  const keys = useRef({ looksGood: () => { }, groupDone: () => { } });
 
   // The review's keys, from the registry: j and k move, r says it looks good (or gives a decision its main
   // answer), n needs a fix, c comments, a asks Claude, s and w change the diff, Esc goes back to the plan.
@@ -148,7 +160,22 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   };
   const openAsk = () => {
     setAsking(true);
-    setTimeout(() => (document.querySelector('[aria-label="Your question or change"]') as HTMLElement | null)?.focus(), 0);
+    setTimeout(() => {
+      const box = document.querySelector('[aria-label="Your question or change"]') as HTMLTextAreaElement | null;
+      box?.focus();
+      box?.setSelectionRange(box.value.length, box.value.length);
+    }, 0);
+  };
+  const askAbout = (t: GitHubThread, kind: 'question' | 'change') => {
+    setDraft({ text: askDraft(t, kind), n: Date.now() });
+    openAsk();
+  };
+  /** The GitHub threads on one line of a hunk. Asking about one needs a step: the skim page has none. */
+  const threadsAt = (hunkId: string, ask: boolean) => (a: Anchor) => {
+    const list = (placed.byHunk.get(hunkId) ?? []).filter((t) => t.side === a.side && t.line === a.line);
+    return list.length
+      ? list.map((t) => <GitHubThreadCard key={t.id} data={askData} thread={t} onFeedback={(f) => f && setFeedback(f)} onAsk={ask ? (kind) => askAbout(t, kind) : undefined} />)
+      : null;
   };
 
   const careful = !!cur && isCareful(cur);
@@ -192,10 +219,10 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   const here = skimGroup
     ? `Skim · ${skimGroup.name}`
     : dec
-    ? `Decision ${decPos + 1} of ${plan.decisions.length}`
-    : cur
-      ? `${careful ? 'Read closely' : 'Skim'} · step ${phaseList.findIndex((s) => s.key === cur.key) + 1} of ${phaseList.length}`
-      : '';
+      ? `Decision ${decPos + 1} of ${plan.decisions.length}`
+      : cur
+        ? `${careful ? 'Read closely' : 'Skim'} · step ${phaseList.findIndex((s) => s.key === cur.key) + 1} of ${phaseList.length}`
+        : '';
 
   const allDone = steps.every((x) => isReviewed(x, state.reviewed)) && plan.decisions.every((d) => state.settled?.[d.id]);
   const nowPhase = phases.find((p) => p.now);
@@ -324,7 +351,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
       else go({ name: 'finish', projectId: data.projectId, branch: data.branch });
     });
     return shell(
-      <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-7">
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-7">
         <div className="flex flex-col gap-1.5">
           <span className="text-meta text-faint">
             Skim · {plural(groupSteps.length, 'low-risk step')} · {plural(skimGroup.files, 'file')}
@@ -354,6 +381,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
                   ignoreSpace={ignoreSpace}
                   comments={state.comments.filter((c) => c.hunkId === id && c.line)}
                   onComment={(a, body, cid) => patch({ type: 'line-comment', id: cid, stepKey: x.key, hunkId: id, path: h.path, line: a.line, side: a.side, body })}
+                  extraAt={threadsAt(id, false)}
                   loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
                   noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
                 />
@@ -458,6 +486,11 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
 
 
   const changedSince = since?.byStep[cur.key];
+  const stepThreads = cur.hunkIds.flatMap((id) => placed.byHunk.get(id) ?? []).filter((t) => !t.resolved).length;
+  // Where search sent you: the hunk with that line, else the file's first hunk in this step.
+  const inFile = (id: string) => !!focus && (data.hunks[id]?.path === focus.path || data.hunks[id]?.oldPath === focus.path);
+  const hasLine = (id: string) => focus?.line != null && !!data.hunks[id]?.lines.some((l) => isLine(l, focus.line!, focus.side));
+  const focusIn = focus ? (cur.hunkIds.find((id) => inFile(id) && hasLine(id)) ?? cur.hunkIds.find(inFile)) : undefined;
   const aside = contextShown && (
     <aside aria-label="Context" className="flex w-80 shrink-0 flex-col gap-5 overflow-y-auto border-l border-border bg-sidebar px-4 py-5">
       <section className="flex flex-col gap-1.5">
@@ -481,13 +514,18 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
   );
 
   return shell(
-    <main className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 py-7">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-6 py-7">
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <RiskPill risk={cur.risk} />
           {cur.outsideTask && <Pill data-tooltip={OUTSIDE_HINT}>Outside your request</Pill>}
           {done && <Pill tone="muted">Reviewed</Pill>}
           {changedSince && changedSince !== 'same' && <Pill tone="link">{changedSince === 'new' ? 'New' : 'Changed'} since your last review</Pill>}
+          {stepThreads > 0 && (
+            <Pill tone="link" icon={<MessageSquare size={12} aria-hidden />} data-tooltip="Open review threads on GitHub, shown at their lines below">
+              {plural(stepThreads, 'comment')} on GitHub
+            </Pill>
+          )}
         </div>
         <h1 className="text-hero font-semibold break-words">{cur.title}</h1>
         <p className={`text-body select-text ${cur.why ? 'text-text' : 'text-muted'}`}>{cur.why || whyFallback(cur, data)}</p>
@@ -590,10 +628,12 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
               ignoreSpace={ignoreSpace}
               comments={state.comments.filter((c) => c.hunkId === id && c.line)}
               onComment={lineComment(id, h.path)}
+              extraAt={threadsAt(id, true)}
               loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
               collapsed={since?.reviewedBefore.has(id) ? 'You reviewed this exact change last time.' : null}
               badge={isNew ? <Pill tone="link">New since your last review</Pill> : null}
               noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
+              focus={id === focusIn ? focus : undefined}
             />
           </div>
         );
@@ -653,14 +693,18 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group }
 
       {(asking || stepExchanges.length > 0) && (
         <AskPanel
-          key={`ask:${cur.key}`}
-          data={data}
+          key={`ask:${cur.key}:${draft?.n ?? ''}`}
+          data={askData}
           step={cur}
           exchanges={stepExchanges}
           onShowChanges={showChanges}
           loadedAt={loadedAt}
+          draft={draft?.text}
+          onCheckout={checkout}
         />
       )}
+
+      <PushToPrNotice data={data} onPushed={showChanges} />
 
       {(commenting || ownComment) && <CommentBox key={`${cur.key}:${commentKey}`} initial={stepComment} onSave={(body) => patch({ type: 'comment', stepKey: cur.key, body })} />}
       {error && <Notice tone="error">{error}</Notice>}

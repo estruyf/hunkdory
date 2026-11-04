@@ -113,7 +113,9 @@ export function askAbility(session: SessionInfo | null, branch: Pick<BranchInfo,
   if (branch.checkout.kind !== 'none') return { question: { by: 'fresh' }, change: { by: 'fresh', where: branch.checkout.path } };
   return {
     question: { by: 'fresh' },
-    change: { by: null, reason: `${branch.pr ? "The pull request's branch" : 'This branch'} isn't checked out on this Mac, so there is nowhere for Claude to change it. Check it out in a folder or worktree first.` },
+    change: branch.pr && !branch.pr.fork
+      ? { by: null, reason: "The pull request's branch isn't checked out on this Mac, so there is nowhere for Claude to change it yet. Hunkdory can check it out in a worktree.", checkout: true }
+      : { by: null, reason: `${branch.pr ? "The pull request's branch comes from a fork and" : 'This branch'} isn't checked out on this Mac, so there is nowhere for Claude to change it. Check it out in a folder or worktree first.` },
   };
 }
 

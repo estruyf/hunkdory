@@ -4,7 +4,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { shellEnv, which } from './shellEnv.ts';
 import * as g from './git.ts';
-import type { CheckItem, GitHubEvent, PrReview, PullRequest } from '../shared/types.ts';
+import type { CheckItem, GitHubEvent, GitHubFeedback, GitHubReview, GitHubThread, PrReview, PullRequest } from '../shared/types.ts';
 
 const run = promisify(execFile);
 
@@ -117,6 +117,7 @@ export interface RawPullRequest {
   // Users and bots by login; a team has its slug (as `slug` or `login`, depending on the gh version) and organization.
   reviewRequests?: { __typename?: string; login?: string; slug?: string; name?: string; organization?: { login?: string } }[] | null;
   latestReviews?: { author: { login: string } | null; state: string }[] | null;
+  isCrossRepository?: boolean;
 }
 
 const REVIEW_STATES = new Set<string>(['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED']);
@@ -137,6 +138,7 @@ export function toPullRequest(p: RawPullRequest): PullRequest {
     body: p.body ?? '',
     updatedAt: p.updatedAt,
     copilot: isCopilot(login),
+    fork: !!p.isCrossRepository,
     checks: parseChecks(p.statusCheckRollup),
     assignees: (p.assignees ?? []).map((a) => a.login).filter(Boolean),
     requestedReviewers: (p.reviewRequests ?? []).map(reviewerName).filter((x): x is string => !!x),
@@ -193,12 +195,32 @@ export async function fetchPullRequests(root: string, repo: string, prs: PullReq
   const specs = fetchRefspecs(prs, have);
   if (!specs.length) return;
   const remote = await remoteFor(root, repo);
-  const env = await shellEnv();
   try {
-    await run('git', ['fetch', '--no-tags', '--quiet', remote, ...specs], { cwd: root, env, maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
+    await toGitHub(root, repo, (to) => ['fetch', '--no-tags', '--quiet', to, ...specs]);
   } catch (e) {
     const err = e as { stderr?: string; killed?: boolean; message: string };
     throw fetchError(err.stderr || err.message, remote, !!err.killed);
+  }
+}
+
+/** git turned away at sign-in: an SSH key GitHub doesn't know, an agent without keys, HTTPS without a credential. Pure, so it can be tested. */
+export const signInFailed = (stderr: string) => /Permission denied \(publickey\)|Host key verification failed|Authentication failed|could not read Username|terminal prompts disabled|Invalid username or password/i.test(stderr);
+
+/**
+ * Runs a git command that talks to GitHub, through the remote as you set it up. When that can't sign in, it goes
+ * again over HTTPS with the GitHub CLI's sign-in, which Hunkdory needs anyway: your git config stays as it is.
+ * `args` gets where to talk to: the remote's name, or the HTTPS URL.
+ */
+async function toGitHub(root: string, repo: string, args: (to: string) => string[]): Promise<void> {
+  const env = await shellEnv();
+  const opts = { cwd: root, env, maxBuffer: 64 * 1024 * 1024, timeout: 120_000 };
+  try {
+    await run('git', args(await remoteFor(root, repo)), opts);
+  } catch (e) {
+    if (!signInFailed(String((e as { stderr?: string }).stderr ?? ''))) throw e;
+    const { bin } = await ghBin();
+    // An empty helper first drops the ones from your config, so only gh answers.
+    await run('git', ['-c', 'credential.helper=', '-c', `credential.helper=!"${bin}" auth git-credential`, ...args(`https://github.com/${repo}.git`)], opts);
   }
 }
 
@@ -215,6 +237,91 @@ export function fetchError(stderr: string, remote: string, timedOut = false): Er
   const lines = stderr.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('Command failed:') && !l.startsWith('+refs/'));
   const line = lines.find((l) => /^(fatal|error):/.test(l)) ?? lines[0];
   return why(line ? line.replace(/^(fatal|error):\s*/, '') : `git fetch from ${remote} failed.`);
+}
+
+/** A GraphQL call. GitHub answers a bad query with a 200 and `errors`: those throw too. */
+async function graphql(cwd: string, query: string, variables: Record<string, unknown>): Promise<any> {
+  const res = await ghApi('POST', 'graphql', cwd, { query, variables });
+  const errors = (res?.errors ?? []) as { message?: string }[];
+  if (errors.length) throw new Error(errors.map((e) => e.message).filter(Boolean).join('; ') || 'GitHub could not answer');
+  return res.data;
+}
+
+const FEEDBACK = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviews(last: 50) { nodes { author { login } state body submittedAt url } }
+      reviewThreads(first: 100) {
+        nodes {
+          id isResolved isOutdated path line startLine diffSide
+          comments(first: 50) { nodes { id author { login } body createdAt url } }
+        }
+      }
+    }
+  }
+}`;
+
+export interface RawFeedback {
+  reviews: { nodes: { author: { login: string } | null; state: string; body: string; submittedAt: string | null; url: string }[] };
+  reviewThreads: {
+    nodes: {
+      id: string;
+      isResolved: boolean;
+      isOutdated: boolean;
+      path: string;
+      line: number | null;
+      startLine: number | null;
+      diffSide: 'LEFT' | 'RIGHT';
+      comments: { nodes: { id: string; author: { login: string } | null; body: string; createdAt: string; url: string }[] };
+    }[];
+  };
+}
+
+/** GitHub's answer, as Hunkdory shows it. A review with no words of its own only holds line comments: those show as threads. Pure, so it can be tested. */
+export function toFeedback(raw: RawFeedback): GitHubFeedback {
+  const reviews: GitHubReview[] = raw.reviews.nodes
+    .filter((r) => r.state !== 'PENDING' && (r.body.trim() || r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED'))
+    .map((r) => ({ author: r.author?.login ?? 'ghost', state: r.state as GitHubReview['state'], body: r.body, at: r.submittedAt ?? '', url: r.url }));
+  const threads: GitHubThread[] = raw.reviewThreads.nodes
+    .filter((t) => t.comments.nodes.length)
+    .map((t) => ({
+      id: t.id,
+      path: t.path,
+      line: t.isOutdated ? null : t.line,
+      startLine: t.isOutdated ? null : t.startLine,
+      side: t.diffSide,
+      resolved: t.isResolved,
+      outdated: t.isOutdated,
+      comments: t.comments.nodes.map((c) => ({ id: c.id, author: c.author?.login ?? 'ghost', body: c.body, at: c.createdAt, url: c.url })),
+    }));
+  return { reviews, threads };
+}
+
+const feedbackCache = new Map<string, { at: number; feedback: GitHubFeedback }>();
+
+/** Reviews and review threads on a pull request. Read again after a minute, or right after Hunkdory changed one. */
+export async function prFeedback(root: string, repo: string, pr: number, maxAgeMs = 60_000): Promise<GitHubFeedback> {
+  const key = `${repo}#${pr}`;
+  const hit = feedbackCache.get(key);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.feedback;
+  const [owner, name] = repo.split('/');
+  const data = await graphql(root, FEEDBACK, { owner, name, number: pr });
+  const feedback = toFeedback(data.repository.pullRequest);
+  feedbackCache.set(key, { at: Date.now(), feedback });
+  return feedback;
+}
+
+/** Replies in a review thread, as you. */
+export async function replyToThread(root: string, repo: string, pr: number, threadId: string, body: string): Promise<void> {
+  await graphql(root, 'mutation($id: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $id, body: $body }) { comment { id } } }', { id: threadId, body });
+  feedbackCache.delete(`${repo}#${pr}`);
+}
+
+/** Resolves a review thread, or opens it again. */
+export async function resolveThread(root: string, repo: string, pr: number, threadId: string, resolved: boolean): Promise<void> {
+  const op = resolved ? 'resolveReviewThread' : 'unresolveReviewThread';
+  await graphql(root, `mutation($id: ID!) { ${op}(input: { threadId: $id }) { thread { id } } }`, { id: threadId });
+  feedbackCache.delete(`${repo}#${pr}`);
 }
 
 /** Forget cached pull requests, after Hunkdory changed one. */
@@ -354,13 +461,15 @@ export async function login(root: string): Promise<string> {
 /** Pushes a local branch to the remote for `repo`, and sets it as the branch's upstream. */
 export async function pushBranch(root: string, repo: string, branch: string): Promise<void> {
   const remote = await remoteFor(root, repo);
-  const env = await shellEnv();
   try {
-    await run('git', ['push', '--set-upstream', remote, `refs/heads/${branch}:refs/heads/${branch}`], { cwd: root, env, timeout: 120_000 });
+    await toGitHub(root, repo, (to) => ['push', to, `refs/heads/${branch}:refs/heads/${branch}`]);
   } catch (e) {
     const msg = String((e as { stderr?: string }).stderr ?? (e as Error).message).trim().split('\n').filter(Boolean).slice(-2).join(' ');
     throw new Error(`Couldn't push ${branch}: ${msg}`);
   }
+  // The branch follows its copy on GitHub, set by hand: a push over the HTTPS fallback would set a URL as its remote.
+  await g.git(['config', `branch.${branch}.remote`, remote], root);
+  await g.git(['config', `branch.${branch}.merge`, `refs/heads/${branch}`], root);
 }
 
 /** Opens a pull request. Returns its number and URL. */

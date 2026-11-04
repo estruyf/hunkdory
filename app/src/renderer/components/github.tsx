@@ -2,7 +2,10 @@ import { Check, Eye, GitMerge, MessageSquare, RefreshCw, Undo2, X, type LucideIc
 import { useState } from 'react';
 import type { Go } from '../App.tsx';
 import type { CheckItem, ReviewData, StackEntry } from '../../shared/types.ts';
-import { cleanError } from './ui.tsx';
+import { cleanError, plural } from './ui.tsx';
+import { FIELD } from './ui/field.ts';
+import { OpenInEditor } from './editor.tsx';
+import { Button } from './ui/Button.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { Pill } from './ui/Pill.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
@@ -155,5 +158,57 @@ function StackPill({ entry: e, onClick }: { entry: StackEntry; onClick(): void }
       #{e.number}
       {st ? ` · ${st.label}` : ''}
     </Pill>
+  );
+}
+
+/**
+ * Edits on this Mac in a pull request's checkout, such as a change Claude made: commit them and push them to the
+ * PR, so they're part of it on GitHub. Never a force push.
+ */
+export function PushToPrNotice({ data, onPushed }: { data: ReviewData; onPushed: () => void }) {
+  const [message, setMessage] = useState('Address review feedback');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!data.pr || (!data.dirty && !data.ahead)) return null;
+  const push = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await window.api.pushToPullRequest(data.projectId, data.branch, message);
+      onPushed();
+    } catch (e) {
+      setError(cleanError(e));
+      setBusy(false);
+    }
+  };
+  // Edits not committed yet, commits not pushed yet, or both.
+  const what = [data.ahead && plural(data.ahead, 'commit'), data.dirty && `${plural(data.dirtyFiles, 'changed file')}`].filter(Boolean).join(' and ');
+  const one = data.ahead + data.dirtyFiles === 1;
+  return (
+    // The commit row sits under the message: a field and two buttons don't fit a notice's actions column.
+    <Notice tone="info" role="note">
+      <strong className="font-semibold">
+        {what} on this Mac {one ? "isn't" : "aren't"} on PR #{data.pr.number} yet.
+      </strong>{' '}
+      {one ? "It's" : "They're"} part of this review. {data.dirty ? 'Commit and push' : 'Push'} to make {one ? 'it' : 'them'} part of the PR on GitHub.
+      <span className="mt-2 flex flex-wrap items-center gap-2">
+        {data.dirty && (
+          <input
+            aria-label="Commit message"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && message.trim() && !busy) push();
+            }}
+            className={`${FIELD} min-w-0 flex-[1_1_220px]`}
+          />
+        )}
+        <Button variant="primary" disabled={busy || (data.dirty && !message.trim())} aria-busy={busy} onClick={push}>
+          {busy ? 'Pushing…' : `${data.dirty ? 'Commit and push' : 'Push'} to PR #${data.pr.number}`}
+        </Button>
+        <OpenInEditor data={data} size="md" />
+      </span>
+      {error && <span className="mt-1.5 block whitespace-pre-wrap text-error">{error}</span>}
+    </Notice>
   );
 }

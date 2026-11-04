@@ -173,7 +173,7 @@ export class Actions {
     // A comment or an approval without anything to say still says you reviewed it; asking for changes has to say which.
     if (event === 'REQUEST_CHANGES' && !comments.length && !req.note.trim() && !req.dropStepKeys.length) throw new Error('Say what needs to change: add a comment or a review summary.');
     // Line numbers only fit GitHub's diff when you reviewed exactly the PR's head.
-    const inline = data.headSha === pr.headRefOid && !data.dirty;
+    const inline = data.headSha === pr.headRefOid && !data.dirty && !data.ahead;
     const review = githubReview(data, state, req, { inline, copilot: toCopilot, reviewer: data.githubLogin });
     const posted = await gh.postReview(project.path, repo, pr.number, { commitId: pr.headRefOid, body: review.body, event, comments: review.comments }).catch((e) => {
       if (event === 'APPROVE' && gh.isOwnPrError(e)) throw new Error(`GitHub doesn’t let you approve your own PR. Post your review as a comment, or approve and merge it without an approval.`);

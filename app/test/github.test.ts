@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { apiErrorText, baseRef, fetchError, fetchRefspecs, foldComments, isCopilot, isOwnPrError, parseChecks, prRef, readWalkthroughComment, stackOf, toPullRequest, walkthroughComment, type RawPullRequest } from '../src/main/github.ts';
+import { apiErrorText, baseRef, fetchError, fetchRefspecs, signInFailed, foldComments, isCopilot, isOwnPrError, parseChecks, prRef, readWalkthroughComment, stackOf, toPullRequest, walkthroughComment, type RawPullRequest } from '../src/main/github.ts';
 import type { PullRequest } from '../src/shared/types.ts';
 
 const pr = (number: number, headRefOid: string, baseRefName = 'develop/5.5'): PullRequest => ({
@@ -16,6 +16,7 @@ const pr = (number: number, headRefOid: string, baseRefName = 'develop/5.5'): Pu
   body: '',
   updatedAt: '2026-10-28T10:00:00Z',
   copilot: false,
+  fork: false,
   checks: [],
   assignees: [],
   requestedReviewers: [],
@@ -167,4 +168,11 @@ test('a failed fetch says why in a sentence, without the command and its refspec
   assert.match(fetchError('', 'origin', true).message, /longer than 2 minutes/);
   // Anything else: git's own reason, not the command line.
   assert.equal(fetchError('Command failed: git fetch origin +refs/x:refs/y\nfatal: refusing to fetch into branch', 'origin').message, "Couldn't fetch the latest pull requests: refusing to fetch into branch");
+});
+
+test('a push or fetch turned away at sign-in goes again through gh; other failures do not', () => {
+  assert.ok(signInFailed('git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.'));
+  assert.ok(signInFailed("fatal: could not read Username for 'https://github.com': terminal prompts disabled"));
+  assert.ok(!signInFailed('! [rejected] feat/x -> feat/x (non-fast-forward)'));
+  assert.ok(!signInFailed('ssh: Could not resolve host: github.com'));
 });

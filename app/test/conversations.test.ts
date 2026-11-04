@@ -101,6 +101,16 @@ test('who can answer and change depends on the session and the checkout', () => 
   assert.match((none.change as { reason: string }).reason, /isn't checked out on this Mac/);
 });
 
+test('a pull request with nowhere to change it can be checked out by Hunkdory, unless it comes from a fork', () => {
+  const pr = { fork: false } as NonNullable<Parameters<typeof askAbility>[1]['pr']>;
+  const ours = askAbility(null, { checkout: { kind: 'none' }, pr });
+  assert.equal(ours.change.by, null);
+  assert.equal((ours.change as { checkout?: boolean }).checkout, true);
+  const fork = askAbility(null, { checkout: { kind: 'none' }, pr: { ...pr, fork: true } });
+  assert.equal((fork.change as { checkout?: boolean }).checkout, undefined);
+  assert.match((fork.change as { reason: string }).reason, /fork/);
+});
+
 test('a Manual project has no assistant to ask, whatever the session or checkout', () => {
   const dir = mkdtempSync(`${tmpdir()}/reviewer-`);
   const session = { cwd: dir } as SessionInfo;

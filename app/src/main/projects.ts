@@ -1,7 +1,7 @@
 // Projects, their agent branches, and the review data for one branch.
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import createWtvWorker from './wtv-worker.ts?nodeWorker';
@@ -18,7 +18,7 @@ import type { GeneratedWalkthroughs } from './writer.ts';
 import type { Summaries, Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
 import { assistantFor } from './assistants/index.ts';
-import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, GitHubFeedback, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -495,6 +495,10 @@ export class Projects {
     }
     if (!filter) scan.pullRequests = prs.length;
     const matched = matchSessions(sessions, { exists: () => true, exclude, probable });
+    // A PR's branch checked out on this Mac, at the PR's commit or with commits made here on top, is where Claude can
+    // change it and Hunkdory pushes from. One behind the PR isn't the PR.
+    const trees = await g.worktrees(root).catch(() => [] as g.Worktree[]);
+    const onTop = async (t: g.Worktree, pr: PullRequest) => t.head === pr.headRefOid || (await g.tryGit(['merge-base', '--is-ancestor', pr.headRefOid, t.head], root)) !== null;
     const out: Discovered[] = [];
     for (const pr of prs) {
       if (only && pr.headRefName !== only) continue;
@@ -504,11 +508,14 @@ export class Projects {
       if (!(await g.refExists(root, headRef)) || !(await g.refExists(root, baseRef))) continue;
       if (!fetched && (await g.tryGit(['rev-parse', headRef], root))?.trim() !== pr.headRefOid) continue;
       const match = matched.get(pr.headRefName) ?? null;
+      const named = pr.fork ? undefined : trees.find((t) => t.branch === pr.headRefName);
+      const tree = named && (await onTop(named, pr)) ? named : undefined;
+      const ahead = tree && tree.head !== pr.headRefOid ? Number((await g.tryGit(['rev-list', '--count', `${pr.headRefOid}..${tree.head}`], root))?.trim() || 0) : 0;
       out.push({
         branch: {
           projectId: project.id,
           name: pr.headRefName,
-          checkout: { kind: 'none' },
+          checkout: tree ? { kind: tree.path === root ? 'main' : 'worktree', path: tree.path } : { kind: 'none' },
           baseRef,
           baseName: chosen ?? pr.baseRefName,
           baseChosen: !!chosen,
@@ -516,7 +523,8 @@ export class Projects {
           headSha: pr.headRefOid,
           pr,
           tracked: false,
-          dirtyFiles: 0,
+          dirtyFiles: tree ? (await g.dirtyFiles(tree.path)).length : 0,
+          ahead,
           uncommitted: false,
           sessionIds: match?.sessions.map((s) => s.id) ?? [],
         },
@@ -609,6 +617,87 @@ export class Projects {
   async runContext(projectId: string, branch: string) {
     const { project, d } = await this.find(projectId, branch);
     return this.locate(project, d);
+  }
+
+  /** Reviews and line comments on the branch's PR. Null when there's none, or GitHub can't be read: the review goes on without. */
+  private async feedback(project: Project, d: Discovered): Promise<GitHubFeedback | null> {
+    const pr = d.branch.pr;
+    if (!pr || !project.github) return null;
+    return gh.prFeedback(project.path, project.github, pr.number).catch(() => null);
+  }
+
+  /** Replies to, or resolves, a review thread on the branch's PR. Returns what's on the PR now. */
+  async onGitHub(projectId: string, branch: string, threadId: string, act: { reply: string } | { resolved: boolean }): Promise<GitHubFeedback | null> {
+    const { project, d } = await this.find(projectId, branch);
+    const pr = d.branch.pr;
+    if (!pr || !project.github) throw new Error('This branch has no pull request on GitHub.');
+    if ('reply' in act) await gh.replyToThread(project.path, project.github, pr.number, threadId, act.reply);
+    else await gh.resolveThread(project.path, project.github, pr.number, threadId, act.resolved);
+    return this.feedback(project, d);
+  }
+
+  /**
+   * Checks a pull request's branch out in a worktree next to the project's folder, tracking the PR's branch on
+   * GitHub, so Claude has somewhere to change it and Hunkdory can push the change. A local branch of the same name
+   * is used when the PR only adds to it; one with commits the PR doesn't have is left alone.
+   */
+  async checkoutPullRequest(projectId: string, branch: string): Promise<string> {
+    const { project, d } = await this.find(projectId, branch);
+    const pr = d.branch.pr;
+    if (!pr || !project.github) throw new Error('This branch has no pull request on GitHub.');
+    if (d.branch.checkout.kind !== 'none') return d.branch.checkout.path;
+    if (pr.fork) throw new Error(`PR #${pr.number} comes from a fork, so Hunkdory can't push to it. Check it out yourself with "gh pr checkout ${pr.number}".`);
+    const root = project.path;
+    const name = pr.headRefName;
+    const head = gh.prRef(pr.number);
+    const done = (path: string) => {
+      // The review read before has nowhere to change it.
+      this.cache.delete(`${project.id}::${name}`);
+      return path;
+    };
+    // Already checked out, behind the PR: bring it up to date when nothing local is in the way.
+    const there = (await g.worktrees(root)).find((t) => t.branch === name);
+    if (there) {
+      if ((await g.dirtyFiles(there.path)).length) throw new Error(`${name} is checked out in ${tilde(there.path)} with uncommitted changes, and it's behind PR #${pr.number}. Commit or stash them there first.`);
+      if ((await g.tryGit(['merge', '--ff-only', '--quiet', head], there.path)) === null) throw new Error(`${name} in ${tilde(there.path)} has commits PR #${pr.number} doesn't. Push or reset them first.`);
+      return done(there.path);
+    }
+    const local = await g.tryGit(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], root);
+    if (local) {
+      if ((await g.tryGit(['merge-base', '--is-ancestor', `refs/heads/${name}`, head], root)) === null) throw new Error(`Your local ${name} has commits PR #${pr.number} doesn't. Push or reset it first.`);
+      await g.git(['branch', '-f', name, head], root);
+    }
+    const path = join(dirname(root), `${basename(root)}-worktrees`, name.replace(/[/\\]/g, '-'));
+    if (existsSync(path)) throw new Error(`${tilde(path)} already exists. Move it aside first.`);
+    await g.git(local ? ['worktree', 'add', '--quiet', path, name] : ['worktree', 'add', '--quiet', '-b', name, path, head], root);
+    // Pushes go to the PR's branch on GitHub.
+    const remote = await gh.remoteFor(root, project.github);
+    await g.git(['config', `branch.${name}.remote`, remote], root);
+    await g.git(['config', `branch.${name}.merge`, `refs/heads/${name}`], root);
+    return done(path);
+  }
+
+  /** Commits what changed in the pull request's checkout, if anything, and pushes the branch to the PR. Never forced. */
+  async pushToPullRequest(projectId: string, branch: string, message: string): Promise<string> {
+    const { project, d } = await this.find(projectId, branch);
+    const pr = d.branch.pr;
+    if (!pr || !project.github) throw new Error('This branch has no pull request on GitHub.');
+    if (d.branch.checkout.kind === 'none') throw new Error(`PR #${pr.number} isn't checked out on this Mac, or it's behind the PR there.`);
+    const wt = d.branch.checkout.path;
+    if ((await g.currentBranch(wt)) !== pr.headRefName) throw new Error(`The folder with these changes is no longer on ${pr.headRefName}. Reload the review.`);
+    const files = (await g.dirtyFiles(wt)).length;
+    if (files) {
+      await g.git(['add', '-A', '--', '.', ':(exclude).review'], wt);
+      await g.git(['commit', '--quiet', '-m', message.trim() || 'Address review feedback'], wt).catch((e: { stderr?: string; stdout?: string; message: string }) => {
+        // A hook that turned the commit down says why on its own output; the command line adds nothing.
+        const why = (e.stderr || e.stdout || '').trim().split('\n').slice(-6).join('\n') || e.message;
+        throw new Error(`Couldn't commit: ${why}`);
+      });
+    }
+    await gh.pushBranch(project.path, project.github, pr.headRefName);
+    gh.forget(project.github);
+    this.cache.delete(`${project.id}::${pr.headRefName}`);
+    return files ? `Committed ${files} file${files === 1 ? '' : 's'} and pushed to PR #${pr.number}.` : `Pushed the commits on this Mac to PR #${pr.number}.`;
   }
 
   /** The PR stack this branch is in, with the branch name Hunkdory opens each PR's review by. */
@@ -733,7 +822,9 @@ export class Projects {
     const p = d.branch.pr;
     const prKey = p ? JSON.stringify([p.number, p.headRefOid, p.baseRefName, p.title, p.author, p.copilot]) : '';
     const hit = this.cache.get(cacheId);
-    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p };
+    // The stack holds your reviews of the other PRs in it, and GitHub holds what others said: both change while
+    // this diff doesn't, so they're taken fresh. The inbox (no lines) has no use for the comments.
+    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p, stack: await this.stack(project, d), github: lines ? await this.feedback(project, d) : null };
 
     const out = await runner.run({ cwd, baseSha, head: inTree ? null : d.branch.headRef, walkthrough: wt.value, lines });
     const r = out.result;
@@ -792,8 +883,10 @@ export class Projects {
       headSha: d.branch.headSha,
       dirty: d.branch.dirtyFiles > 0,
       dirtyFiles: d.branch.dirtyFiles,
+      ahead: d.branch.ahead ?? 0,
       uncommitted: d.branch.uncommitted,
       stack: await this.stack(project, d),
+      github: null,
       sharedWalkthrough: source === 'reviewer' && shared ? shared : null,
       repo: project.github,
       projectId: project.id,
@@ -832,7 +925,7 @@ export class Projects {
       minutes: estimateMinutes(steps, r.hunks),
     };
     this.cache.set(cacheId, { key, pr: prKey, data, full: lines });
-    return data;
+    return lines ? { ...data, github: await this.feedback(project, d) } : data;
   }
 
   private scanning: Promise<InboxScan> | null = null;

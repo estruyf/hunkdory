@@ -10,6 +10,7 @@ import { Actions } from './actions.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
+import { installedEditors, openInEditor, pickEditor } from './editors.ts';
 import { addToStepComment, answerLine, removeFromStepComments, setAnswerLine } from '../shared/comments.ts';
 import { carryReviewed } from '../shared/order.ts';
 import type { ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/types.ts';
@@ -253,6 +254,20 @@ const api: ReviewerApi = {
   fileLines: (projectId, branch, path, side, from, to) => projects.fileLines(projectId, branch, path, side, from, to),
   searchCode: (projectId, branch, query) => projects.searchCode(projectId, branch, query),
   shareWalkthrough: (projectId, branch) => writer.share(projectId, branch),
+  editors: async () => ({ installed: installedEditors(), current: pickEditor(store.settings().editor) }),
+  setEditor: async (id) => store.updateSettings({ editor: id }),
+  openInEditor: async (projectId, branch) => {
+    const { d } = await projects.find(projectId, branch);
+    if (d.branch.checkout.kind === 'none') throw new Error(`${branch} isn't checked out on this Mac.`);
+    const editor = pickEditor(store.settings().editor);
+    // No editor found: Finder at least shows the folder.
+    if (editor) await openInEditor(editor, d.branch.checkout.path);
+    else shell.showItemInFolder(d.branch.checkout.path);
+  },
+  checkoutPullRequest: (projectId, branch) => projects.checkoutPullRequest(projectId, branch),
+  pushToPullRequest: (projectId, branch, message) => projects.pushToPullRequest(projectId, branch, message),
+  replyOnGitHub: (projectId, branch, threadId, body) => projects.onGitHub(projectId, branch, threadId, { reply: body }),
+  resolveOnGitHub: (projectId, branch, threadId, resolved) => projects.onGitHub(projectId, branch, threadId, { resolved }),
   cancelExchange: async (projectId, branch, id) => conversations.cancel(projectId, branch, id),
 };
 

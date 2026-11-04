@@ -51,6 +51,9 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
   const [order, setOrder] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
   const [howItWorks, setHowItWorks] = usePref<boolean>('plan-how-it-works', true);
   const [theme, setTheme] = useState<Theme | null>(null);
+  const editors = useAsync(() => window.api.editors(), []);
+  const [editor, setEditor] = useState<string | null>(null);
+  useEffect(() => setEditor(editors.value?.current?.id ?? null), [editors.value]);
   const [copied, setCopied] = useState(false);
   const [addingAgent, setAddingAgent] = useState(false);
   const [agentForm, setAgentForm] = useState({ name: '', command: '', args: '' });
@@ -109,6 +112,25 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
               <SegmentedControl<Theme> mode="radio" label="Theme" value={theme ?? 'system'} onChange={pick} segments={THEMES.map((t) => ({ value: t.value, label: t.label, tooltip: t.hint }))} />
             </Row>
             {settings.error && <Notice tone="error">{settings.error}</Notice>}
+          </Card>
+
+          <Card title="Editor">
+            <Row label="Open folders in" detail="Where “Open in editor” takes you: the folder Claude changes a branch in.">
+              {editors.value?.installed.length ? (
+                <Select
+                  label="Editor"
+                  value={editor ?? editors.value.installed[0]!.id}
+                  onChange={(id) => {
+                    setEditor(id);
+                    void window.api.setEditor(id);
+                  }}
+                  options={editors.value.installed.map((e) => ({ value: e.id, label: e.name }))}
+                  className={`${FIELD} w-48`}
+                />
+              ) : (
+                <span className="text-meta text-muted">No editor found in Applications. Folders open in Finder.</span>
+              )}
+            </Row>
           </Card>
 
           <Card title="Inbox">

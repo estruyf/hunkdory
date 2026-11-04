@@ -9,16 +9,17 @@ import type { ReviewData, ReviewState, Step } from '../../shared/types.ts';
 import { Markdown } from '../components/markdown.tsx';
 import { timeAgo } from '../../shared/order.ts';
 import { Walkthrough } from './Walkthrough.tsx';
+import type { LineRef } from '../components/diff.tsx';
 
-type At = { stepKey?: string; decision?: string; group?: string };
+type At = { stepKey?: string; decision?: string; group?: string; focus?: LineRef };
 
-export function Review({ go, projectId, branch, stepKey, decision, group, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } } & At) {
+export function Review({ go, projectId, branch, stepKey, decision, group, focus, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } } & At) {
   // Read once per branch. Moving between steps changes the route, not the review.
   const loaded = useAsync(() => (preloaded ? Promise.resolve(preloaded) : window.api.loadReview(projectId, branch)), [projectId, branch]);
   const value = loaded.value ?? preloaded;
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
   if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
-  return <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} />;
+  return <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} focus={focus} />;
 }
 
 export function ReviewError({ go, message }: { go: Go; message: string }) {

@@ -9,6 +9,7 @@ import { Notice } from './ui/Notice.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
 import { TEXTAREA } from './ui/field.ts';
 import { useWalkthroughJobFor } from '../state/walkthroughs.ts';
+import { OpenInEditor } from './editor.tsx';
 
 function since(from: string, to: string | null) {
   const s = Math.max(0, Math.round(((to ? Date.parse(to) : Date.now()) - Date.parse(from)) / 1000));
@@ -162,6 +163,8 @@ export function AskPanel({
   exchanges,
   onShowChanges,
   loadedAt,
+  draft,
+  onCheckout,
 }: {
   data: ReviewData;
   step: Step;
@@ -170,10 +173,28 @@ export function AskPanel({
   onShowChanges: () => void;
   /** When the review on screen read the branch. */
   loadedAt: string;
+  /** What the box starts with, such as a GitHub comment to ask about. */
+  draft?: string;
+  /** Checks the pull request out in a worktree, for a change when it has nowhere to happen yet. */
+  onCheckout?: () => Promise<void>;
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(draft ?? '');
   const { send: ask, busy, pending, error } = useSend(data, step);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const canChange = !!data.ask.change.by;
+  const canCheckout = !data.ask.change.by && !!data.ask.change.checkout && !!onCheckout;
+  const checkout = async () => {
+    setCheckingOut(true);
+    setCheckoutError(null);
+    try {
+      await onCheckout!();
+    } catch (e) {
+      setCheckoutError(cleanError(e));
+    } finally {
+      setCheckingOut(false);
+    }
+  };
   // The box empties right away: what you sent shows in the thread. It comes back if sending fails.
   const send = async (kind: Exchange['kind']) => {
     const sent = text;
@@ -209,11 +230,20 @@ export function AskPanel({
         <Button disabled={!text.trim() || busy || !canChange} onClick={() => send('change')} data-tooltip={canChange ? undefined : who(data, 'change')}>
           Ask for this change
         </Button>
+        {canCheckout && (
+          <Button variant="quiet" disabled={checkingOut} aria-busy={checkingOut} onClick={checkout} data-tooltip="Makes a worktree for the PR's branch next to the project's folder, so the change has somewhere to happen. Your text stays.">
+            {checkingOut ? 'Checking out…' : 'Check out in a worktree'}
+          </Button>
+        )}
       </div>
-      <p className="text-meta text-muted">
-        {who(data, 'question')} {who(data, 'change')}
-      </p>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="min-w-0 flex-[1_1_320px] text-meta text-muted">
+          {who(data, 'question')} {who(data, 'change')}
+        </p>
+        {canChange && <OpenInEditor data={data} />}
+      </div>
       {error && <Notice tone="error">{error}</Notice>}
+      {checkoutError && <Notice tone="error">{checkoutError}</Notice>}
     </section>
   );
 }

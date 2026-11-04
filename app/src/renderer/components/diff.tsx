@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import hljs from 'highlight.js/lib/common';
 import { ignoreWhitespace, languageFor, riskReason, splitRows } from '../../shared/diff.ts';
 import type { Comment, DiffLine, HunkView } from '../../shared/types.ts';
@@ -14,6 +14,10 @@ const STEP = 20;
 
 export type DiffMode = 'unified' | 'split';
 export type Anchor = { side: 'LEFT' | 'RIGHT'; line: number };
+/** A place to land in a review, as search sends you there: a file, or a line of it (the new version, or with LEFT a removed line). */
+export type LineRef = { path: string; line?: number; side?: Anchor['side'] };
+/** Whether a row is that line: its new number, or for LEFT the old number of a removed line, as GitHub counts. */
+export const isLine = (l: DiffLine, line: number, side: Anchor['side'] = 'RIGHT') => (side === 'LEFT' ? l.kind === 'del' && l.oldN === line : l.kind !== 'del' && l.newN === line);
 
 /** Where a comment on this row lands: the new file, or the old one for a removed line. GitHub's sides. */
 const anchorOf = (l: DiffLine): Anchor | null => (l.kind === 'del' ? (l.oldN ? { side: 'LEFT', line: l.oldN } : null) : l.newN ? { side: 'RIGHT', line: l.newN } : null);
@@ -55,6 +59,10 @@ interface Props {
   badge?: ReactNode;
   /** Who wrote the hunk's note: the branch's agent, or Hunkdory when it wrote the walkthrough itself. */
   noteBy?: 'agent' | 'reviewer';
+  /** More to show under a line, before your own comments on it: what others said on GitHub. */
+  extraAt?: (anchor: Anchor) => ReactNode;
+  /** Scrolls to this hunk, opened, and with a line (in the new file) to that line, marked. A new object scrolls again. */
+  focus?: { line?: number | null; side?: Anchor['side'] };
 }
 
 /** A long path that wraps between folders, not in the middle of a name. The file name stands out. */
@@ -75,7 +83,7 @@ function PathLabel({ path }: { path: string }) {
   );
 }
 
-export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace = false, comments = [], onComment, loadLines, collapsed, badge, noteBy = 'agent' }: Props) {
+export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace = false, comments = [], onComment, loadLines, collapsed, badge, noteBy = 'agent', extraAt, focus }: Props) {
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState(!collapsed);
   const [above, setAbove] = useState<DiffLine[]>([]);
@@ -91,6 +99,19 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
   // Rows read from the file around the change aren't part of GitHub's diff, so they take no comments.
   const extra = new Set<DiffLine>([...above, ...below]);
   const risks = hunk.risks.filter((r) => r.severity !== 'low');
+  const root = useRef<HTMLElement>(null);
+  const focusRow = useRef<HTMLDivElement>(null);
+  const isFocus = (l: DiffLine | null) => !!l && focus?.line != null && isLine(l, focus.line, focus.side) && !extra.has(l);
+
+  // Landing here from search: open it, show the rows down to the line, then bring it into view.
+  useEffect(() => {
+    if (!focus) return;
+    setOpen(true);
+    if (focus.line != null && base.findIndex((l) => isLine(l, focus.line!, focus.side)) >= MAX_ROWS) setAll(true);
+    // After the rows it opened are on screen.
+    const t = setTimeout(() => (focusRow.current ?? root.current)?.scrollIntoView({ block: focusRow.current ? 'center' : 'start', behavior: 'smooth' }), 0);
+    return () => clearTimeout(t);
+  }, [focus]);
 
   // Context can grow at either edge that is an unchanged line of a modified file.
   const expandable = !!loadLines && (hunk.status === 'modified' || hunk.status === 'renamed') && !hunk.synthetic;
@@ -133,9 +154,11 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
   const thread = (a: Anchor | null, key: string) => {
     const list = commentsAt(a);
     const isEditing = same(editing, a);
-    if (!list.length && !isEditing) return null;
+    const more = a ? extraAt?.(a) : null;
+    if (!list.length && !isEditing && !more) return null;
     return (
       <div key={key} className="diff-thread">
+        {more}
         {list.map((c) => (
           <LineComment key={c.id} comment={c} onSave={(body) => onComment?.(a!, body, c.id)} />
         ))}
@@ -176,7 +199,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
               <div className="diff-cell empty" />
             );
           return [
-            <div key={i} className="diff-row">
+            <div key={i} ref={isFocus(r.left) || isFocus(r.right) ? focusRow : undefined} className={`diff-row${isFocus(r.left) || isFocus(r.right) ? ' focus' : ''}`}>
               {cell(r.left, la, 'old')}
               {cell(r.right, ra, 'new')}
             </div>,
@@ -192,7 +215,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
         {lines.flatMap((l, i) => {
           const a = anchorOf(l);
           return [
-            <div key={i} className={`diff-row ${l.kind}${extra.has(l) ? ' extra' : ''}`}>
+            <div key={i} ref={isFocus(l) ? focusRow : undefined} className={`diff-row ${l.kind}${extra.has(l) ? ' extra' : ''}${isFocus(l) ? ' focus' : ''}`}>
               {num(l.oldN, l, a?.side === 'LEFT' ? a : null)}
               {num(l.newN, l, a?.side === 'RIGHT' ? a : null)}
               <span className="diff-mark">{l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ''}</span>
@@ -207,7 +230,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
 
   const bar = (children: ReactNode) => <div className="diff-bar">{children}</div>;
   return (
-    <section className="overflow-hidden rounded-lg border border-border">
+    <section ref={root} className="scroll-mt-3 overflow-hidden rounded-lg border border-border">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-code px-3 py-1.5">
         <PathLabel path={hunk.path} />
         <span className="flex flex-wrap items-center gap-1.5">

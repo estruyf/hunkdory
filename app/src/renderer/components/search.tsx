@@ -8,6 +8,7 @@ import { cleanError, plural } from './ui.tsx';
 import { Button } from './ui/Button.tsx';
 import { Pill } from './ui/Pill.tsx';
 import { FIELD_LG } from './ui/field.ts';
+import type { LineRef } from './diff.tsx';
 
 type StepRef = { stepKey: string; index: number; title: string };
 
@@ -33,7 +34,8 @@ function selectedText(): string | undefined {
   return sel && sel.length <= 120 && !sel.includes('\n') ? sel : undefined;
 }
 
-export function useCodeSearch(data: ReviewData, onShowStep: (stepKey: string) => void) {
+/** `onShowStep` gets the file, and the line when it's a changed one, so the step opens right there. */
+export function useCodeSearch(data: ReviewData, onShowStep: (stepKey: string, at?: LineRef) => void) {
   const [open, setOpen] = useState(false);
   // Kept while the panel is closed, so it opens where you left it.
   const [query, setQuery] = useState('');
@@ -73,9 +75,9 @@ export function useCodeSearch(data: ReviewData, onShowStep: (stepKey: string) =>
       query={query}
       setQuery={setQuery}
       onClose={() => setOpen(false)}
-      onShowStep={(key) => {
+      onShowStep={(key, at) => {
         setOpen(false);
-        onShowStep(key);
+        onShowStep(key, at);
       }}
     />
   ) : null;
@@ -83,7 +85,7 @@ export function useCodeSearch(data: ReviewData, onShowStep: (stepKey: string) =>
   return { button, panel };
 }
 
-function SearchPanel({ data, query, setQuery, onClose, onShowStep }: { data: ReviewData; query: string; setQuery: (q: string) => void; onClose: () => void; onShowStep: (stepKey: string) => void }) {
+function SearchPanel({ data, query, setQuery, onClose, onShowStep }: { data: ReviewData; query: string; setQuery: (q: string) => void; onClose: () => void; onShowStep: (stepKey: string, at?: LineRef) => void }) {
   const [res, setRes] = useState<{ q: string; value?: CodeSearchResult; error?: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -164,7 +166,7 @@ function SearchPanel({ data, query, setQuery, onClose, onShowStep }: { data: Rev
               <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-4 pb-1">
                 <span className="min-w-0 flex-[1_1_300px] font-mono text-ui font-semibold break-all">{path}</span>
                 {step && (
-                  <button type="button" className="text-meta text-link hover:underline" data-tooltip={`Step ${step.index + 1}: ${step.title}`} onClick={() => onShowStep(step.stepKey)}>
+                  <button type="button" className="text-meta text-link hover:underline" data-tooltip={`Step ${step.index + 1}: ${step.title}`} onClick={() => onShowStep(step.stepKey, { path })}>
                     In this change · step {step.index + 1} →
                   </button>
                 )}
@@ -180,7 +182,7 @@ function SearchPanel({ data, query, setQuery, onClose, onShowStep }: { data: Rev
   );
 }
 
-function MatchRow({ data, match, query, changed, onShowStep }: { data: ReviewData; match: CodeSearchResult['matches'][number]; query: string; changed?: StepRef; onShowStep: (stepKey: string) => void }) {
+function MatchRow({ data, match, query, changed, onShowStep }: { data: ReviewData; match: CodeSearchResult['matches'][number]; query: string; changed?: StepRef; onShowStep: (stepKey: string, at?: LineRef) => void }) {
   const [context, setContext] = useState<{ from: number; lines: string[] } | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -202,7 +204,7 @@ function MatchRow({ data, match, query, changed, onShowStep }: { data: ReviewDat
           </span>
         </button>
         {changed && (
-          <Pill tone="link" onClick={() => onShowStep(changed.stepKey)} data-tooltip={`Changed in step ${changed.index + 1}: ${changed.title}`}>
+          <Pill tone="link" onClick={() => onShowStep(changed.stepKey, { path: match.path, line: match.line })} data-tooltip={`Changed in step ${changed.index + 1}: ${changed.title}`}>
             Changed · step {changed.index + 1}
           </Pill>
         )}

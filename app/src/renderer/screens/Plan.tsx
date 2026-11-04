@@ -14,9 +14,13 @@ import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { matches } from '../lib/shortcuts.ts';
-import { PrLink, StackBar, checksText, checksTone } from '../components/github.tsx';
+import { PrLink, PushToPrNotice, StackBar, checksText, checksTone } from '../components/github.tsx';
+import { GitHubReviews } from '../components/githubThreads.tsx';
+import { placeThreads } from '../../shared/threads.ts';
+import { MessageSquare } from 'lucide-react';
 import { AgentTests, AskedFor, ReviewError } from './Review.tsx';
 import { useCodeSearch } from '../components/search.tsx';
+import type { LineRef } from '../components/diff.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { OUTSIDE_HINT, RISK_LABEL, formatDuration, isReviewed, timeAgo, tooBig } from '../../shared/order.ts';
@@ -139,6 +143,22 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
   const [copied, setCopied] = useState(false);
   const plan = useMemo(() => buildPlan(data, state), [data, state.order]);
   const progress = planProgress(plan, state);
+  // What people said on GitHub. Replying or resolving here changes it without reading the branch again.
+  const [feedback, setFeedback] = useState(data.github);
+  useEffect(() => setFeedback(data.github), [data.github]);
+  const placed = useMemo(() => placeThreads(feedback?.threads ?? [], data.hunks), [feedback, data.hunks]);
+  // Each thread on this diff with its step, open ones first, in the order of the steps.
+  const inDiff = useMemo(
+    () =>
+      [...placed.byHunk]
+        .flatMap(([id, threads]) => {
+          const step = data.steps.find((s) => s.hunkIds.includes(id));
+          return step ? threads.map((thread) => ({ thread, step })) : [];
+        })
+        .sort((a, b) => Number(a.thread.resolved) - Number(b.thread.resolved) || a.step.index - b.step.index || (a.thread.line ?? 0) - (b.thread.line ?? 0)),
+    [placed, data.steps]
+  );
+  const openThreadsIn = (steps: Step[]) => steps.flatMap((s) => s.hunkIds.flatMap((id) => placed.byHunk.get(id) ?? [])).filter((t) => !t.resolved).length;
   // Opening a branch without a walkthrough has Hunkdory write one; the steps update when it's ready.
   const w = useWalkthroughJob(data, { auto: true, onDone: onReload });
 
@@ -183,12 +203,12 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
     return next;
   };
 
-  const enter = async (to: { stepKey?: string; decision?: string; group?: string }) => {
+  const enter = async (to: { stepKey?: string; decision?: string; group?: string; focus?: LineRef }) => {
     const s = await begin();
     if (s) go({ name: 'review', projectId: data.projectId, branch: data.branch, ...to, preloaded: { data, state: s } });
   };
   const open = (step: Step | undefined) => step && enter({ stepKey: step.key });
-  const search = useCodeSearch(data, (key) => open(data.steps.find((s) => s.key === key)));
+  const search = useCodeSearch(data, (key, focus) => enter({ stepKey: key, focus }));
   const toFinish = () => go({ name: 'finish', projectId: data.projectId, branch: data.branch });
 
   const resume = resumePoint(plan, state);
@@ -336,6 +356,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
           )}
 
           <UncommittedNotice data={data} onChanged={onReload} onError={setError} />
+          <PushToPrNotice data={data} onPushed={onReload} />
           {data.stack && <StackBar data={data} go={go} />}
           <WalkthroughNotice data={data} w={w} />
 
@@ -362,6 +383,16 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
 
           <HowItWorks />
           <RequestCard data={data} onOpen={open} />
+          {feedback && (
+            <GitHubReviews
+              data={data}
+              feedback={feedback}
+              inDiff={inDiff}
+              elsewhere={placed.elsewhere}
+              onFeedback={(f) => f && setFeedback(f)}
+              onOpen={(step, t) => enter({ stepKey: step.key, focus: { path: t.path, line: t.line ?? undefined, side: t.side } })}
+            />
+          )}
 
           <Phase title="Decide" count={plan.decisions.length} meta={plan.decisions.length ? `${progress.decided} of ${progress.decisions} done` : 'Nothing to decide'} hint="Calls only you can make: work you didn’t ask for, failing CI, and patterns that need attention.">
             {plan.decisions.length === 0 ? (
@@ -398,12 +429,18 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                 {carefulShown.map((s) => {
                   const done = isReviewed(s, state.reviewed);
                   const changed = since?.byStep[s.key];
+                  const threads = openThreadsIn([s]);
                   return (
                     <li key={s.key}>
                       <button type="button" onClick={() => open(s)} className="group flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg px-2.5 py-2 text-left hover:bg-border/45">
                         <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${done ? 'bg-text' : 'border-2 border-faint'}`} />
                         <span className={`min-w-0 flex-[1_1_320px] text-body break-words ${done ? 'text-muted' : 'text-text'}`}>{s.title}</span>
                         {changed && changed !== 'same' && <Pill tone="link">{changed === 'new' ? 'New' : 'Changed'}</Pill>}
+                        {threads > 0 && (
+                          <Pill tone="link" icon={<MessageSquare size={12} aria-hidden />} data-tooltip={`${plural(threads, 'open comment')} on GitHub`}>
+                            {threads}
+                          </Pill>
+                        )}
                         <RiskPill risk={s.risk} />
                         {s.outsideTask && <Pill data-tooltip={OUTSIDE_HINT}>Outside your request</Pill>}
                         <span className="w-14 text-right text-meta text-faint">{plural(s.files.length, 'file')}</span>
@@ -431,12 +468,14 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
               <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5">
                 {plan.skimGroups.map((g) => {
                   const done = g.steps.filter((s) => isReviewed(s, state.reviewed)).length;
+                  const threads = openThreadsIn(g.steps);
                   return (
                     <div key={g.name} className="flex flex-col gap-1 rounded-lg border border-border p-3">
                       <span className="font-mono text-ui font-semibold break-all">{g.name}</span>
                       <span className="text-meta text-faint">
                         {plural(g.steps.length, 'step')} · {plural(g.files, 'file')}
                         {done && done < g.steps.length ? ` · ${done} reviewed` : ''}
+                        {threads ? ` · ${plural(threads, 'comment')} on GitHub` : ''}
                       </span>
                       <Button size="sm" className="mt-1 self-start" onClick={() => enter({ group: g.name })}>
                         {done === g.steps.length ? 'Reviewed ✓' : 'Skim folder'}

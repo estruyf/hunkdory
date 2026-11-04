@@ -88,6 +88,8 @@ export interface PullRequest {
   updatedAt: string;
   /** Opened by the GitHub Copilot coding agent. */
   copilot: boolean;
+  /** Its branch lives in a fork: Hunkdory can't push to it. */
+  fork: boolean;
   /** CI and other checks on the head commit, as GitHub reports them. */
   checks: CheckItem[];
   /** Logins. */
@@ -107,6 +109,44 @@ export interface CheckItem {
   name: string;
   state: 'pass' | 'fail' | 'pending' | 'skipped';
   url: string | null;
+}
+
+/** One comment in a review thread on GitHub. */
+export interface GitHubComment {
+  id: string;
+  author: string;
+  body: string;
+  at: string;
+  url: string;
+}
+
+/** A conversation on a line of the pull request's diff on GitHub. */
+export interface GitHubThread {
+  /** GitHub's node id, to reply to it or resolve it. */
+  id: string;
+  path: string;
+  /** The line it's on in the PR's current diff; null once the code it was on changed (outdated). */
+  line: number | null;
+  startLine: number | null;
+  side: 'LEFT' | 'RIGHT';
+  resolved: boolean;
+  outdated: boolean;
+  comments: GitHubComment[];
+}
+
+/** A review someone submitted on the pull request: their verdict, and what they wrote on top of their line comments. */
+export interface GitHubReview {
+  author: string;
+  state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED';
+  body: string;
+  at: string;
+  url: string;
+}
+
+/** What people said on the pull request on GitHub. */
+export interface GitHubFeedback {
+  reviews: GitHubReview[];
+  threads: GitHubThread[];
 }
 
 /** One pull request in a stack: each one's base is the head of the one below it. */
@@ -169,6 +209,8 @@ export interface BranchInfo {
   projectId: string;
   name: string;
   checkout: Checkout;
+  /** A pull request's checkout: commits in it that aren't on the PR yet. */
+  ahead?: number;
   /** Ref to diff against, e.g. "develop" or "refs/reviewer/base/develop" for a pull request. */
   baseRef: string;
   /** Base as people call it, for display. */
@@ -317,10 +359,14 @@ export interface ReviewData {
   dirty: boolean;
   /** How many files aren't committed yet. */
   dirtyFiles: number;
+  /** A pull request checked out on this Mac: commits made here that aren't on the PR yet. */
+  ahead: number;
   /** Only the uncommitted work on a base branch: approving it commits it there instead of merging. */
   uncommitted: boolean;
   /** Pull requests this one sits on and that sit on it, bottom first. Null when it isn't stacked. */
   stack: { base: string; prs: StackEntry[] } | null;
+  /** Reviews and line comments on the pull request on GitHub. Null without a PR, or when GitHub couldn't be read. */
+  github: GitHubFeedback | null;
   /** Where Hunkdory's walkthrough came from when a teammate shared it on the PR. */
   sharedWalkthrough: { url: string; by: string } | null;
   /** The linked GitHub repo ("owner/name"), or null when the project has none. */
@@ -357,7 +403,8 @@ export interface Exchange {
 /** What "Ask Claude" can do on a branch, and why not when it can't. */
 export interface AskAbility {
   question: { by: Exchange['by'] } | { by: null; reason: string };
-  change: { by: Exchange['by']; where: string } | { by: null; reason: string };
+  /** `checkout`: the branch is a pull request Hunkdory can check out in a worktree, so Claude has somewhere to change it. */
+  change: { by: Exchange['by']; where: string } | { by: null; reason: string; checkout?: boolean };
 }
 
 export interface Comment {
@@ -534,8 +581,18 @@ export interface AcpAgentConfig {
 }
 
 /** App-wide settings, kept in the store next to your projects. */
+/** A code editor Hunkdory can open a branch's folder in. */
+export interface EditorChoice {
+  id: string;
+  name: string;
+  /** The app's name in /Applications, without .app. */
+  app: string;
+}
+
 export interface AppSettings {
   theme: Theme;
+  /** The editor to open folders in, by id. Null: the first one installed. */
+  editor: string | null;
   /** ACP agents you've added (Gemini, codex-acp, or anything else), for any project to pick as its assistant. */
   acpAgents: AcpAgentConfig[];
 }
@@ -607,6 +664,19 @@ export interface ReviewerApi {
   /** Asks Claude about a step, or to change something there. Returns the review with the new exchange. */
   ask(projectId: string, branch: string, stepKey: string, kind: Exchange['kind'], text: string, check?: number): Promise<ReviewState>;
   cancelExchange(projectId: string, branch: string, exchangeId: string): Promise<void>;
+  /** Replies to a review thread on the pull request. Returns what's on the PR now. */
+  replyOnGitHub(projectId: string, branch: string, threadId: string, body: string): Promise<GitHubFeedback | null>;
+  /** The editors installed on this Mac, and the one Hunkdory opens folders in (null when there's none). */
+  editors(): Promise<{ installed: EditorChoice[]; current: EditorChoice | null }>;
+  setEditor(id: string | null): Promise<AppSettings>;
+  /** Opens the folder a branch is checked out in, in your editor. */
+  openInEditor(projectId: string, branch: string): Promise<void>;
+  /** Checks the pull request's branch out in a worktree, so Claude can change it. Returns the folder. */
+  checkoutPullRequest(projectId: string, branch: string): Promise<string>;
+  /** Commits what changed in the pull request's checkout and pushes it to the PR's branch. Returns what happened. */
+  pushToPullRequest(projectId: string, branch: string, message: string): Promise<string>;
+  /** Resolves a review thread on the pull request, or (`resolved` false) opens it again. */
+  resolveOnGitHub(projectId: string, branch: string, threadId: string, resolved: boolean): Promise<GitHubFeedback | null>;
   /** Lines `from`..`to` (1-based, inclusive) of a file on one side of the diff, for showing more context. */
   fileLines(projectId: string, branch: string, path: string, side: 'old' | 'new', from: number, to: number): Promise<{ lines: string[]; total: number }>;
   searchCode(projectId: string, branch: string, query: string): Promise<CodeSearchResult>;
