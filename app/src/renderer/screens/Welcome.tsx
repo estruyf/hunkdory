@@ -14,7 +14,7 @@ export function Welcome({ go }: { go: Go }) {
         <span className="text-body font-semibold">Hunkdory</span>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pt-12 pb-14">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-12 pb-14">
           <div className="flex flex-col gap-2">
             <h1 className="text-hero font-semibold">Review what your agents wrote, one step at a time.</h1>
             <p className="text-body text-muted">

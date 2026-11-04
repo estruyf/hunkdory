@@ -424,6 +424,22 @@ export interface Comment {
 export type Decision = 'merge' | 'send-back' | 'discard' | 'github';
 export type GitHubEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 
+/** One thing in a sent-back run's log: what the agent said (`text`), a tool it used, what the CLI printed, or why it failed. */
+export interface RunLogEntry {
+  kind: 'text' | 'tool' | 'output' | 'error';
+  text: string;
+}
+
+export interface RunLog {
+  entries: RunLogEntry[];
+  /** The start of a very long log was left out. */
+  cut: boolean;
+  running: boolean;
+  /** How the run ended, once it has. */
+  message: string;
+  file: string;
+}
+
 export interface DecisionRecord {
   kind: Decision;
   note: string;
@@ -653,6 +669,8 @@ export interface ReviewerApi {
   updateReview(projectId: string, branch: string, patch: ReviewPatch): Promise<ReviewState>;
   finish(req: FinishRequest): Promise<FinishResult>;
   openSessionFile(file: string): Promise<void>;
+  /** The log of the agent run this branch was sent back to, in words; null when it has none. */
+  runLog(projectId: string, branch: string): Promise<RunLog | null>;
   walkthroughJob(projectId: string, branch: string): Promise<WalkthroughJob | null>;
   /** Every walkthrough run since the app started, for the sidebar. */
   walkthroughJobs(): Promise<WalkthroughJob[]>;

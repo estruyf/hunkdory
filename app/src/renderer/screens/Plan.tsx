@@ -274,7 +274,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
       {search.panel}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pt-7 pb-14">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-2">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint">
               <span className="flex min-w-0 items-baseline gap-1 font-mono">

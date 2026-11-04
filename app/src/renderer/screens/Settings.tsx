@@ -104,7 +104,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
         <Button variant="quiet" iconOnly aria-label="Close Settings" shortcut="settings.close" icon={<X size={15} aria-hidden />} onClick={onClose} />
       </ViewHeader>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 pt-7 pb-14">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 pt-7 pb-14">
           <h1 className="text-hero font-semibold">Settings</h1>
 
           <Card title="Appearance">

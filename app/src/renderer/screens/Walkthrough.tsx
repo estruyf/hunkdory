@@ -1,5 +1,5 @@
 // The step walkthrough: one step at a time, read top to bottom, with one clear next action.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
 import { ArrowLeft, Check, Columns2, MessageSquare, Rows2 } from 'lucide-react';
 import { Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, useMediaQuery, usePref } from '../components/ui.tsx';
@@ -112,6 +112,13 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     setDraft(null);
     setCommenting(false);
   }, [selKey, decision]);
+
+  // And at its top: the scroller stays mounted from one place to the next. Search's jump to a line comes after this.
+  const scroller = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // In braces: scrollTo returns a promise, and an effect may only return its clean-up.
+    scroller.current?.scrollTo(0, 0);
+  }, [selKey, decision, group]);
 
   /** After the decisions: the first step you haven't reviewed, or wrap up. */
   const pastDecisions = (s: ReviewState = state) => {
@@ -325,7 +332,9 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
       <WalkthroughBar data={data} onSwitch={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, reload: Date.now() })} />
       {search.panel}
       <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{body}</div>
+        <div ref={scroller} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          {body}
+        </div>
         {aside}
       </div>
       {footer(foot)}
@@ -405,7 +414,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   if (dec && !cur) {
     const failing = data.pr?.checks.find((c) => c.state === 'fail' && c.url);
     return shell(
-      <main className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-7">
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-6 py-7">
         <span className="text-meta text-faint">
           Decision {decPos + 1} of {plan.decisions.length}
         </span>

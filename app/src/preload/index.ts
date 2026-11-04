@@ -26,6 +26,7 @@ const methods: (keyof ReviewerApi)[] = [
   'updateReview',
   'finish',
   'openSessionFile',
+  'runLog',
   'walkthroughJob',
   'walkthroughJobs',
   'writeWalkthrough',

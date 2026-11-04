@@ -28,7 +28,7 @@ export function ReviewError({ go, message }: { go: Go; message: string }) {
       <ViewHeader>
         <h1 className="text-title font-semibold">Can't open this review</h1>
       </ViewHeader>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-8">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-6 py-8">
         <Notice tone="error">{message}</Notice>
         <div>
           <Button onClick={() => go({ name: 'home' })}>Back to the inbox</Button>

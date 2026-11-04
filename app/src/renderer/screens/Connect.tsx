@@ -169,7 +169,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       </ViewHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 pt-7 pb-14">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-hero font-semibold">{existing ? `${existing.name} settings` : 'Connect a project'}</h1>
             <p className="text-body text-muted">A project is one git repo on your Mac. The defaults suit most repos: pick the folder, choose how steps get written, and connect.</p>
@@ -246,9 +246,8 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                     on: true,
                     title: `Let ${assistants.find((a) => a.id === assistant)?.name ?? 'Claude'} write a walkthrough`,
                     note: assistant?.startsWith('acp:') ? '' : '(recommended)',
-                    detail: `Steps by intent, with a reason for each. For a branch that opens without one, ${assistants.find((a) => a.id === assistant)?.name ?? 'Claude Code'} reads the diff, the commits and the session.${
-                      assistant === 'copilot' ? ' Like any Copilot run, that goes to GitHub.' : assistant === 'claude-code' ? ' Like any Claude Code run, that goes to Anthropic.' : ''
-                    }`,
+                    detail: `Steps by intent, with a reason for each. For a branch that opens without one, ${assistants.find((a) => a.id === assistant)?.name ?? 'Claude Code'} reads the diff, the commits and the session.${assistant === 'copilot' ? ' Like any Copilot run, that goes to GitHub.' : assistant === 'claude-code' ? ' Like any Claude Code run, that goes to Anthropic.' : ''
+                      }`,
                   },
                   { on: false, title: 'One step per file, fully offline', note: '', detail: 'Nothing is sent anywhere. You can still ask for a walkthrough on a branch when you want one.' },
                 ].map((o) => (

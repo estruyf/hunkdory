@@ -2,6 +2,7 @@ import type { Go } from '../App.tsx';
 import { useEffect, useState } from 'react';
 import { cleanError, Crumbs, plural, rememberReview, useInbox } from '../components/ui.tsx';
 import { nextInStack, openStackEntry, stackProgress, stackStatus } from '../components/github.tsx';
+import { RunLogDialog } from '../components/runLog.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Confetti } from '../components/Confetti.tsx';
 import { Button } from '../components/ui/Button.tsx';
@@ -18,6 +19,7 @@ const HEADINGS = { merge: 'Merged', 'send-back': 'Sent back to Claude Code', dis
 export function Done({ go, projectId, branch, result, stack }: { go: Go; projectId: string; branch: string; result: FinishResult; stack: ReviewData['stack'] }) {
   const inbox = useInbox();
   const [error, setError] = useState<string | null>(null);
+  const [showLog, setShowLog] = useState(false);
   const decision = result.review?.decision;
   useEffect(() => {
     if (result.review) rememberReview(result.review);
@@ -40,7 +42,7 @@ export function Done({ go, projectId, branch, result, stack }: { go: Go; project
   // ⌘↵ reviews the next branch.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(stackNext || next) || !matches(e, 'done.next')) return;
+      if (showLog || !(stackNext || next) || !matches(e, 'done.next')) return;
       e.preventDefault();
       openNext();
     };
@@ -52,13 +54,14 @@ export function Done({ go, projectId, branch, result, stack }: { go: Go; project
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* Something landed: a merge or a posted review. */}
       {(kind === 'merge' || kind === 'github') && <Confetti />}
+      {showLog && <RunLogDialog projectId={projectId} branch={branch} onClose={() => setShowLog(false)} />}
       <ViewHeader>
         <div className="min-w-0 flex-1">
           <Crumbs items={[{ label: heading }]} />
         </div>
       </ViewHeader>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pt-14 pb-14">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-14 pb-14">
           <OutcomeIcon kind={kind} />
           <div className="flex flex-col gap-2">
             <h1 className="text-hero font-semibold">{heading}</h1>
@@ -88,7 +91,7 @@ export function Done({ go, projectId, branch, result, stack }: { go: Go; project
               }
               actions={
                 decision?.logFile ? (
-                  <Button size="sm" onClick={() => window.api.openSessionFile(decision.logFile!)}>
+                  <Button size="sm" onClick={() => setShowLog(true)}>
                     Show the run log
                   </Button>
                 ) : undefined

@@ -7,6 +7,7 @@ import { Projects } from './projects.ts';
 import { allAssistants, setAcpAgents } from './assistants/index.ts';
 import { Summaries } from './summaries.ts';
 import { Actions } from './actions.ts';
+import { readRunLog } from './runLog.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
@@ -244,6 +245,11 @@ const api: ReviewerApi = {
   finish: (req) => actions.finish(req),
   openSessionFile: async (file) => {
     shell.showItemInFolder(file);
+  },
+  runLog: async (projectId, branch) => {
+    const d = store.review(projectId, branch)?.decision;
+    if (!d?.logFile) return null;
+    return { ...(await readRunLog(d.logFile, store.project(projectId).path)), running: d.result === 'running', message: d.message, file: d.logFile };
   },
   walkthroughJob: async (projectId, branch) => writer.job(projectId, branch),
   walkthroughJobs: async () => writer.jobsAll(),

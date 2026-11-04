@@ -19,8 +19,8 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
   const [projectId, setProjectId] = useState(initialProject);
   const current = projectId ?? projects.value?.[0]?.id;
   // Wait for the project list, or an empty list flashes up as "no branches".
-  const branches = useAsync(() => (current ? window.api.listBranches(current) : new Promise<never>(() => {})), [current]);
-  const uncommitted = useAsync(() => (current ? window.api.listUncommitted(current) : new Promise<never>(() => {})), [current]);
+  const branches = useAsync(() => (current ? window.api.listBranches(current) : new Promise<never>(() => { })), [current]);
+  const uncommitted = useAsync(() => (current ? window.api.listUncommitted(current) : new Promise<never>(() => { })), [current]);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
@@ -66,7 +66,7 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
         </div>
       </ViewHeader>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 pt-7 pb-14">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-hero font-semibold">Review another branch</h1>
             <p className="text-body text-muted">

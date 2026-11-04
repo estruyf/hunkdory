@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, EyeOff, Loader2, Plus, RefreshCw, Search, Settings, Undo2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, EyeOff, Loader2, Plus, RefreshCw, Search, Settings, Undo2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { Go } from '../App.tsx';
 import { Crumbs, plural } from '../components/ui.tsx';
@@ -102,6 +102,17 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
     scroller.current?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // The buttons that clear go away once they have: the search takes over the focus, so the keyboard stays in the list's reach.
+  const clearSearch = () => {
+    data.setQuery('');
+    document.getElementById(SEARCH_ID)?.focus();
+  };
+  const resetFilters = () => {
+    data.setProject('all');
+    data.setPeople('anyone');
+    clearSearch();
+  };
+
   // Esc clears the search (and leaves it once empty), ↓ goes to the first row, Enter opens it.
   const onSearchKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
@@ -186,7 +197,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
                 spellCheck={false}
                 className="min-w-0 flex-1 bg-transparent text-ui text-text outline-none placeholder:text-faint"
               />
-              <Kbd shortcut="branch.goto" />
+              {data.query ? <Button variant="quiet" size="sm" iconOnly aria-label="Clear search" kbd="Esc" icon={<X size={13} aria-hidden />} onClick={clearSearch} className="-mr-1.5 shrink-0" /> : <Kbd shortcut="branch.goto" />}
             </label>
             <Select
               label="Project"
@@ -196,6 +207,11 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
               className={`${FIELD} w-44 min-w-0`}
             />
             <Select label="People" value={data.people} onChange={data.setPeople} options={peopleOptions} className={`${FIELD} w-52 min-w-0`} menuWidth={220} />
+            {filtered && (
+              <Button variant="quiet" data-tooltip="Clear the search and show every project and person" onClick={resetFilters}>
+                Reset
+              </Button>
+            )}
             <span className="flex-1" />
             <Button shortcut="branch.other" onClick={() => go({ name: 'pick', projectId: data.project === 'all' ? undefined : data.project })}>
               Review another branch…
@@ -204,7 +220,19 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
 
           <div data-inbox-list className="flex flex-col gap-5" onKeyDown={onListKey}>
             {scanning && <GroupSkeleton />}
-            {data.loaded && total === 0 && <Notice>{filtered ? 'Nothing matches.' : 'Nothing waiting for you.'}</Notice>}
+            {data.loaded && total === 0 && (
+              <Notice
+                actions={
+                  filtered && (
+                    <Button variant="quiet" size="sm" onClick={resetFilters}>
+                      Reset search and filters
+                    </Button>
+                  )
+                }
+              >
+                {filtered ? 'Nothing matches.' : 'Nothing waiting for you.'}
+              </Notice>
+            )}
             {data.groups.map((g) =>
               g.rows.length === 0 ? null : <Group key={g.id} group={g} folded={g.foldable && !!folded[g.id]} onFold={() => setFolded((f) => ({ ...f, [g.id]: !f[g.id] }))} onIgnore={data.ignore} go={go} />
             )}

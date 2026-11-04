@@ -99,38 +99,38 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
       detail: data.uncommitted
         ? `Commits the changes to ${data.branch} as they are, as one commit. Nothing is pushed. Your comments stay in Hunkdory.`
         : data.prByYou
-        ? `Merges your pull request #${data.pr!.number} into ${data.pr!.baseRefName}${comments.length ? `, with your ${plural(comments.length, 'comment')} on it` : ''}. GitHub doesn’t let you approve your own PR.`
-        : data.pr
-        ? `Approves pull request #${data.pr.number} on GitHub${comments.length ? ` with your ${plural(comments.length, 'comment')}` : ''} and merges it into ${data.pr.baseRefName}.`
-        : canOpenPr && openPr
-          ? `Pushes ${data.branch} and opens a pull request into ${base}, with your comments in the description. Nothing is merged yet.`
-          : `Merge into ${base} as it is. Your comments stay in Hunkdory.`,
+          ? `Merges your pull request #${data.pr!.number} into ${data.pr!.baseRefName}${comments.length ? `, with your ${plural(comments.length, 'comment')} on it` : ''}. GitHub doesn’t let you approve your own PR.`
+          : data.pr
+            ? `Approves pull request #${data.pr.number} on GitHub${comments.length ? ` with your ${plural(comments.length, 'comment')}` : ''} and merges it into ${data.pr.baseRefName}.`
+            : canOpenPr && openPr
+              ? `Pushes ${data.branch} and opens a pull request into ${base}, with your comments in the description. Nothing is merged yet.`
+              : `Merge into ${base} as it is. Your comments stay in Hunkdory.`,
       submit: data.uncommitted ? 'Approve & commit' : data.prByYou ? 'Merge' : data.pr ? 'Approve & merge' : canOpenPr && openPr ? 'Approve & open PR' : 'Approve & merge',
     },
     ...(data.pr
       ? [
-          {
-            id: 'github' as const,
-            title: `Post your review on PR #${data.pr.number}`,
-            detail: `${comments.length ? `Your ${plural(comments.length, 'comment')} ${comments.length === 1 ? 'goes' : 'go'} on GitHub, on the code ${comments.length === 1 ? "it's" : "they're"} about.` : 'Your review goes on GitHub.'} The PR leaves your inbox until it changes.`,
-            submit: event === 'APPROVE' ? 'Approve on GitHub' : event === 'REQUEST_CHANGES' ? 'Request changes on GitHub' : 'Post review',
-          },
-        ]
+        {
+          id: 'github' as const,
+          title: `Post your review on PR #${data.pr.number}`,
+          detail: `${comments.length ? `Your ${plural(comments.length, 'comment')} ${comments.length === 1 ? 'goes' : 'go'} on GitHub, on the code ${comments.length === 1 ? "it's" : "they're"} about.` : 'Your review goes on GitHub.'} The PR leaves your inbox until it changes.`,
+          submit: event === 'APPROVE' ? 'Approve on GitHub' : event === 'REQUEST_CHANGES' ? 'Request changes on GitHub' : 'Post review',
+        },
+      ]
       : []),
     prCopilot
       ? {
-          id: 'send-back' as const,
-          title: 'Send back to Copilot',
-          detail: `Posts your review on PR #${data.pr!.number} asking @copilot to address it${dropping.length ? `, including dropping ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. Copilot works on GitHub; the PR comes back here when it pushes.`,
-          submit: 'Send back to Copilot',
-        }
+        id: 'send-back' as const,
+        title: 'Send back to Copilot',
+        detail: `Posts your review on PR #${data.pr!.number} asking @copilot to address it${dropping.length ? `, including dropping ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. Copilot works on GitHub; the PR comes back here when it pushes.`,
+        submit: 'Send back to Copilot',
+      }
       : {
-          id: 'send-back' as const,
-          title: 'Send back to the agent',
-          detail: `Resumes the agent's session with ${comments.length ? `your ${plural(comments.length, 'comment')}` : 'your note'}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
-          submit: 'Send back',
-          disabled: agent ? undefined : !data.assistant ? "This project is set to Manual, so there's no assistant to send it back to." : 'No session on this Mac worked on this branch, so there is no agent to send it back to.',
-        },
+        id: 'send-back' as const,
+        title: 'Send back to the agent',
+        detail: `Resumes the agent's session with ${comments.length ? `your ${plural(comments.length, 'comment')}` : 'your note'}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
+        submit: 'Send back',
+        disabled: agent ? undefined : !data.assistant ? "This project is set to Manual, so there's no assistant to send it back to." : 'No session on this Mac worked on this branch, so there is no agent to send it back to.',
+      },
     {
       id: 'discard',
       title: data.local ? 'Discard the branch' : 'Close this review',
@@ -240,7 +240,9 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
             : noteField('Review summary (optional)', comments.length ? 'Anything else it should know' : `Leave it empty to post “${reviewedNote(data.githubLogin)}”`)}
         </>
       );
-    if (id === 'send-back')
+    if (id === 'send-back') {
+      // With no comments and nothing to drop, the note is all the agent gets: sending it back needs one.
+      const optional = comments.length > 0 || drop.size > 0;
       return (
         <>
           {outside.map((s) => (
@@ -257,9 +259,10 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
               Drop step {s.index + 1} ({s.title}): you didn’t ask for it
             </Checkbox>
           ))}
-          {noteField(`Note to ${agent === 'copilot' ? 'Copilot' : 'the agent'} (optional)`)}
+          {noteField(`Note to ${agent === 'copilot' ? 'Copilot' : 'the agent'}${optional ? ' (optional)' : ''}`, optional ? undefined : 'What should it change?')}
         </>
       );
+    }
     if (id === 'discard' && data.local)
       return (
         <Checkbox
@@ -285,7 +288,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
       </ViewHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 pt-7 pb-14">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-1">
             <h1 className="text-hero font-semibold break-words">{data.title}</h1>
             <p className="text-meta text-faint">
