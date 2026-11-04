@@ -496,9 +496,9 @@ export class Projects {
     if (!filter) scan.pullRequests = prs.length;
     const matched = matchSessions(sessions, { exists: () => true, exclude, probable });
     // A PR's branch checked out on this Mac, at the PR's commit or with commits made here on top, is where Claude can
-    // change it and Hunkdory pushes from. One behind the PR isn't the PR.
+    // change it and Hunkdory pushes from. So is one with the PR's files on other commits, as after the PR was rebased:
+    // the push moves it onto the PR's head first. One behind the PR isn't the PR.
     const trees = await g.worktrees(root).catch(() => [] as g.Worktree[]);
-    const onTop = async (t: g.Worktree, pr: PullRequest) => t.head === pr.headRefOid || (await g.tryGit(['merge-base', '--is-ancestor', pr.headRefOid, t.head], root)) !== null;
     const out: Discovered[] = [];
     for (const pr of prs) {
       if (only && pr.headRefName !== only) continue;
@@ -509,8 +509,9 @@ export class Projects {
       if (!fetched && (await g.tryGit(['rev-parse', headRef], root))?.trim() !== pr.headRefOid) continue;
       const match = matched.get(pr.headRefName) ?? null;
       const named = pr.fork ? undefined : trees.find((t) => t.branch === pr.headRefName);
-      const tree = named && (await onTop(named, pr)) ? named : undefined;
-      const ahead = tree && tree.head !== pr.headRefOid ? Number((await g.tryGit(['rev-list', '--count', `${pr.headRefOid}..${tree.head}`], root))?.trim() || 0) : 0;
+      const at = named ? await prRelation(root, named.head, pr.headRefOid) : null;
+      const tree = at ? named : undefined;
+      const ahead = at === 'ahead' ? Number((await g.tryGit(['rev-list', '--count', `${pr.headRefOid}..${named!.head}`], root))?.trim() || 0) : 0;
       out.push({
         branch: {
           projectId: project.id,
@@ -685,6 +686,9 @@ export class Projects {
     if (d.branch.checkout.kind === 'none') throw new Error(`PR #${pr.number} isn't checked out on this Mac, or it's behind the PR there.`);
     const wt = d.branch.checkout.path;
     if ((await g.currentBranch(wt)) !== pr.headRefName) throw new Error(`The folder with these changes is no longer on ${pr.headRefName}. Reload the review.`);
+    // The PR was rebased under the checkout: its branch goes onto the PR's head, so the push isn't a forced one.
+    const head = (await g.git(['rev-parse', 'HEAD'], wt)).trim();
+    if ((await prRelation(project.path, head, pr.headRefOid)) === 'rebased') await g.git(['reset', '--soft', '--quiet', pr.headRefOid], wt);
     const files = (await g.dirtyFiles(wt)).length;
     if (files) {
       await g.git(['add', '-A', '--', '.', ':(exclude).review'], wt);
@@ -1099,6 +1103,17 @@ function foldDuplicates(items: Discovered[]): Discovered[] {
 async function chosenBase(project: Project, branch: string): Promise<string | null> {
   const base = project.bases?.[branch];
   return base && (await g.refExists(project.path, base)) ? base : null;
+}
+
+/**
+ * How a checkout's commit stands to a PR's head: at it, ahead of it with commits made here, or `rebased`: the same
+ * files on other commits, as when the PR was rebased after it was checked out. Null: it's behind, or elsewhere.
+ */
+async function prRelation(root: string, head: string, prHead: string): Promise<'at' | 'ahead' | 'rebased' | null> {
+  if (head === prHead) return 'at';
+  if ((await g.tryGit(['merge-base', '--is-ancestor', prHead, head], root)) !== null) return 'ahead';
+  if ((await g.tryGit(['diff', '--quiet', prHead, head], root)) !== null) return 'rebased';
+  return null;
 }
 
 /** When the newest uncommitted edit in a checkout was made. */

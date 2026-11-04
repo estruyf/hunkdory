@@ -547,7 +547,7 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
         outside.length ? (
           <span className="flex flex-col items-start gap-1">
             {outside.map((s) => (
-              <button key={s.key} type="button" className="text-left break-words text-link hover:underline" onClick={() => onOpen(s)}>
+              <button key={s.key} type="button" className="max-w-full text-left break-words text-link hover:underline" onClick={() => onOpen(s)}>
                 Step {s.index + 1}: {s.title} ({plural(s.files.length, 'file')}) →
               </button>
             ))}

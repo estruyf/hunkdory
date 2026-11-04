@@ -508,7 +508,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
           <AgentTests data={data} />
         </section>
       )}
-      {data.stack && <StackBar data={data} go={go} />}
+      {data.stack && <StackBar data={data} go={go} layout="column" />}
       <ChecksCard data={data} />
     </aside>
   );
@@ -667,7 +667,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
                 {a === 'no' || a === 'unsure' ? (
                   <CheckFollowUp
                     key={`${cur.key}:${i}:${a}`}
-                    data={data}
+                    data={askData}
                     step={cur}
                     index={i}
                     value={a}
@@ -677,6 +677,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
                     onShowChanges={showChanges}
                     loadedAt={loadedAt}
                     autoFocus={answered?.stepKey === cur.key && answered.index === i}
+                    onCheckout={checkout}
                   />
                 ) : (
                   thread.length > 0 && (

@@ -62,6 +62,29 @@ function useSend(data: ReviewData, step: Step, check?: number) {
   return { send, busy: !!pending, pending, error };
 }
 
+const CHECKOUT_TIP = "Makes a worktree for the PR's branch next to the project's folder, so the change has somewhere to happen.";
+
+/** Checking the pull request out in a worktree, when a change has nowhere to happen yet. `checkout` says whether it worked. */
+function useCheckout(data: ReviewData, onCheckout?: () => Promise<void>) {
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const canCheckout = !data.ask.change.by && !!data.ask.change.checkout && !!onCheckout;
+  const checkout = async () => {
+    setCheckingOut(true);
+    setCheckoutError(null);
+    try {
+      await onCheckout!();
+      return true;
+    } catch (e) {
+      setCheckoutError(cleanError(e));
+      return false;
+    } finally {
+      setCheckingOut(false);
+    }
+  };
+  return { canCheckout, checkout, checkingOut, checkoutError };
+}
+
 function Asked({ kind, text }: PendingAsk) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -180,21 +203,8 @@ export function AskPanel({
 }) {
   const [text, setText] = useState(draft ?? '');
   const { send: ask, busy, pending, error } = useSend(data, step);
-  const [checkingOut, setCheckingOut] = useState(false);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const { canCheckout, checkout, checkingOut, checkoutError } = useCheckout(data, onCheckout);
   const canChange = !!data.ask.change.by;
-  const canCheckout = !data.ask.change.by && !!data.ask.change.checkout && !!onCheckout;
-  const checkout = async () => {
-    setCheckingOut(true);
-    setCheckoutError(null);
-    try {
-      await onCheckout!();
-    } catch (e) {
-      setCheckoutError(cleanError(e));
-    } finally {
-      setCheckingOut(false);
-    }
-  };
   // The box empties right away: what you sent shows in the thread. It comes back if sending fails.
   const send = async (kind: Exchange['kind']) => {
     const sent = text;
@@ -231,7 +241,7 @@ export function AskPanel({
           Ask for this change
         </Button>
         {canCheckout && (
-          <Button variant="quiet" disabled={checkingOut} aria-busy={checkingOut} onClick={checkout} data-tooltip="Makes a worktree for the PR's branch next to the project's folder, so the change has somewhere to happen. Your text stays.">
+          <Button variant="quiet" disabled={checkingOut} aria-busy={checkingOut} onClick={checkout} data-tooltip={`${CHECKOUT_TIP} Your text stays.`}>
             {checkingOut ? 'Checking out…' : 'Check out in a worktree'}
           </Button>
         )}
@@ -263,6 +273,7 @@ export function CheckFollowUp({
   onShowChanges,
   loadedAt,
   autoFocus,
+  onCheckout,
 }: {
   data: ReviewData;
   step: Step;
@@ -275,12 +286,15 @@ export function CheckFollowUp({
   onShowChanges: () => void;
   loadedAt: string;
   autoFocus?: boolean;
+  /** Checks the pull request out in a worktree, so the change has somewhere to happen. */
+  onCheckout?: () => Promise<void>;
 }) {
   const question = step.checks[index];
   const change = value === 'no';
   // A question starts from the one on screen; a change from what you said should change.
   const [text, setText] = useState(change ? note : question);
   const { send, busy, pending, error } = useSend(data, step, index);
+  const { canCheckout, checkout, checkingOut, checkoutError } = useCheckout(data, onCheckout);
   const canChange = !!data.ask.change.by;
   const canAsk = !!data.ask.question.by;
   const changeRunning = exchanges.some((e) => e.kind === 'change' && e.status === 'running');
@@ -308,9 +322,11 @@ export function CheckFollowUp({
       return;
     }
     save();
+    // Nowhere to change it yet: check the PR out first, then ask in the same go.
+    if (!canChange && !(await checkout())) return;
     await send('change', text.trim() ? `${question}\n\n${text.trim()}` : question);
   };
-  const disabled = busy || (change ? !canChange || changeRunning : !text.trim() || !canAsk);
+  const disabled = busy || checkingOut || (change ? !(canChange || canCheckout) || changeRunning : !text.trim() || !canAsk);
 
   const name = data.assistant?.name ?? 'the assistant';
 
@@ -339,17 +355,18 @@ export function CheckFollowUp({
           variant="primary"
           kbd="mod+enter"
           disabled={disabled}
-          aria-busy={busy}
+          aria-busy={busy || checkingOut}
           onClick={submit}
-          data-tooltip={change ? (!canChange ? who(data, 'change') : undefined) : !canAsk ? who(data, 'question') : undefined}
+          data-tooltip={change ? (canChange ? undefined : canCheckout ? CHECKOUT_TIP : who(data, 'change')) : !canAsk ? who(data, 'question') : undefined}
         >
-          {busy ? (change ? 'Starting…' : 'Asking…') : change ? `Ask ${name} to change it` : 'Ask'}
+          {checkingOut ? 'Checking out…' : busy ? (change ? 'Starting…' : 'Asking…') : change ? (canChange || !canCheckout ? `Ask ${name} to change it` : `Check out and ask ${name} to change it`) : 'Ask'}
         </Button>
         <span className="min-w-0 flex-1 text-meta text-muted">
           {change ? <>Goes with your review as “Needs a change”, whether or not {name} changes it now. {canChange ? who(data, 'change') : ''}</> : who(data, 'question')}
         </span>
       </div>
       {error && <Notice tone="error">{error}</Notice>}
+      {checkoutError && <Notice tone="error">{checkoutError}</Notice>}
     </div>
   );
 }

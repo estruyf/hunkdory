@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReviewData, WalkthroughJob } from '../../shared/types.ts';
 import { CircleCheck, Loader2 } from 'lucide-react';
-import { cleanError } from './ui.tsx';
+import { cleanError, plural } from './ui.tsx';
 import { Button } from './ui/Button.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { jobKey, useWalkthroughJobFor, useWalkthroughs } from '../state/walkthroughs.ts';
@@ -50,8 +50,19 @@ export function useWalkthroughJob(data: ReviewData | undefined, opts: { auto?: b
       setError(cleanError(e));
     }
   };
+  // Only what the walkthrough doesn't cover yet, such as a change Claude made. Nothing to do: the data is just stale.
+  const update = async () => {
+    setError(null);
+    try {
+      const j = await window.api.updateWalkthrough(projectId!, branch!);
+      if (j) remember(j);
+      else onDone.current?.();
+    } catch (e) {
+      setError(cleanError(e));
+    }
+  };
   const cancel = () => window.api.cancelWalkthrough(projectId!, branch!);
-  return { job, error, write, cancel };
+  return { job, error, write, update, cancel };
 }
 
 /** Runs whose result a screen read the branch again for. */
@@ -229,11 +240,17 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
       }
     };
     const sharedUrl = sharing.startsWith('https://') ? sharing : shared?.url;
+    const uncovered = data.steps.filter((s) => s.source === 'unnarrated');
     return (
       <Notice
         tone="neutral"
         actions={
           <>
+            {!manual && uncovered.length > 0 && (
+              <Button size="sm" variant="primary" onClick={w.update}>
+                Update the walkthrough
+              </Button>
+            )}
             {data.pr && (
               <Button size="sm" disabled={sharing === 'busy'} aria-busy={sharing === 'busy'} onClick={share}>
                 {sharing === 'busy' ? 'Sharing…' : shared || sharing.startsWith('https://') ? 'Share again' : `Share on PR #${data.pr.number}`}
@@ -257,6 +274,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
             </button>
           </>
         )}
+        {!manual && uncovered.length > 0 && <> {plural(uncovered.length, 'file')} changed since it was written, such as by a change Claude made. Updating fits them into its steps.</>}
         {sharing.startsWith('error:') && <span className="text-error"> Sharing failed: {sharing.slice(6)}</span>}
         {failed && <span className="text-error"> Rewriting failed: {failed}</span>}
       </Notice>

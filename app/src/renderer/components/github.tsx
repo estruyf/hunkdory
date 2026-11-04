@@ -114,8 +114,11 @@ export async function openStackEntry(projectId: string, e: StackEntry, go: Go) {
   go({ name: 'plan', projectId, branch: e.branch });
 }
 
-/** The PRs this one sits on and that sit on it. Each opens its own review. */
-export function StackBar({ data, go }: { data: ReviewData; go: Go }) {
+/**
+ * The PRs this one sits on and that sit on it. Each opens its own review. `row` runs from the base to the newest, left
+ * to right; `column`, for a narrow side panel, has the newest on top and the base at the bottom.
+ */
+export function StackBar({ data, go, layout = 'row' }: { data: ReviewData; go: Go; layout?: 'row' | 'column' }) {
   const [error, setError] = useState<string | null>(null);
   if (!data.stack) return null;
   const open = async (e: StackEntry) => {
@@ -125,26 +128,45 @@ export function StackBar({ data, go }: { data: ReviewData; go: Go }) {
       setError(cleanError(err));
     }
   };
+  const pill = (e: StackEntry) =>
+    e.current ? (
+      <Pill selected aria-current="page" data-tooltip={e.title}>
+        #{e.number} this PR
+      </Pill>
+    ) : (
+      <StackPill entry={e} onClick={() => open(e)} />
+    );
   return (
     <nav aria-label="Pull request stack" className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-ui">
-        <span className="font-semibold text-muted">Stack</span>
-        <span className="font-mono text-muted">{data.stack.base}</span>
-        {data.stack.prs.map((e) => (
-          <span key={e.number} className="inline-flex items-center gap-2">
-            <span aria-hidden className="text-faint">
-              ←
+      {layout === 'row' ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-ui">
+          <span className="font-semibold text-muted">Stack</span>
+          <span className="font-mono text-muted">{data.stack.base}</span>
+          {data.stack.prs.map((e) => (
+            <span key={e.number} className="inline-flex items-center gap-2">
+              <span aria-hidden className="text-faint">
+                ←
+              </span>
+              {pill(e)}
             </span>
-            {e.current ? (
-              <Pill selected aria-current="page" data-tooltip={e.title}>
-                #{e.number} this PR
-              </Pill>
-            ) : (
-              <StackPill entry={e} onClick={() => open(e)} />
-            )}
-          </span>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <span className="text-ui font-semibold text-muted">Stack</span>
+          <ol className="flex flex-col items-start gap-0.5 text-ui">
+            {[...data.stack.prs].reverse().map((e) => (
+              <li key={e.number} className="flex flex-col items-start gap-0.5">
+                {pill(e)}
+                <span aria-hidden className="pl-3 text-faint">
+                  ↓
+                </span>
+              </li>
+            ))}
+            <li className="font-mono text-muted">{data.stack.base}</li>
+          </ol>
+        </>
+      )}
       <span className="text-meta text-muted">This review only shows what this PR adds on top of the one below it. {stackProgress(data.stack.prs)}.</span>
       {error && <Notice tone="error">{error}</Notice>}
     </nav>
