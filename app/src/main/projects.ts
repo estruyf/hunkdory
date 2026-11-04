@@ -481,10 +481,17 @@ export class Projects {
     let prs: PullRequest[];
     try {
       prs = (await gh.openPullRequests(root, project.github!)).filter((p) => !filter || filter(p));
-      await gh.fetchPullRequests(root, project.github!, only ? prs.filter((p) => p.headRefName === only) : prs);
     } catch (e) {
       scan.error = (e as Error).message;
       return [];
+    }
+    // A fetch that fails, say offline, still leaves the PRs fetched before: those whose head hasn't moved since stay.
+    let fetched = true;
+    try {
+      await gh.fetchPullRequests(root, project.github!, only ? prs.filter((p) => p.headRefName === only) : prs);
+    } catch (e) {
+      scan.error = (e as Error).message;
+      fetched = false;
     }
     if (!filter) scan.pullRequests = prs.length;
     const matched = matchSessions(sessions, { exists: () => true, exclude, probable });
@@ -495,6 +502,7 @@ export class Projects {
       const chosen = await chosenBase(project, pr.headRefName);
       const baseRef = chosen ?? gh.baseRef(pr.baseRefName);
       if (!(await g.refExists(root, headRef)) || !(await g.refExists(root, baseRef))) continue;
+      if (!fetched && (await g.tryGit(['rev-parse', headRef], root))?.trim() !== pr.headRefOid) continue;
       const match = matched.get(pr.headRefName) ?? null;
       out.push({
         branch: {
@@ -610,6 +618,7 @@ export class Projects {
     const prs = await gh.openPullRequests(project.path, project.github).catch(() => [] as PullRequest[]);
     const st = gh.stackOf(prs, pr.number);
     if (!st) return null;
+    const me = await gh.login(project.path).catch(() => null);
     const entries = [];
     for (const p of st.prs) {
       const branch =
@@ -618,7 +627,17 @@ export class Projects {
           : project.watch.pullRequests ||(await g.refExists(project.path, `refs/heads/${p.headRefName}`))
             ? p.headRefName
             : `origin/${p.headRefName}`;
-      entries.push({ number: p.number, title: p.title, branch, url: p.url, current: p.number === pr.number, status: this.store.review(project.id, branch)?.status ?? null });
+      const state = this.store.review(project.id, branch);
+      entries.push({
+        number: p.number,
+        title: p.title,
+        branch,
+        url: p.url,
+        current: p.number === pr.number,
+        status: state?.status ?? null,
+        changed: !!state?.decision?.headSha && state.decision.headSha !== p.headRefOid,
+        github: (me && p.reviews.find((r) => r.login === me)?.state) || null,
+      });
     }
     return { base: st.base, prs: entries };
   }
@@ -816,11 +835,20 @@ export class Projects {
     return data;
   }
 
-  private scanning: Promise<{ items: InboxItem[]; scans: ProjectScan[]; me: string | null }> | null = null;
+  private scanning: Promise<InboxScan> | null = null;
+  /** The last scan, so one project can be read again without the others. */
+  private last: InboxScan | null = null;
 
-  /** Two screens asking at once share one scan. */
-  inbox(refresh = false): Promise<{ items: InboxItem[]; scans: ProjectScan[]; me: string | null }> {
-    if (this.scanning && !refresh) return this.scanning;
+  /**
+   * Two screens asking at once share one scan. `projectId` reads that project alone and keeps the others as the
+   * last scan saw them; `refetch` asks GitHub again rather than use the pull requests read in the last minute.
+   */
+  inbox(refresh = false, opts: { projectId?: string; refetch?: boolean } = {}): Promise<InboxScan> {
+    const only = opts.projectId ? this.store.projects().find((p) => p.id === opts.projectId) : undefined;
+    if (opts.refetch) for (const p of only ? [only] : this.store.projects()) if (p.github) gh.forget(p.github);
+    // Before the first scan there are no others to keep: read them all.
+    if (only && (this.last || this.scanning)) return (this.scanning ?? Promise.resolve()).catch(() => {}).then(() => this.scanProject(only, refresh));
+    if (this.scanning && !refresh && !opts.refetch) return this.scanning;
     const run = this.scanInbox(refresh).finally(() => {
       if (this.scanning === run) this.scanning = null;
     });
@@ -828,7 +856,19 @@ export class Projects {
     return run;
   }
 
-  private async scanInbox(refresh: boolean): Promise<{ items: InboxItem[]; scans: ProjectScan[]; me: string | null }> {
+  private async scanProject(project: Project, refresh: boolean): Promise<InboxScan> {
+    const last = this.last ?? { items: [], scans: [], me: null };
+    const { items, scan } = await this.projectInbox(project, refresh, new Set(), Promise.resolve(last.me));
+    const ids = new Set(this.store.projects().map((p) => p.id));
+    const scans = last.scans.filter((s) => ids.has(s.projectId) && s.projectId !== project.id);
+    const at = last.scans.findIndex((s) => s.projectId === project.id);
+    scans.splice(at === -1 ? scans.length : at, 0, scan);
+    const next = { items: [...last.items.filter((i) => ids.has(i.projectId) && i.projectId !== project.id), ...items].sort(newestFirst), scans, me: last.me };
+    this.last = next;
+    return next;
+  }
+
+  private async scanInbox(refresh: boolean): Promise<InboxScan> {
     const listed = new Set<string>();
     // Who "you" are on GitHub, for the People filter. Asked once per run, alongside the scan.
     const linked = this.store.projects().find((p) => p.github);
@@ -837,8 +877,9 @@ export class Projects {
     const per = await Promise.all(this.store.projects().map((p) => this.projectInbox(p, refresh, listed, me)));
     this.summaries.keepOnly(listed);
     const items = per.flatMap((r) => r.items);
-    items.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-    return { items, scans: per.map((r) => r.scan), me: await me };
+    items.sort(newestFirst);
+    this.last = { items, scans: per.map((r) => r.scan), me: await me };
+    return this.last;
   }
 
   private async projectInbox(project: Project, refresh: boolean, listed: Set<string>, me: Promise<string | null>): Promise<{ items: InboxItem[]; scan: ProjectScan }> {
@@ -942,6 +983,10 @@ export class Projects {
     return { items: items.filter((x): x is InboxItem => !!x), scan };
   }
 }
+
+type InboxScan = { items: InboxItem[]; scans: ProjectScan[]; me: string | null };
+
+const newestFirst = (a: InboxItem, b: InboxItem) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
 
 /** Folds branches on the same commit as another one into it, sessions and all. */
 function foldDuplicates(items: Discovered[]): Discovered[] {

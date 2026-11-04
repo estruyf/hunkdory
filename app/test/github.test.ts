@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { apiErrorText, baseRef, fetchRefspecs, foldComments, isCopilot, isOwnPrError, parseChecks, prRef, readWalkthroughComment, stackOf, toPullRequest, walkthroughComment, type RawPullRequest } from '../src/main/github.ts';
+import { apiErrorText, baseRef, fetchError, fetchRefspecs, foldComments, isCopilot, isOwnPrError, parseChecks, prRef, readWalkthroughComment, stackOf, toPullRequest, walkthroughComment, type RawPullRequest } from '../src/main/github.ts';
 import type { PullRequest } from '../src/shared/types.ts';
 
 const pr = (number: number, headRefOid: string, baseRefName = 'develop/5.5'): PullRequest => ({
@@ -151,4 +151,20 @@ test('a failed API call says what GitHub said, not just the status', () => {
   assert.equal(apiErrorText(stderr, JSON.stringify({ message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'custom', message: 'title is too long' }] })), 'title is too long');
   assert.equal(apiErrorText(stderr, JSON.stringify({ message: 'Not Found' })), 'gh: Unprocessable Entity (HTTP 422)');
   assert.equal(apiErrorText(stderr, ''), 'gh: Unprocessable Entity (HTTP 422)');
+});
+
+test('a failed fetch says why in a sentence, without the command and its refspecs', () => {
+  const stderr = [
+    'Command failed: git fetch --no-tags --quiet origin +refs/pull/2415/head:refs/reviewer/pr/2415 +refs/heads/develop/5.5:refs/reviewer/base/develop/5.5',
+    'git@github.com: Permission denied (publickey).',
+    'fatal: Could not read from remote repository.',
+    '',
+    'Please make sure you have the correct access rights',
+    'and the repository exists.',
+  ].join('\n');
+  assert.match(fetchError(stderr, 'origin').message, /^Couldn't fetch the latest pull requests: GitHub turned down the SSH key for origin\./);
+  assert.match(fetchError('ssh: Could not resolve host: github.com', 'origin').message, /can't be reached/);
+  assert.match(fetchError('', 'origin', true).message, /longer than 2 minutes/);
+  // Anything else: git's own reason, not the command line.
+  assert.equal(fetchError('Command failed: git fetch origin +refs/x:refs/y\nfatal: refusing to fetch into branch', 'origin').message, "Couldn't fetch the latest pull requests: refusing to fetch into branch");
 });

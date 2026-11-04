@@ -203,7 +203,7 @@ const api: ReviewerApi = {
     if (/^https:\/\//.test(url)) await shell.openExternal(url);
   },
   inbox: async (opts) => {
-    const { items: waiting, scans, me } = await projects.inbox(opts?.refresh);
+    const { items: waiting, scans, me } = await projects.inbox(opts?.refresh, { projectId: opts?.projectId, refetch: opts?.refetch });
     const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
     const done = store
       .reviews()

@@ -273,7 +273,7 @@ export const SHORTCUTS = [
   { id: 'settings', keys: ['mod+,'], action: 'Open or close Settings', section: 'general' },
   { id: 'settings.close', keys: ['escape'], action: 'Close Settings', section: 'general', when: (ctx) => ctx.view === 'settings' },
   { id: 'home', keys: ['mod+shift+h'], action: 'Inbox', section: 'general', note: 'From a review, your place in it is kept' },
-  { id: 'branch.goto', keys: ['mod+p'], action: 'Go to a branch', section: 'general', note: 'The inbox’s search, from any view' },
+  { id: 'branch.goto', keys: ['mod+p'], action: 'Go to a branch or pull request', section: 'general', note: 'The inbox’s search, from any view' },
   { id: 'branch.other', keys: ['mod+n'], action: 'Review another branch', section: 'general' },
   { id: 'nav.back', keys: ['mod+['], action: 'Back', section: 'general', note: 'Also the mouse’s back button and a swipe' },
   { id: 'nav.forward', keys: ['mod+]'], action: 'Forward', section: 'general' },

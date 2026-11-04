@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronUp, EyeOff, Loader2, Plus, Search, Settings, Undo2 } from 'lucide-react';
-import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { ChevronDown, ChevronUp, EyeOff, Loader2, Plus, RefreshCw, Search, Settings, Undo2 } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { Go } from '../App.tsx';
 import { Crumbs, plural } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
@@ -63,6 +63,7 @@ const GROUP_LIMIT = 5;
 export function Home({ go, data, initialProject }: { go: Go; data: InboxData; initialProject?: string }) {
   const first = useBranches((s) => s.firstToReview);
   const [folded, setFolded] = useState<Record<string, boolean>>({ reviewed: true, ignored: true });
+  const scroller = useRef<HTMLDivElement>(null);
 
   // Opened on one project (from its settings): filter to it.
   useEffect(() => {
@@ -94,6 +95,12 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
     ...(Object.keys(ROLE_LABEL) as (keyof typeof ROLE_LABEL)[]).flatMap((role) => ['me', ...data.everyone[role]].map((p) => ({ value: `${role}:${p}` as PeopleFilter, label: peopleLabel(`${role}:${p}`) }))),
   ];
   if (!peopleOptions.some((o) => o.value === data.people)) peopleOptions.push({ value: data.people, label: peopleLabel(data.people) });
+
+  // A project in Projects filters the inbox to it, or back to every project; the list it filters is up top.
+  const pickProject = (id: string) => {
+    data.setProject(data.project === id ? 'all' : id);
+    scroller.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Esc clears the search (and leaves it once empty), ↓ goes to the first row, Enter opens it.
   const onSearchKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -137,7 +144,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
         </div>
         <Button variant="quiet" iconOnly aria-label="Settings" shortcut="settings" icon={<Settings size={15} aria-hidden />} onClick={() => openSettings()} />
       </ViewHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-10 pb-14">
           {scanning ? (
             <div role="status" className="flex flex-col gap-2">
@@ -174,8 +181,8 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
                 value={data.query}
                 onChange={(e) => data.setQuery(e.target.value)}
                 onKeyDown={onSearchKey}
-                placeholder="Search branches"
-                aria-label="Search branches"
+                placeholder="Search branches and PRs"
+                aria-label="Search branches and pull requests"
                 spellCheck={false}
                 className="min-w-0 flex-1 bg-transparent text-ui text-text outline-none placeholder:text-faint"
               />
@@ -208,6 +215,16 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
               <SectionHeader as="h2" count={shownProjects.length} className="flex-1">
                 Projects
               </SectionHeader>
+              <Button
+                variant="quiet"
+                size="sm"
+                icon={<RefreshCw size={13} className={data.refreshing === 'all' ? 'animate-spin' : ''} aria-hidden />}
+                disabled={!!data.refreshing}
+                data-tooltip="Look for new branches and pull requests in every project"
+                onClick={() => data.refresh()}
+              >
+                Refresh all
+              </Button>
               <Button variant="quiet" size="sm" icon={<Plus size={13} aria-hidden />} onClick={() => go({ name: 'connect' })}>
                 Add project
               </Button>
@@ -215,7 +232,18 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
             {shownProjects.length > 0 && (
               <ul className="m-0 flex list-none flex-col gap-px p-0">
                 {shownProjects.map((p) => (
-                  <ProjectRow key={p.id} project={p} scan={data.scans.find((x) => x.projectId === p.id)} scanning={scanning} waiting={waitingRows.filter((r) => r.projectId === p.id).length} go={go} />
+                  <ProjectRow
+                    key={p.id}
+                    project={p}
+                    scan={data.scans.find((x) => x.projectId === p.id)}
+                    scanning={scanning}
+                    waiting={waitingRows.filter((r) => r.projectId === p.id).length}
+                    selected={data.project === p.id}
+                    onSelect={() => pickProject(p.id)}
+                    refreshing={data.refreshing === 'all' || data.refreshing === p.id}
+                    onRefresh={() => data.refresh(p.id)}
+                    go={go}
+                  />
                 ))}
               </ul>
             )}
@@ -341,11 +369,30 @@ function GroupSkeleton() {
   );
 }
 
-/** One project: what waits, and when nothing does, why, in numbers you can check. */
-function ProjectRow({ project, scan, scanning, waiting, go }: { project: Project; scan?: ProjectScan; scanning: boolean; waiting: number; go: Go }) {
+/** One project: what waits, and when nothing does, why, in numbers you can check. Picking it filters the inbox to it. */
+function ProjectRow({
+  project,
+  scan,
+  scanning,
+  waiting,
+  selected,
+  onSelect,
+  refreshing,
+  onRefresh,
+  go,
+}: {
+  project: Project;
+  scan?: ProjectScan;
+  scanning: boolean;
+  waiting: number;
+  selected: boolean;
+  onSelect(): void;
+  refreshing: boolean;
+  onRefresh(): void;
+  go: Go;
+}) {
   const why: string[] = [];
-  if (scan?.error) why.push(scan.error);
-  else if (scan && !waiting) {
+  if (scan && !scan.error && !waiting) {
     if (scan.pullRequests !== null) why.push(scan.pullRequests ? `${plural(scan.pullRequests, 'open pull request')}, none could be read.` : 'No open pull requests.');
     else {
       why.push(`${plural(scan.sessions, 'Claude Code session')} found, working on ${plural(scan.branchesSeen, 'branch', 'branches')}.`);
@@ -354,12 +401,36 @@ function ProjectRow({ project, scan, scanning, waiting, go }: { project: Project
     }
   }
   return (
-    <li className="flex items-center gap-3 rounded-lg px-2.5 py-2 hover:bg-border/45">
-      <ProjectIcon name={project.name} size={22} />
-      <span className="grid min-w-0 flex-1">
-        <span className="truncate text-body font-semibold">{project.name}</span>
-        <span className={`text-meta ${scan?.error ? 'text-error' : 'text-faint'}`}>{waiting ? `${plural(waiting, 'branch', 'branches')} to review` : why.join(' ') || (scanning ? 'Checking…' : 'Nothing waiting.')}</span>
-      </span>
+    <li className={`flex items-center gap-3 rounded-lg px-2.5 py-2 ${selected ? 'bg-selected' : 'hover:bg-border/45'}`}>
+      <button
+        type="button"
+        aria-pressed={selected}
+        data-tooltip={selected ? 'Show every project’s branches' : `Show only ${project.name}’s branches`}
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left"
+      >
+        <ProjectIcon name={project.name} size={22} />
+        <span className="grid min-w-0 flex-1">
+          <span className="truncate text-body font-semibold">{project.name}</span>
+          {(waiting || !scan?.error) && <span className="text-meta text-faint">{waiting ? `${plural(waiting, 'branch', 'branches')} to review` : why.join(' ') || (scanning || refreshing ? 'Checking…' : 'Nothing waiting.')}</span>}
+          {/* What went wrong reading it, such as a fetch GitHub turned down: what it still found stays listed above. */}
+          {scan?.error && (
+            <span className="line-clamp-2 text-meta text-error" data-tooltip={scan.error}>
+              {scan.error}
+            </span>
+          )}
+        </span>
+      </button>
+      <Button
+        variant="quiet"
+        size="sm"
+        iconOnly
+        aria-label={`Refresh ${project.name}`}
+        data-tooltip={`Look for new branches and pull requests in ${project.name}`}
+        disabled={refreshing}
+        icon={<RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} aria-hidden />}
+        onClick={onRefresh}
+      />
       <Button variant="quiet" size="sm" onClick={() => go({ name: 'pick', projectId: project.id })}>
         Review another branch
       </Button>

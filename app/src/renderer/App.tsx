@@ -29,7 +29,7 @@ export type Route =
   // `group` shows a whole skim folder on one page.
   | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; group?: string; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number }
   | { name: 'finish'; projectId: string; branch: string }
-  | { name: 'done'; projectId: string; branch: string; result: FinishResult };
+  | { name: 'done'; projectId: string; branch: string; result: FinishResult; stack?: ReviewData['stack'] };
 
 export type Go = (r: Route) => void;
 
@@ -192,6 +192,6 @@ function view(route: Route, go: Go, hasProjects: boolean, inbox: InboxData) {
     case 'finish':
       return <Finish go={go} projectId={route.projectId} branch={route.branch} />;
     case 'done':
-      return <Done go={go} projectId={route.projectId} branch={route.branch} result={route.result} />;
+      return <Done go={go} projectId={route.projectId} branch={route.branch} result={route.result} stack={route.stack ?? null} />;
   }
 }

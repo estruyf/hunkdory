@@ -84,6 +84,16 @@ const PILL_TONE: Record<Exclude<PillTone, 'count'>, string> = {
   link: 'border-link/40 bg-link/10 text-link',
 };
 
+/** Hovering a tinted pill deepens its tint rather than turning it grey. */
+const PILL_HOVER: Partial<Record<PillTone, string>> = {
+  accent: 'hover:bg-accent/20',
+  ok: 'hover:bg-ok/20',
+  warn: 'hover:bg-warn/20',
+  caution: 'hover:bg-caution/20',
+  error: 'hover:bg-error/20',
+  link: 'hover:bg-link/20',
+};
+
 export interface PillLook {
   tone: PillTone;
   /** A button (it reacts to hover) rather than a label. */
@@ -99,6 +109,6 @@ export function pillClass({ tone, interactive, dashed, selected, shrink }: PillL
   if (tone === 'count') return 'inline-flex items-center rounded-full px-1.5 tabular-nums tracking-normal';
   const muted = dashed || tone === 'muted';
   const look = selected ? 'border-border bg-selected text-text' : dashed ? 'border-dashed border-border text-muted' : PILL_TONE[tone];
-  const hover = interactive ? `hover:bg-border/50 ${muted && !selected ? 'hover:text-text' : ''}` : '';
+  const hover = interactive ? `${(!selected && !dashed && PILL_HOVER[tone]) || 'hover:bg-border/50'} ${muted && !selected ? 'hover:text-text' : ''}` : '';
   return `inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-meta whitespace-nowrap ${shrink ? 'min-w-0' : 'shrink-0'} ${look} ${hover}`;
 }

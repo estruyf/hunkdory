@@ -1,3 +1,4 @@
+import { Check, Eye, GitMerge, MessageSquare, RefreshCw, Undo2, X, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import type { Go } from '../App.tsx';
 import type { CheckItem, ReviewData, StackEntry } from '../../shared/types.ts';
@@ -77,7 +78,38 @@ export function ChecksCard({ data }: { data: ReviewData }) {
   );
 }
 
-const STATUS: Record<NonNullable<StackEntry['status']>, string> = { open: 'In review', reviewed: 'Reviewed', 'sent-back': 'Sent back', merged: 'Merged', discarded: 'Closed' };
+/**
+ * Where you are with a PR in a stack: your review in Hunkdory first, then what you did on GitHub. `done` is for
+ * picking what to review next. Null: you haven't looked at it.
+ */
+export function stackStatus(e: StackEntry): { label: string; tone: PillTone; icon: LucideIcon; done: boolean } | null {
+  if (e.status === 'merged') return { label: 'Merged', tone: 'ok', icon: GitMerge, done: true };
+  if (e.status === 'discarded') return { label: 'Closed', tone: 'muted', icon: X, done: true };
+  if ((e.status === 'reviewed' || e.status === 'sent-back') && e.changed) return { label: 'Changed since your review', tone: 'warn', icon: RefreshCw, done: false };
+  if (e.status === 'reviewed') return { label: 'Reviewed', tone: 'ok', icon: Check, done: true };
+  if (e.status === 'sent-back') return { label: 'Sent back', tone: 'caution', icon: Undo2, done: true };
+  if (e.github === 'APPROVED') return { label: 'Approved', tone: 'ok', icon: Check, done: true };
+  if (e.github === 'CHANGES_REQUESTED') return { label: 'Changes requested', tone: 'caution', icon: MessageSquare, done: true };
+  if (e.github === 'COMMENTED') return { label: 'Commented', tone: 'link', icon: MessageSquare, done: false };
+  if (e.status === 'open') return { label: 'In review', tone: 'link', icon: Eye, done: false };
+  return null;
+}
+
+/** "3 of 8 reviewed": the PRs you're done with, this one included. */
+export const stackProgress = (prs: StackEntry[]) => `${prs.filter((e) => stackStatus(e)?.done).length} of ${prs.length} reviewed`;
+
+/** The PR to review after this one: the first one up the stack you're not done with, else the first one below. */
+export function nextInStack(prs: StackEntry[]): StackEntry | null {
+  const at = prs.findIndex((e) => e.current);
+  const todo = (e: StackEntry) => !e.current && !stackStatus(e)?.done;
+  return prs.slice(at + 1).find(todo) ?? prs.slice(0, at).find(todo) ?? null;
+}
+
+/** Opens a PR of the stack. One outside your inbox gets picked, the same as "Review another branch". */
+export async function openStackEntry(projectId: string, e: StackEntry, go: Go) {
+  await window.api.trackBranch(projectId, e.branch);
+  go({ name: 'plan', projectId, branch: e.branch });
+}
 
 /** The PRs this one sits on and that sit on it. Each opens its own review. */
 export function StackBar({ data, go }: { data: ReviewData; go: Go }) {
@@ -85,9 +117,7 @@ export function StackBar({ data, go }: { data: ReviewData; go: Go }) {
   if (!data.stack) return null;
   const open = async (e: StackEntry) => {
     try {
-      // A PR outside your inbox gets picked, the same as "Review another branch".
-      await window.api.trackBranch(data.projectId, e.branch);
-      go({ name: 'plan', projectId: data.projectId, branch: e.branch });
+      await openStackEntry(data.projectId, e, go);
     } catch (err) {
       setError(cleanError(err));
     }
@@ -107,16 +137,23 @@ export function StackBar({ data, go }: { data: ReviewData; go: Go }) {
                 #{e.number} this PR
               </Pill>
             ) : (
-              <Pill tone="muted" onClick={() => open(e)} data-tooltip={`${e.title}${e.status ? ` · ${STATUS[e.status]}` : ''}`}>
-                #{e.number}
-                {e.status ? ` · ${STATUS[e.status]}` : ''}
-              </Pill>
+              <StackPill entry={e} onClick={() => open(e)} />
             )}
           </span>
         ))}
       </div>
-      <span className="text-meta text-muted">This review only shows what this PR adds on top of the one below it.</span>
+      <span className="text-meta text-muted">This review only shows what this PR adds on top of the one below it. {stackProgress(data.stack.prs)}.</span>
       {error && <Notice tone="error">{error}</Notice>}
     </nav>
+  );
+}
+
+function StackPill({ entry: e, onClick }: { entry: StackEntry; onClick(): void }) {
+  const st = stackStatus(e);
+  return (
+    <Pill tone={st?.tone ?? 'muted'} icon={st && <st.icon size={12} strokeWidth={2.5} aria-hidden />} onClick={onClick} data-tooltip={`${e.title}${st ? ` · ${st.label}` : ' · Not reviewed yet'}`}>
+      #{e.number}
+      {st ? ` · ${st.label}` : ''}
+    </Pill>
   );
 }

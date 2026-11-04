@@ -1,37 +1,48 @@
 import type { Go } from '../App.tsx';
-import { useEffect } from 'react';
-import { Crumbs, plural, rememberReview, useInbox } from '../components/ui.tsx';
+import { useEffect, useState } from 'react';
+import { cleanError, Crumbs, plural, rememberReview, useInbox } from '../components/ui.tsx';
+import { nextInStack, openStackEntry, stackProgress, stackStatus } from '../components/github.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Confetti } from '../components/Confetti.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Kbd } from '../components/ui/Kbd.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
+import { Pill } from '../components/ui/Pill.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { matches } from '../lib/shortcuts.ts';
 import { formatDuration, suggestedOrder } from '../../shared/order.ts';
-import type { FinishResult } from '../../shared/types.ts';
+import type { FinishResult, InboxItem, ReviewData, StackEntry } from '../../shared/types.ts';
 
 const HEADINGS = { merge: 'Merged', 'send-back': 'Sent back to Claude Code', discard: 'Discarded', github: 'Review posted on GitHub' } as const;
 
-export function Done({ go, projectId, branch, result }: { go: Go; projectId: string; branch: string; result: FinishResult }) {
+export function Done({ go, projectId, branch, result, stack }: { go: Go; projectId: string; branch: string; result: FinishResult; stack: ReviewData['stack'] }) {
   const inbox = useInbox();
+  const [error, setError] = useState<string | null>(null);
   const decision = result.review?.decision;
   useEffect(() => {
     if (result.review) rememberReview(result.review);
   }, []);
   const kind = decision?.kind ?? 'merge';
-  const queue = suggestedOrder(inbox.value?.waiting.filter((w) => !(w.projectId === projectId && w.branch === branch) && w.review?.status !== 'sent-back' && !w.ignored && !w.error) ?? []);
+  // A stacked PR: the one you just finished counts as done, and the next one up the stack comes before the inbox.
+  const prs = stack?.prs.map((e) => (e.current ? { ...e, status: result.review?.status ?? e.status, changed: false } : e)) ?? [];
+  const stackNext = nextInStack(prs);
+  const queue = suggestedOrder(inbox.value?.waiting.filter((w) => !(w.projectId === projectId && w.branch === branch) && w.review?.status !== 'sent-back' && !w.ignored && !w.error && !(stackNext && w.projectId === projectId && w.branch === stackNext.branch)) ?? []);
   const next = queue[0];
   const queueMinutes = queue.reduce((n, w) => n + w.minutes, 0);
+  const waitingFor = (e: StackEntry) => inbox.value?.waiting.find((w) => w.projectId === projectId && w.branch === e.branch);
+  const openNext = () => {
+    if (stackNext) openStackEntry(projectId, stackNext, go).catch((e) => setError(cleanError(e)));
+    else if (next) go({ name: 'plan', projectId: next.projectId, branch: next.branch });
+  };
 
   const heading = kind === 'send-back' && decision?.github ? 'Sent back to Copilot' : decision?.commit ? 'Committed' : HEADINGS[kind];
 
   // ⌘↵ reviews the next branch.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!next || !matches(e, 'done.next')) return;
+      if (!(stackNext || next) || !matches(e, 'done.next')) return;
       e.preventDefault();
-      go({ name: 'plan', projectId: next.projectId, branch: next.branch });
+      openNext();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -87,32 +98,99 @@ export function Done({ go, projectId, branch, result }: { go: Go; projectId: str
             </Notice>
           )}
 
+          {error && <Notice tone="error">{error}</Notice>}
+
+          {stackNext && (
+            <section className="flex flex-col gap-2">
+              <SectionHeader as="h2">Next in the stack</SectionHeader>
+              <NextCard
+                title={stackNext.title}
+                meta={[`PR #${stackNext.number}`, `${prs.indexOf(stackNext) + 1} of ${prs.length} in the stack`, ...sizeOf(waitingFor(stackNext))].join(' · ')}
+                onClick={openNext}
+                shortcut
+              />
+            </section>
+          )}
+
+          {stack && <StackList prs={prs} base={stack.base} onOpen={(e) => openStackEntry(projectId, e, go).catch((err) => setError(cleanError(err)))} />}
+
           {next && (
             <section className="flex flex-col gap-2">
               <SectionHeader as="h2" count={queue.length}>
-                Next up
+                {stackNext ? 'Next in your inbox' : 'Next up'}
               </SectionHeader>
-              <button
-                type="button"
+              <NextCard
+                title={next.title}
+                meta={[next.projectName, ...sizeOf(next), ...(queue.length > 1 ? [`${queue.length} waiting, about ${formatDuration(queueMinutes)} in all`] : [])].join(' · ')}
                 onClick={() => go({ name: 'plan', projectId: next.projectId, branch: next.branch })}
-                className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-border/45"
-              >
-                <span className="flex min-w-0 flex-[1_1_260px] flex-col gap-0.5">
-                  <span className="text-body font-semibold">{next.title}</span>
-                  <span className="text-meta text-faint">
-                    {next.projectName} · {plural(next.steps, 'step')} · about {formatDuration(next.minutes)}
-                    {queue.length > 1 ? ` · ${queue.length} waiting, about ${formatDuration(queueMinutes)} in all` : ''}
-                  </span>
-                </span>
-                <span className="flex items-center gap-2 text-ui font-semibold text-text">
-                  Review now <Kbd shortcut="done.next" />
-                </span>
-              </button>
+                shortcut={!stackNext}
+              />
             </section>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/** "1 step · about 1 min", when the inbox has read the branch. */
+const sizeOf = (w: InboxItem | undefined) => (w ? [plural(w.steps, 'step'), `about ${formatDuration(w.minutes)}`] : []);
+
+function NextCard({ title, meta, onClick, shortcut }: { title: string; meta: string; onClick(): void; shortcut?: boolean }) {
+  return (
+    <button type="button" onClick={onClick} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-border/45">
+      <span className="flex min-w-0 flex-[1_1_260px] flex-col gap-0.5">
+        <span className="text-body font-semibold">{title}</span>
+        <span className="text-meta text-faint">{meta}</span>
+      </span>
+      <span className="flex items-center gap-2 text-ui font-semibold text-text">
+        Review now {shortcut && <Kbd shortcut="done.next" />}
+      </span>
+    </button>
+  );
+}
+
+/** Every PR in the stack, bottom first, with where you are with each: the one you just finished included. */
+function StackList({ prs, base, onOpen }: { prs: StackEntry[]; base: string; onOpen(e: StackEntry): void }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <SectionHeader as="h2" action={<span className="text-meta text-faint">{stackProgress(prs)}</span>}>
+        The stack
+      </SectionHeader>
+      <ul className="m-0 flex list-none flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-card p-0">
+        <li className="px-4 py-2 text-meta text-faint">
+          On <span className="font-mono">{base}</span>
+        </li>
+        {prs.map((e) => {
+          const st = stackStatus(e);
+          const body = (
+            <>
+              <span className="w-14 shrink-0 font-mono text-meta text-faint">#{e.number}</span>
+              <span className="min-w-0 flex-1 truncate text-body">{e.title}</span>
+              {e.current && <span className="shrink-0 text-meta text-faint">Just finished</span>}
+              {st ? (
+                <Pill tone={st.tone} icon={<st.icon size={12} strokeWidth={2.5} aria-hidden />}>
+                  {st.label}
+                </Pill>
+              ) : <span className="shrink-0 text-meta text-faint">Not reviewed yet</span>}
+            </>
+          );
+          return (
+            <li key={e.number}>
+              {e.current ? (
+                <div aria-current="page" className="flex items-center gap-3 bg-selected px-4 py-2">
+                  {body}
+                </div>
+              ) : (
+                <button type="button" onClick={() => onOpen(e)} className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-border/45">
+                  {body}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

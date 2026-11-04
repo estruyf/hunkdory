@@ -53,7 +53,7 @@ export function useInboxData() {
       waiting: inbox.value?.waiting ?? [],
       done: inbox.value?.done ?? [],
       projectNames: names,
-      shown: (w: InboxItem) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName}`.toLowerCase().includes(q)) && matchesPeople(w, people, me),
+      shown: (w: InboxItem) => (!filter || w.projectId === filter) && (!q || `${w.title} ${w.branch} ${w.projectName} ${w.pr ? `#${w.pr.number}` : ''}`.toLowerCase().includes(q)) && matchesPeople(w, people, me),
       shownDone: (d) => (!filter || d.projectId === filter) && (!q || `${d.title} ${d.branch} ${names.get(d.projectId) ?? ''}`.toLowerCase().includes(q)),
       order,
       who: (w) => peopleLine(w, me),
@@ -92,6 +92,10 @@ export function useInboxData() {
     projects: projects.value ?? [],
     scans: inbox.value?.scans ?? [],
     loading: inbox.loading,
+    /** What a scan is reading right now: one project's id, `all`, or null. */
+    refreshing: inbox.loading ? (inbox.projectId ?? 'all') : null,
+    /** Reads every project again, or only `projectId`, asking GitHub afresh rather than use what it said in the last minute. */
+    refresh: (projectId?: string) => inbox.reload({ projectId, refetch: true }),
     loaded: !!inbox.value,
     error: inbox.error,
     project: filter ?? 'all',

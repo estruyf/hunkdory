@@ -119,6 +119,10 @@ export interface StackEntry {
   current: boolean;
   /** Your review of it, if you started one. */
   status: ReviewState['status'] | null;
+  /** New commits since you reviewed or sent it back in Hunkdory. */
+  changed: boolean;
+  /** Your latest review of it on GitHub, from Hunkdory or not. */
+  github: PrReview['state'] | null;
 }
 
 /** A Claude Code session, parsed from ~/.claude/projects/<encoded cwd>/<id>.jsonl. */
@@ -583,8 +587,11 @@ export interface ReviewerApi {
   /** Compares one branch against `base`, whatever the project's base. `null` goes back to Hunkdory's pick. */
   setBase(projectId: string, branch: string, base: string | null): Promise<void>;
   openExternal(url: string): Promise<void>;
-  /** `me` is who gh is signed in as, null without GitHub. */
-  inbox(opts?: { refresh?: boolean }): Promise<{ waiting: InboxItem[]; done: ReviewState[]; scans: ProjectScan[]; me: string | null }>;
+  /**
+   * `me` is who gh is signed in as, null without GitHub. `projectId` reads that project again and keeps the others
+   * as last read; `refetch` asks GitHub for its pull requests rather than use the ones read in the last minute.
+   */
+  inbox(opts?: { refresh?: boolean; projectId?: string; refetch?: boolean }): Promise<{ waiting: InboxItem[]; done: ReviewState[]; scans: ProjectScan[]; me: string | null }>;
   loadReview(projectId: string, branch: string, opts?: { refresh?: boolean }): Promise<{ data: ReviewData; state: ReviewState }>;
   updateReview(projectId: string, branch: string, patch: ReviewPatch): Promise<ReviewState>;
   finish(req: FinishRequest): Promise<FinishResult>;

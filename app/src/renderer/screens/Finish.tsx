@@ -155,7 +155,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
     setError(null);
     try {
       const res = await window.api.finish({ projectId: data.projectId, branch: data.branch, kind: pick, note, dropStepKeys: pick === 'send-back' ? [...drop] : [], commitFirst, deleteBranch, event, openPr: opening ? { title: prTitle.trim() || data.title, draft } : undefined, commitMessage: data.uncommitted ? commitMessage : undefined });
-      if (res.ok) go({ name: 'done', projectId: data.projectId, branch: data.branch, result: res });
+      if (res.ok) go({ name: 'done', projectId: data.projectId, branch: data.branch, result: res, stack: data.stack });
       else if (res.needsCommit) setNeedsCommit(res.needsCommit);
       else setError(res.message);
     } catch (e) {

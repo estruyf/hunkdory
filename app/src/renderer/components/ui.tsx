@@ -1,5 +1,5 @@
 import { Loader2 } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ReviewerApi, ReviewState, RiskLevel } from '../../shared/types.ts';
 import type { Go } from '../App.tsx';
 import { RISK_LABEL } from '../../shared/order.ts';
@@ -127,6 +127,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
 }
 
 type Inbox = Awaited<ReturnType<ReviewerApi['inbox']>>;
+type InboxOpts = NonNullable<Parameters<ReviewerApi['inbox']>[0]>;
 
 // The inbox as last seen. A scan takes seconds, so going back to the inbox shows this while a new one runs.
 let lastInbox: Inbox | undefined;
@@ -150,16 +151,20 @@ export function rememberReview(r: ReviewState) {
 /** The inbox: the remembered one right away, then a fresh scan. `patch` changes it in place, e.g. right after you ignore a branch. */
 export function useInbox() {
   const [value, setValue] = useState(lastInbox);
-  const [state, setState] = useState<{ error?: string; loading: boolean }>({ loading: true });
+  // `projectId`: the scan reads only that project.
+  const [state, setState] = useState<{ error?: string; loading: boolean; projectId?: string }>({ loading: true });
   const [tick, setTick] = useState(0);
+  const next = useRef<InboxOpts>({});
   useEffect(() => {
     inboxListeners.add(setValue);
     return () => void inboxListeners.delete(setValue);
   }, []);
   useEffect(() => {
     let live = true;
-    setState({ loading: true });
-    window.api.inbox().then(
+    const opts = next.current;
+    next.current = {};
+    setState({ loading: true, projectId: opts.projectId });
+    window.api.inbox(opts).then(
       (v) => {
         // A scan that started before a change you made since is out of date.
         if (!live) return;
@@ -175,7 +180,10 @@ export function useInbox() {
   return {
     value,
     ...state,
-    reload: () => setTick((t) => t + 1),
+    reload: (opts: InboxOpts = {}) => {
+      next.current = opts;
+      setTick((t) => t + 1);
+    },
     patch: (fn: (v: Inbox) => Inbox) => lastInbox && setLastInbox(fn(lastInbox)),
   };
 }

@@ -194,7 +194,27 @@ export async function fetchPullRequests(root: string, repo: string, prs: PullReq
   if (!specs.length) return;
   const remote = await remoteFor(root, repo);
   const env = await shellEnv();
-  await run('git', ['fetch', '--no-tags', '--quiet', remote, ...specs], { cwd: root, env, maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
+  try {
+    await run('git', ['fetch', '--no-tags', '--quiet', remote, ...specs], { cwd: root, env, maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
+  } catch (e) {
+    const err = e as { stderr?: string; killed?: boolean; message: string };
+    throw fetchError(err.stderr || err.message, remote, !!err.killed);
+  }
+}
+
+/** A failed fetch in a sentence: git's own message is the whole command line, every refspec in it. Pure, so it can be tested. */
+export function fetchError(stderr: string, remote: string, timedOut = false): Error {
+  const why = (s: string) => new Error(`Couldn't fetch the latest pull requests: ${s}`);
+  if (timedOut) return why(`${remote} took longer than 2 minutes to answer.`);
+  if (/Host key verification failed/i.test(stderr)) return why(`git doesn't trust GitHub's SSH host key yet. Run "ssh -T git@github.com" in a terminal once.`);
+  if (/Permission denied \(publickey\)/i.test(stderr)) return why(`GitHub turned down the SSH key for ${remote}. Check that "ssh -T git@github.com" works in a terminal.`);
+  if (/Authentication failed|could not read Username|terminal prompts disabled/i.test(stderr)) return why(`GitHub asked for a sign-in over HTTPS. Run "gh auth setup-git" in a terminal.`);
+  if (/Could not resolve host|Network is unreachable|Connection (timed out|refused)|Operation timed out/i.test(stderr)) return why(`GitHub can't be reached. Check your connection.`);
+  if (/Repository not found|does not appear to be a git repository/i.test(stderr)) return why(`${remote} points at a repository that doesn't exist or you can't access.`);
+  // Otherwise git's own reason, without the command it ran.
+  const lines = stderr.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('Command failed:') && !l.startsWith('+refs/'));
+  const line = lines.find((l) => /^(fatal|error):/.test(l)) ?? lines[0];
+  return why(line ? line.replace(/^(fatal|error):\s*/, '') : `git fetch from ${remote} failed.`);
 }
 
 /** Forget cached pull requests, after Hunkdory changed one. */
