@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDecisions, buildPlan, defaultDrops, openItems, planProgress, resumePoint, settleComment, skimGroups } from '../src/shared/plan.ts';
+import { buildDecisions, buildPlan, decisionsForComment, defaultDrops, openItems, planProgress, resumePoint, settleComment, skimGroups } from '../src/shared/plan.ts';
 import { addToStepComment, removeFromStepComments } from '../src/shared/comments.ts';
 import { prDescription } from '../src/main/actions.ts';
-import type { AttentionFlag, ReviewState, Step } from '../src/shared/types.ts';
+import type { AttentionFlag, CheckItem, ReviewState, Step } from '../src/shared/types.ts';
 
 const step = (i: number, over: Partial<Step> = {}): Step => ({
-  key: `k${i}`, index: i, title: `Step ${i}`, why: '', checks: [], risk: 'low', outsideTask: false, source: 'chapter',
+  key: `k${i}`, index: i, title: `Step ${i}`, why: '', checks: [], risk: 'low', outsideTask: false, noTestChange: false, choices: [], source: 'chapter',
   hunkIds: [`h${i}`], files: [`src/area${i % 2}/file${i}.ts`], added: 1, removed: 0, ...over,
 });
 
@@ -121,4 +121,12 @@ test('medium flags on a step are notes on that step, not decisions', () => {
   const plan = buildPlan({ steps, attention, pr: null, prompt: 'Do it' }, { order: 'story' });
   assert.deepEqual(plan.decisions.map((d) => d.title), ['No tests changed']);
   assert.deepEqual(plan.notes.map((d) => d.title), ['Error swallowed']);
+});
+
+test('decisions read as lines for a PR comment, without the app\'s words or failing CI', () => {
+  const steps = [step(0, { outsideTask: true, title: 'Bump lint' }), step(1)];
+  const flags: AttentionFlag[] = [{ severity: 'high', title: 'Touches auth', detail: 'token.js in step 2.', stepKey: 'k1' }];
+  const checks: CheckItem[] = [{ name: 'ci', state: 'fail', url: null } as CheckItem];
+  const lines = decisionsForComment(buildDecisions(steps, flags, checks, true));
+  assert.deepEqual(lines, ['**Touches auth.** token.js in step 2.', '**Outside the request.** Step 1: Bump lint.']);
 });

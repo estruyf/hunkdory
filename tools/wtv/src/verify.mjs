@@ -30,6 +30,10 @@ export function normalizeWalkthrough(input) {
       refs: (c.hunks ?? c.refs ?? []).map(String),
       checks: strings(c.checks),
       outsideTask: c.outsideTask === true,
+      // Choices the agent made here, by its own account: what it chose and what it set aside.
+      choices: (Array.isArray(c.choices) ? c.choices : [])
+        .filter((x) => typeof x?.question === 'string' && x.question.trim() && typeof x.chose === 'string' && x.chose.trim())
+        .map((x) => ({ question: x.question, chose: x.chose, why: typeof x.why === 'string' && x.why.trim() ? x.why : null, rejected: strings(x.rejected) })),
       // Agent notes per hunk, keyed by one of the chapter's refs: { "h:54b48929c1": "..." }
       notes: c.notes && typeof c.notes === 'object' && !Array.isArray(c.notes)
         ? Object.fromEntries(Object.entries(c.notes).filter(([, v]) => typeof v === 'string' && v.trim()))
@@ -115,6 +119,7 @@ export function verify({ cwd, walkthrough, base, head }) {
       risk: c.risk,
       checks: c.checks ?? [],
       outsideTask: !!c.outsideTask,
+      choices: c.choices ?? [],
       notes,
       refs,
       hunkIds,

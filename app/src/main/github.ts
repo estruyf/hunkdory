@@ -4,7 +4,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { shellEnv, which } from './shellEnv.ts';
 import * as g from './git.ts';
-import type { CheckItem, GitHubEvent, GitHubFeedback, GitHubReview, GitHubThread, PrReview, PullRequest } from '../shared/types.ts';
+import type { AgentChoice, CheckItem, GitHubEvent, GitHubFeedback, GitHubReview, GitHubThread, PrReview, PullRequest } from '../shared/types.ts';
 
 const run = promisify(execFile);
 
@@ -377,13 +377,20 @@ const MARK = '<!-- reviewer:walkthrough -->';
 const DATA = /<!-- reviewer:data:([A-Za-z0-9+/=]+) -->/;
 
 /** A walkthrough as a PR comment people can read, with the data for other Hunkdory users hidden at the end. Pure. */
-export function walkthroughComment(wt: { title?: string; intent?: string; chapters: { title: string; why?: string; risk?: string; checks?: string[]; outsideTask?: boolean; files?: string[] }[] }, data: unknown): string {
+export function walkthroughComment(
+  wt: { title?: string; intent?: string; beforeApproving?: string[]; chapters: { title: string; why?: string; risk?: string; checks?: string[]; outsideTask?: boolean; files?: string[]; choices?: AgentChoice[] }[] },
+  data: unknown
+): string {
   const n = wt.chapters.length;
-  const lines = [MARK, '## Review walkthrough', '', wt.intent ?? '', '', `<details><summary>${n} step${n === 1 ? '' : 's'}, written by Hunkdory from the diff</summary>`, ''];
+  const lines = [MARK, '## Review walkthrough', '', wt.intent ?? '', ''];
+  if (wt.beforeApproving?.length) lines.push('### Before approving', '', ...wt.beforeApproving.map((l) => `- ${l}`), '');
+  lines.push(`<details><summary>${n} step${n === 1 ? '' : 's'}, written by Hunkdory from the diff</summary>`, '');
   wt.chapters.forEach((c, i) => {
     lines.push(`### ${i + 1}. ${c.title}${c.outsideTask ? ' (outside the task)' : ''}`, '', c.why ?? '');
-    if (c.risk) lines.push('', `**Risk:** ${c.risk}`);
+    // Without questions of its own, a step asks its risk as its question.
+    if (c.risk && !c.checks?.includes(c.risk)) lines.push('', `**Risk:** ${c.risk}`);
     if (c.checks?.length) lines.push('', ...c.checks.map((q) => `- [ ] ${q}`));
+    if (c.choices?.length) lines.push('', '**Choices the agent made:**', ...c.choices.map((x) => `- ${x.question} ${x.chose}${x.why ? ` ${x.why}` : ''}${x.rejected.length ? ` Set aside: ${x.rejected.join('; ')}.` : ''}`));
     if (c.files?.length) lines.push('', `Files: ${c.files.map((f) => `\`${f}\``).join(', ')}`);
     lines.push('');
   });

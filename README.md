@@ -23,13 +23,16 @@ you merge, send it back to the agent, or discard it.
    work you didn't ask for), *Read closely*, and *Skim* (the low-risk rest,
    grouped by folder). A branch without a walkthrough gets one from Claude
    Code, written from the diff, the commits and the agent's session.
-3. **The steps.** One step at a time, with the reason next to each change.
+3. **The steps.** One step at a time, with the reason next to each change, the
+   choices the agent says it made, and how it got there in its session.
    Comment on a line, ask Claude about the step, or ask it to change the code.
 4. **Finish.** Merge, open a pull request, post your review on GitHub, send it
    back to the agent with your comments, or discard it.
 
 Hunkdory runs on your Mac. It only sends code to Claude when you let it write a
-walkthrough, ask a question, or send work back.
+walkthrough, ask a question, or send work back. When the same assistant ran the
+agent's session, a walkthrough also gets what the agent said and thought on that
+branch, so sharing one on a pull request can carry that reasoning to GitHub.
 
 ## What you need
 

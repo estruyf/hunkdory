@@ -24,6 +24,8 @@ interface WtvHunk {
   removed: string[];
   added: string[];
   whitespaceOnly: boolean;
+  /** A test file, going by its path. */
+  isTest: boolean;
   lockfile: boolean;
   generated: boolean;
   risks: { code: string; severity: 'high' | 'medium' | 'low'; label: string; match?: { term: string; line: number | null } }[];
@@ -39,6 +41,7 @@ interface WtvChapter {
   risk: string | null;
   checks: string[];
   outsideTask: boolean;
+  choices: { question: string; chose: string; why: string | null; rejected: string[] }[];
   notes: { ref: string; text: string; hunkIds: string[] }[];
   refs: { ref: string; kind: string; matched: string[] }[];
   hunkIds: string[];

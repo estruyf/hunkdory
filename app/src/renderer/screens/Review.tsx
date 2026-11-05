@@ -4,8 +4,9 @@ import { LoadingPage, useAsync } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
+import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { TEXTAREA } from '../components/ui/field.ts';
-import type { ReviewData, ReviewState, Step } from '../../shared/types.ts';
+import type { AgentChoice, ReviewData, ReviewState, Step } from '../../shared/types.ts';
 import { Markdown } from '../components/markdown.tsx';
 import { timeAgo } from '../../shared/order.ts';
 import { Walkthrough } from './Walkthrough.tsx';
@@ -66,6 +67,30 @@ export function AgentTests({ data }: { data: ReviewData }) {
       {stale && <> The agent edited files after that run.</>}
       {t.runs.length > 1 && <span className="text-muted"> ({t.runs.length} runs in all)</span>}
     </span>
+  );
+}
+
+export const NO_TEST_HINT = 'No test file changed in this step. Tests that already exist may still cover this code.';
+
+/** What the agent decided in a step and what it set aside. Its own account, so it's marked as one. */
+export function AgentChoices({ choices }: { choices: AgentChoice[] }) {
+  return (
+    <section className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-4">
+      <SectionHeader as="h2" count={choices.length}>
+        {choices.length === 1 ? 'A choice the agent made' : 'Choices the agent made'}
+      </SectionHeader>
+      {choices.map((c, i) => (
+        <div key={i} className="flex flex-col gap-0.5 text-body break-words select-text">
+          <strong className="font-semibold">{c.question}</strong>
+          <span>
+            {c.chose}
+            {c.why ? ` ${c.why}` : ''}
+          </span>
+          {c.rejected.length > 0 && <span className="text-ui text-muted">Set aside: {c.rejected.join('; ')}</span>}
+        </div>
+      ))}
+      <span className="text-meta text-faint">From the agent’s own account. Hunkdory doesn’t check this against the code.</span>
+    </section>
   );
 }
 

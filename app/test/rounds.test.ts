@@ -6,7 +6,7 @@ import { githubReview, stepAnchor } from '../src/main/actions.ts';
 import { apiComment } from '../src/main/github.ts';
 import type { DecisionRecord, DiffLine, HunkView, Step } from '../src/shared/types.ts';
 
-const step = (key: string, hunkIds: string[], index = 0): Step => ({ key, index, title: key, why: '', checks: [], risk: 'low', outsideTask: false, source: 'chapter', hunkIds, files: [`${key}.ts`], added: 1, removed: 0 });
+const step = (key: string, hunkIds: string[], index = 0): Step => ({ key, index, title: key, why: '', checks: [], risk: 'low', outsideTask: false, noTestChange: false, choices: [], source: 'chapter', hunkIds, files: [`${key}.ts`], added: 1, removed: 0 });
 const decision = (hunkIds?: string[]): DecisionRecord => ({ kind: 'send-back', note: '', dropStepKeys: [], at: '2026-10-28T10:00:00Z', result: 'ok', message: '', hunkIds });
 
 test('no earlier round, nothing to compare', () => {

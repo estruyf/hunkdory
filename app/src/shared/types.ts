@@ -288,6 +288,15 @@ export interface WalkthroughJob {
 
 export type StepSource = 'chapter' | 'unnarrated' | 'skeleton' | 'skipped';
 
+/** A choice the agent made in a step, by its own account. */
+export interface AgentChoice {
+  question: string;
+  chose: string;
+  why: string | null;
+  /** What it set aside, with the reason when it gave one. */
+  rejected: string[];
+}
+
 export interface Step {
   /** Stable across reloads: survives line shifts, changes when the step's content changes. */
   key: string;
@@ -298,6 +307,9 @@ export interface Step {
   checks: string[];
   risk: RiskLevel;
   outsideTask: boolean;
+  /** Changes code without changing a test file. Says nothing about tests that already cover that code. */
+  noTestChange: boolean;
+  choices: AgentChoice[];
   source: StepSource;
   hunkIds: string[];
   files: string[];
@@ -428,6 +440,21 @@ export type GitHubEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 export interface RunLogEntry {
   kind: 'text' | 'tool' | 'output' | 'error';
   text: string;
+}
+
+/** Part of a session where the agent edited a step's files: what it was asked, what it said just before, and the edits. */
+export interface StepTraceTurn {
+  prompt: string | null;
+  /** A subagent did this, so `prompt` is the task it was given. */
+  subagent: boolean;
+  at: string | null;
+  entries: RunLogEntry[];
+}
+
+export interface StepTrace {
+  turns: StepTraceTurn[];
+  /** The sessions are a guess, not a sure match: see ReviewData.sessionProbable. */
+  probable: boolean;
 }
 
 export interface RunLog {
@@ -671,6 +698,7 @@ export interface ReviewerApi {
   openSessionFile(file: string): Promise<void>;
   /** The log of the agent run this branch was sent back to, in words; null when it has none. */
   runLog(projectId: string, branch: string): Promise<RunLog | null>;
+  stepTrace(projectId: string, branch: string, files: string[]): Promise<StepTrace>;
   walkthroughJob(projectId: string, branch: string): Promise<WalkthroughJob | null>;
   /** Every walkthrough run since the app started, for the sidebar. */
   walkthroughJobs(): Promise<WalkthroughJob[]>;

@@ -199,3 +199,23 @@ test('a mark for a step that is gone stays while some of its hunks are in no rev
   // Run again on its own output: nothing left to change.
   assert.equal(carryReviewed([{ key: 'ch:0', hunkIds: ['h1'] }, { key: 'ch:1', hunkIds: ['h2', 'h9'] }], next!), null);
 });
+
+test('a chapter that changes code and no test says so, and only a chapter can', () => {
+  const steps = buildSteps(fixture().r, 'agent');
+  const by = (title: string) => steps.find((s) => s.title.startsWith(title))!;
+  assert.equal(by('Retry helper').noTestChange, true);
+  assert.equal(by('Concurrency dependency').noTestChange, false, 'package.json is not code a test covers');
+  assert.equal(by('Not in the walkthrough: src/auth/token.js').noTestChange, false, 'split by file, so its tests are always elsewhere');
+  assert.equal(by('Formatting and generated files').noTestChange, false);
+
+  const withTest = buildSteps(fixture((wt) => (wt.chapters[0].hunks as string[]).push('test/sync.test.js')).r, 'agent');
+  assert.equal(withTest.find((s) => s.title === 'Retry helper')!.noTestChange, false);
+  assert.ok(buildSteps(fixture().r, 'skeleton').every((s) => !s.noTestChange), 'a skeleton splits by file too');
+});
+
+test("a chapter's choices reach its step, and malformed ones are dropped", () => {
+  const choice = { question: 'Where to retry?', chose: 'In the client.', why: 'One place.', rejected: ['In each caller'] };
+  const steps = buildSteps(fixture((wt) => (wt.chapters[0].choices = [choice, { question: 'No answer' }, 'nonsense', { question: 'Bare', chose: 'This.' }])).r, 'agent');
+  assert.deepEqual(steps[0].choices, [choice, { question: 'Bare', chose: 'This.', why: null, rejected: [] }]);
+  assert.deepEqual(steps[1].choices, []);
+});

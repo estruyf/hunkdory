@@ -124,3 +124,40 @@ test('a test result reads the output, since a piped run exits 0', () => {
   assert.equal(testResult(true, ''), 'failed');
   assert.equal(testResult(false, 'built in 76ms'), 'unknown');
 });
+
+const bash = (id: string, command: string, at: string) => ({ type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } });
+const bashResult = (id: string, content: string) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content }] } });
+const edit = (at: string) => ({ type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', id: 'e', name: 'Edit', input: { file_path: '/x.ts' } }] } });
+
+test("a subagent's tests and edits written into the session's own transcript count, but not its cwd or branch", () => {
+  const side = (r: object) => ({ ...r, isSidechain: true, cwd: '/elsewhere', gitBranch: 'sidechain-branch' });
+  const s = parseTranscript(jsonl([...lines, side(bash('t', 'npm test', '2026-10-21T16:12:00.000Z')), side(bashResult('t', '3 passed')), side(edit('2026-10-21T16:13:00.000Z'))]), '/x.jsonl', SESSION)!;
+  assert.deepEqual(s.testRuns, [{ command: 'npm test', at: '2026-10-21T16:12:00.000Z', result: 'passed' }]);
+  assert.equal(s.lastEditAt, '2026-10-21T16:13:00.000Z');
+  assert.notEqual(s.cwd, '/elsewhere');
+  assert.ok(!s.branches.some((b) => b.name === 'sidechain-branch'));
+});
+
+test("readSessions adds the work in a session's subagent files, and notices when one grows", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sessions-'));
+  const main = [
+    { type: 'user', cwd: ROOT, timestamp: '2026-10-21T10:00:00.000Z', message: { content: 'Do it' } },
+    bash('a', 'npm test', '2026-10-21T10:01:00.000Z'),
+    bashResult('a', '1 passed'),
+    edit('2026-10-21T10:02:00.000Z'),
+  ];
+  writeFileSync(join(dir, `${SESSION}.jsonl`), jsonl(main));
+  mkdirSync(join(dir, SESSION, 'subagents'), { recursive: true });
+  const sub = join(dir, SESSION, 'subagents', 'agent-1.jsonl');
+  const subLines = [bash('b', 'npx vitest', '2026-10-21T10:05:00.000Z'), bashResult('b', '2 failed')];
+  writeFileSync(sub, jsonl(subLines));
+
+  let s = readSessions([dir])[0];
+  assert.deepEqual(s.testRuns.map((r) => [r.command, r.result]), [['npm test', 'passed'], ['npx vitest', 'failed']]);
+  assert.equal(s.lastEditAt, '2026-10-21T10:02:00.000Z', 'no edit in the subagent yet');
+
+  // The session's own file doesn't change while its subagent works.
+  writeFileSync(sub, jsonl([...subLines, edit('2026-10-21T10:06:00.000Z')]));
+  s = readSessions([dir])[0];
+  assert.equal(s.lastEditAt, '2026-10-21T10:06:00.000Z');
+});

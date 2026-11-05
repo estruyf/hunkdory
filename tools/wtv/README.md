@@ -46,8 +46,10 @@ including untracked files. The `.review/` folder is never part of the diff.
   can't slip through.
 - **Chapters** have `title`, `why`, optional `risk`, and `hunks` (refs). Optional
   review fields: `checks` (questions for the reviewer), `outsideTask: true`
-  (work the prompt didn't ask for), and `notes` (`{ "<ref>": "text" }`, an agent
-  note on specific hunks). Older walkthroughs without these still work.
+  (work the prompt didn't ask for), `notes` (`{ "<ref>": "text" }`, an agent
+  note on specific hunks), and `choices` (`{ question, chose, why, rejected }`,
+  what the agent decided here and what it set aside). Older walkthroughs without
+  these still work.
 - **Refs** in a chapter can be `h:<id>`, `path:10-20`, `path` or `folder/`.
 - **Buckets**: narrated, unnarrated, noise (whitespace-only), generated
   (lockfiles, dist), phantom (refs matching nothing), weak (high-risk hunk only
@@ -79,7 +81,7 @@ can't loop, and it never blocks when something goes wrong (no git, no changes).
 ## JSON contract (for a review UI)
 
 `wtv verify --json` returns `ok`, `intent`, `base`, `head`, `chapters` (with
-`hunkIds`, `checks`, `outsideTask` and `notes` resolved to `hunkIds`), `hunks` (full content, `bucket`, `risks`, `level`, `chapters`;
+`hunkIds`, `checks`, `outsideTask`, `choices` and `notes` resolved to `hunkIds`), `hunks` (full content, `bucket`, `risks`, `level`, `isTest`, `chapters`;
 each risk has `code`, `severity`, `label` and, when a line set it off, `match: { term, line }`),
 `buckets` and `findings`. A UI renders chapters in order and puts
 `buckets.unnarrated` at the top.

@@ -48,7 +48,7 @@ interface Event {
   };
 }
 
-const EDIT_TOOLS = new Set(['edit', 'create']);
+export const EDIT_TOOLS = new Set(['edit', 'create']);
 
 /** Parse one session's `events.jsonl`: the fields `workspace.yaml` doesn't carry. Exported for fixture tests. */
 export function parseCopilotEvents(text: string): { firstPrompt: string | null; testRuns: SessionInfo['testRuns']; lastEditAt: string | null } {

@@ -99,6 +99,17 @@ export function buildDecisions(steps: Step[], flags: AttentionFlag[], checks: Ch
   return out.sort((a, b) => rank(a) - rank(b));
 }
 
+/**
+ * The decisions as lines for a comment on the PR, for people who aren't in the app. Failing CI stays out: GitHub
+ * shows it, and a comment would go stale.
+ */
+export function decisionsForComment(decisions: PlanDecision[]): string[] {
+  return decisions.flatMap((d) => {
+    if (d.kind === 'ci') return [];
+    return d.kind === 'outside' ? [`**Outside the request.** ${d.places.join('; ')}.`] : [`**${d.title}.** ${d.detail}`];
+  });
+}
+
 /** Button and result text for a decision. */
 export function decisionLabels(d: Pick<PlanDecision, 'kind'>) {
   return d.kind === 'outside'

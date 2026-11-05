@@ -9,7 +9,8 @@
 // - Sessions in a Claude Code worktree live under "<project>--claude-worktrees-<name>"
 //   and carry a `worktree-state` record with the branch they started from.
 // - `gitBranch` is per record and can change during a session.
-// - Subagent transcripts sit in "<session id>/subagents/" and are marked `isSidechain`.
+// - Subagent transcripts sit in "<session id>/subagents/" and are marked `isSidechain`. Their cwd and branch say
+//   nothing about the session, but the tests they ran and the files they edited are part of its work.
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -50,7 +51,7 @@ export function encodeProjectPath(path: string): string {
 const INJECTED = /<(ide_opened_file|ide_selection|system-reminder|browser_instruction|ide_diagnostics)>[\s\S]*?<\/\1>/g;
 const NOT_A_PROMPT = /^(<local-command-std(out|err)>|<task-notification>|<bash-(input|stdout|stderr)>|\[Request interrupted|Caveat: The messages below)/;
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+export const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 /** A content block of a message: text, a tool call, or a tool's result. */
 interface Block {
@@ -108,6 +109,58 @@ export function promptText(rec: Rec): { text: string; slashOnly: boolean } | nul
   return { text, slashOnly: false };
 }
 
+/** Collects the test runs and last edit from a transcript's records, one record at a time. */
+function activity() {
+  const testRuns: TestRun[] = [];
+  const pending = new Map<string, { command: string; at: string }>();
+  let lastEditAt: string | null = null;
+  return {
+    testRuns,
+    lastEditAt: () => lastEditAt,
+    add(rec: Rec) {
+      const content = Array.isArray(rec.message?.content) ? (rec.message.content as Block[]) : [];
+      for (const b of content) {
+        if (rec.type === 'assistant' && b?.type === 'tool_use' && rec.timestamp) {
+          if (EDIT_TOOLS.has(b.name ?? '')) lastEditAt = rec.timestamp;
+          const cmd = b.name === 'Bash' && typeof b.input?.command === 'string' ? (b.input.command as string) : null;
+          if (cmd && b.id && TEST_CMD.test(withoutHeredocs(cmd))) pending.set(b.id, { command: shortCommand(cmd), at: rec.timestamp });
+        } else if (rec.type === 'user' && b?.type === 'tool_result' && b.tool_use_id && pending.has(b.tool_use_id)) {
+          const out = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((x: { text?: string }) => x?.text ?? '').join('\n') : '';
+          testRuns.push({ ...pending.get(b.tool_use_id)!, result: testResult(!!b.is_error, out) });
+          pending.delete(b.tool_use_id);
+        }
+      }
+    },
+  };
+}
+
+/** The subagent transcripts of a session, kept in a folder named after its transcript. */
+export function subagentFiles(file: string): string[] {
+  const dir = join(file.replace(/\.jsonl$/, ''), 'subagents');
+  try {
+    return readdirSync(dir).filter((f) => f.endsWith('.jsonl')).map((f) => join(dir, f));
+  } catch {
+    return [];
+  }
+}
+
+/** Adds what the session's subagents did to its test runs and last edit. */
+export function withSubagents(info: SessionInfo, transcripts: string[]): SessionInfo {
+  const all = activity();
+  for (const text of transcripts) {
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        all.add(JSON.parse(line));
+      } catch {
+        // A transcript being written can end in a partial line.
+      }
+    }
+  }
+  const lastEditAt = [info.lastEditAt, all.lastEditAt()].filter((t): t is string => !!t).sort().at(-1) ?? null;
+  return { ...info, testRuns: [...info.testRuns, ...all.testRuns].sort((a, b) => a.at.localeCompare(b.at)), lastEditAt };
+}
+
 /** Parse one transcript. Returns null for files with no conversation in them. */
 export function parseTranscript(text: string, file: string, id: string, configDir = DEFAULT_CONFIG_DIR): SessionInfo | null {
   let cwd: string | null = null;
@@ -120,9 +173,7 @@ export function parseTranscript(text: string, file: string, id: string, configDi
   let firstPrompt: string | null = null;
   let firstSlash: string | null = null;
   const branches = new Map<string, { firstSeen: string; lastSeen: string }>();
-  const testRuns: TestRun[] = [];
-  const pending = new Map<string, { command: string; at: string }>();
-  let lastEditAt: string | null = null;
+  const work = activity();
 
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -138,6 +189,7 @@ export function parseTranscript(text: string, file: string, id: string, configDi
       originalBranch = rec.worktreeSession.originalBranch ?? originalBranch;
       worktreePath = rec.worktreeSession.worktreePath ?? worktreePath;
     }
+    work.add(rec);
     if (rec.isSidechain) continue;
     if (rec.cwd) cwd = rec.cwd;
     if (rec.timestamp && (rec.type === 'user' || rec.type === 'assistant')) {
@@ -148,18 +200,6 @@ export function parseTranscript(text: string, file: string, id: string, configDi
         const firstSeen = branches.get(rec.gitBranch)?.firstSeen ?? rec.timestamp;
         branches.delete(rec.gitBranch);
         branches.set(rec.gitBranch, { firstSeen, lastSeen: rec.timestamp });
-      }
-    }
-    const content = Array.isArray(rec.message?.content) ? (rec.message.content as Block[]) : [];
-    for (const b of content) {
-      if (rec.type === 'assistant' && b?.type === 'tool_use' && rec.timestamp) {
-        if (EDIT_TOOLS.has(b.name ?? '')) lastEditAt = rec.timestamp;
-        const cmd = b.name === 'Bash' && typeof b.input?.command === 'string' ? (b.input.command as string) : null;
-        if (cmd && b.id && TEST_CMD.test(withoutHeredocs(cmd))) pending.set(b.id, { command: shortCommand(cmd), at: rec.timestamp });
-      } else if (rec.type === 'user' && b?.type === 'tool_result' && b.tool_use_id && pending.has(b.tool_use_id)) {
-        const out = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((x: { text?: string }) => x?.text ?? '').join('\n') : '';
-        testRuns.push({ ...pending.get(b.tool_use_id)!, result: testResult(!!b.is_error, out) });
-        pending.delete(b.tool_use_id);
       }
     }
     if (!firstPrompt) {
@@ -183,8 +223,8 @@ export function parseTranscript(text: string, file: string, id: string, configDi
     title: customTitle ?? title,
     startedAt,
     endedAt,
-    testRuns,
-    lastEditAt,
+    testRuns: work.testRuns,
+    lastEditAt: work.lastEditAt(),
   };
 }
 
@@ -225,14 +265,20 @@ export function readSessions(dirs: string[]): SessionInfo[] {
       const file = join(dir, f);
       try {
         const st = statSync(file);
+        // A subagent writes to its own file while the session's stays as it is, so both decide whether this is stale.
+        const subagents = subagentFiles(file);
+        const subStats = subagents.map((s) => statSync(s));
+        const mtimeMs = Math.max(st.mtimeMs, ...subStats.map((s) => s.mtimeMs));
+        const size = subStats.reduce((n, s) => n + s.size, st.size);
         const hit = cache.get(file);
-        if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+        if (hit && hit.mtimeMs === mtimeMs && hit.size === size) {
           if (hit.info) out.push(hit.info);
           continue;
         }
         // <config dir>/projects/<encoded cwd>/<id>.jsonl
-        const info = parseTranscript(readFileSync(file, 'utf8'), file, f.replace(/\.jsonl$/, ''), dirname(dirname(dir)));
-        cache.set(file, { mtimeMs: st.mtimeMs, size: st.size, info });
+        const parsed = parseTranscript(readFileSync(file, 'utf8'), file, f.replace(/\.jsonl$/, ''), dirname(dirname(dir)));
+        const info = parsed && withSubagents(parsed, subagents.map((s) => readFileSync(s, 'utf8')));
+        cache.set(file, { mtimeMs, size, info });
         if (info) out.push(info);
       } catch {
         // Unreadable transcript: skip it, it only costs context.

@@ -48,7 +48,7 @@ function locateLine(h, test) {
 }
 
 export function assessHunk(h) {
-  if (h.whitespaceOnly) return { risks: [], level: 'none' };
+  if (h.whitespaceOnly) return { risks: [], level: 'none', isTest: TEST_PATH.test(h.path) };
   const risks = [];
   // `match` says why: the text that set the tag off, and its line (null for a match on the path).
   const add = (code, severity, label, match = null) => risks.push({ code, severity, label, ...(match ? { match } : {}) });
@@ -97,7 +97,7 @@ export function assessHunk(h) {
   }
   const list = [...byCode.values()];
   const level = list.reduce((max, r) => (SEVERITY[r.severity] > SEVERITY[max] ? r.severity : max), 'none');
-  return { risks: list, level };
+  return { risks: list, level, isTest };
 }
 
 /** Findings that only make sense across the whole change. */

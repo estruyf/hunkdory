@@ -18,7 +18,7 @@ import { PrLink, PushToPrNotice, StackBar, checksText, checksTone } from '../com
 import { GitHubReviews } from '../components/githubThreads.tsx';
 import { placeThreads } from '../../shared/threads.ts';
 import { MessageSquare } from 'lucide-react';
-import { AgentTests, AskedFor, ReviewError } from './Review.tsx';
+import { AgentTests, AskedFor, NO_TEST_HINT, ReviewError } from './Review.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import type { LineRef } from '../components/diff.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
@@ -443,6 +443,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                         )}
                         <RiskPill risk={s.risk} />
                         {s.outsideTask && <Pill data-tooltip={OUTSIDE_HINT}>Outside your request</Pill>}
+                        {s.noTestChange && <Pill tone="muted" data-tooltip={NO_TEST_HINT}>No test changed</Pill>}
                         <span className="w-14 text-right text-meta text-faint">{plural(s.files.length, 'file')}</span>
                         <span className={`w-20 text-right text-ui ${done ? 'text-muted' : 'text-link opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}>{done ? 'Reviewed' : 'Review →'}</span>
                       </button>

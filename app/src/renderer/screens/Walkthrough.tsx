@@ -25,7 +25,8 @@ import { AskPanel, CheckFollowUp, Thread } from '../components/ask.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import { EmptyStepNotice, WalkthroughBar } from '../components/walkthrough.tsx';
-import { AgentTests, AskedFor, CommentBox, whyFallback } from './Review.tsx';
+import { StepTraceDialog } from '../components/runLog.tsx';
+import { AgentChoices, AgentTests, AskedFor, CommentBox, NO_TEST_HINT, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
 
 export function Walkthrough({ go, data, initialState, stepKey, decision, group, focus }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string; focus?: LineRef }) {
@@ -58,6 +59,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   // The question you just answered "Needs a change" or "Not sure", so its box takes the focus.
   const [answered, setAnswered] = useState<{ stepKey: string; index: number } | null>(null);
   const [commenting, setCommenting] = useState(false);
+  // The step whose "How the agent got here" is open. Also from the skim page, which shows several steps.
+  const [tracing, setTracing] = useState<Step | null>(null);
   const [commentKey, setCommentKey] = useState(0);
   const [showContext, setShowContext] = usePref<boolean>('walkthrough-context', true);
   const [mode, setMode] = usePref<DiffMode>('diff-mode', 'unified');
@@ -111,7 +114,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     setAsking(false);
     setDraft(null);
     setCommenting(false);
-  }, [selKey, decision]);
+    setTracing(null);
+  }, [selKey, decision, group]);
 
   // And at its top: the scroller stays mounted from one place to the next. Search's jump to a line comes after this.
   const scroller = useRef<HTMLDivElement>(null);
@@ -134,7 +138,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   // answer), n needs a fix, c comments, a asks Claude, s and w change the diff, Esc goes back to the plan.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!isPlainKey(e)) return;
+      // The dialog has the keys while it's open: Esc closes it instead of leaving for the plan.
+      if (!isPlainKey(e) || tracing) return;
       const run = (fn: () => void) => {
         e.preventDefault();
         fn();
@@ -333,6 +338,14 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     </footer>
   );
 
+  const traceLink = (s: Step) =>
+    data.sessionCount > 0 &&
+    s.files.length > 0 && (
+      <button type="button" className="self-start text-ui text-link hover:underline" onClick={() => setTracing(s)}>
+        How the agent got here
+      </button>
+    );
+
   const shell = (body: React.ReactNode, foot: React.ReactNode, aside?: React.ReactNode) => (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {header}
@@ -345,6 +358,16 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
         {aside}
       </div>
       {footer(foot)}
+      {tracing && (
+        <StepTraceDialog
+          projectId={data.projectId}
+          branch={data.branch}
+          title={tracing.title}
+          // A renamed file was edited under either name.
+          files={[...new Set(tracing.hunkIds.flatMap((id) => [data.hunks[id]?.path, data.hunks[id]?.oldPath]).filter((f): f is string => !!f))]}
+          onClose={() => setTracing(null)}
+        />
+      )}
     </div>
   );
 
@@ -384,9 +407,12 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
                 Step {x.index + 1}: {x.title}
               </h2>
               <RiskPill risk={x.risk} />
+              {x.noTestChange && <Pill tone="muted" data-tooltip={NO_TEST_HINT}>No test changed</Pill>}
               {isReviewed(x, state.reviewed) && <Pill tone="muted">Reviewed</Pill>}
             </div>
             {x.why && <p className="text-body text-text select-text">{x.why}</p>}
+            {traceLink(x)}
+            {x.choices.length > 0 && <AgentChoices choices={x.choices} />}
             {x.hunkIds.map((id) => {
               const h = data.hunks[id];
               return h ? (
@@ -538,6 +564,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
         <div className="flex flex-wrap items-center gap-1.5">
           <RiskPill risk={cur.risk} />
           {cur.outsideTask && <Pill data-tooltip={OUTSIDE_HINT}>Outside your request</Pill>}
+          {cur.noTestChange && <Pill tone="muted" data-tooltip={NO_TEST_HINT}>No test changed</Pill>}
           {done && <Pill tone="muted">Reviewed</Pill>}
           {changedSince && changedSince !== 'same' && <Pill tone="link">{changedSince === 'new' ? 'New' : 'Changed'} since your last review</Pill>}
           {stepThreads > 0 && (
@@ -548,7 +575,10 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
         </div>
         <h1 className="text-hero font-semibold break-words">{cur.title}</h1>
         <p className={`text-body select-text ${cur.why ? 'text-text' : 'text-muted'}`}>{cur.why || whyFallback(cur, data)}</p>
+        {traceLink(cur)}
       </div>
+
+      {cur.choices.length > 0 && <AgentChoices choices={cur.choices} />}
 
       {stepFlags.map((f) => {
         const labels = decisionLabels(f);

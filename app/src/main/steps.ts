@@ -11,6 +11,10 @@ const maxLevel = (levels: (keyof typeof RANK)[]): RiskLevel => {
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'step';
 const isTodo = (s: string | null | undefined) => !s || /^todo\b/i.test(s.trim());
 
+/** Files that hold code a test could cover: not docs, config or styles. */
+const CODE_FILE = /\.([cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php|swift|c|h|cpp|hpp|vue|svelte)$/;
+const isCode = (h: WtvHunk) => CODE_FILE.test(h.path) && !h.isTest && !h.lockfile && !h.generated && !h.whitespaceOnly;
+
 /**
  * Every changed hunk ends up in at least one step:
  * walkthrough chapters in the agent's order, then one "outside the task" step per file
@@ -27,11 +31,14 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
     return key;
   };
 
-  const make = (s: Omit<Step, 'index' | 'files' | 'added' | 'removed' | 'risk'> & { minRisk?: RiskLevel }): Step => {
+  const make = (s: Omit<Step, 'index' | 'files' | 'added' | 'removed' | 'risk' | 'noTestChange' | 'choices'> & { minRisk?: RiskLevel; choices?: Step['choices'] }): Step => {
     const hs = s.hunkIds.map((id) => byId.get(id)!).filter(Boolean);
     const { minRisk, ...rest } = s;
     return {
       ...rest,
+      choices: rest.choices ?? [],
+      // Only a chapter can say this: it holds the tests of its code, while the other steps split a change by file.
+      noTestChange: s.source === 'chapter' && hs.some(isCode) && !hs.some((h) => h.isTest && !h.whitespaceOnly),
       index: steps.length,
       risk: maxLevel([...hs.map((h) => h.level), minRisk ?? 'none']),
       files: [...new Set(hs.map((h) => h.path))],
@@ -50,6 +57,7 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
         why: isTodo(ch.why) ? '' : ch.why,
         checks,
         outsideTask: ch.outsideTask,
+        choices: ch.choices,
         minRisk: ch.outsideTask ? 'medium' : undefined,
         source: skeleton ? 'skeleton' : 'chapter',
         hunkIds: ch.hunkIds,
