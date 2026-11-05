@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import hljs from 'highlight.js/lib/common';
 import { ignoreWhitespace, languageFor, riskReason, splitRows } from '../../shared/diff.ts';
 import type { Comment, DiffLine, HunkView } from '../../shared/types.ts';
-import { Sparkles } from 'lucide-react';
+import { ChevronRight, MessageSquare, Sparkles } from 'lucide-react';
 import { Markdown } from './markdown.tsx';
 import { modKey } from '../lib/shortcuts.ts';
+import { plural } from './ui.tsx';
 import { Button } from './ui/Button.tsx';
+import { Checkbox } from './ui/Checkbox.tsx';
 import { Pill } from './ui/Pill.tsx';
 import { TEXTAREA } from './ui/field.ts';
 
@@ -63,6 +66,14 @@ interface Props {
   extraAt?: (anchor: Anchor) => ReactNode;
   /** Scrolls to this hunk, opened, and with a line (in the new file) to that line, marked. A new object scrolls again. */
   focus?: { line?: number | null; side?: Anchor['side'] };
+  /** Whether you ticked this change off. A ticked change opens closed, down to its header. */
+  reviewed?: boolean;
+  /** Ticks it off, or back on. Without it there's no box and it can't close. */
+  onReviewed?: (on: boolean) => void;
+  /** Opens even when ticked off, e.g. for a decision that asks you to read the code. */
+  startOpen?: boolean;
+  /** Open threads on GitHub here, counted on the header while it's closed. */
+  threads?: number;
 }
 
 /** A long path that wraps between folders, not in the middle of a name. The file name stands out. */
@@ -83,14 +94,17 @@ function PathLabel({ path }: { path: string }) {
   );
 }
 
-export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace = false, comments = [], onComment, loadLines, collapsed, badge, noteBy = 'agent', extraAt, focus }: Props) {
+export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace = false, comments = [], onComment, loadLines, collapsed, badge, noteBy = 'agent', extraAt, focus, reviewed = false, onReviewed, startOpen = false, threads = 0 }: Props) {
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState(!collapsed);
+  const [wantShut, setShut] = useState(reviewed && !startOpen);
   const [above, setAbove] = useState<DiffLine[]>([]);
   const [below, setBelow] = useState<DiffLine[]>([]);
   const [atEnd, setAtEnd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<Anchor | null>(null);
+  // A comment you're writing keeps it open: closing would lose the draft.
+  const shut = wantShut && !editing;
   const lang = useMemo(() => languageFor(hunk.path), [hunk.path]);
 
   const base = useMemo(() => (ignoreSpace ? ignoreWhitespace(hunk.lines) : hunk.lines), [hunk.lines, ignoreSpace]);
@@ -100,12 +114,14 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
   const extra = new Set<DiffLine>([...above, ...below]);
   const risks = hunk.risks.filter((r) => r.severity !== 'low');
   const root = useRef<HTMLElement>(null);
+  const head = useRef<HTMLDivElement>(null);
   const focusRow = useRef<HTMLDivElement>(null);
   const isFocus = (l: DiffLine | null) => !!l && focus?.line != null && isLine(l, focus.line, focus.side) && !extra.has(l);
 
   // Landing here from search: open it, show the rows down to the line, then bring it into view.
   useEffect(() => {
     if (!focus) return;
+    setShut(false);
     setOpen(true);
     if (focus.line != null && base.findIndex((l) => isLine(l, focus.line!, focus.side)) >= MAX_ROWS) setAll(true);
     // After the rows it opened are on screen.
@@ -228,22 +244,58 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
     );
   }
 
+  const setClosed = (next: boolean) => {
+    // Closed from further down the change, its header was stuck to the top: the next change comes up right under it.
+    const stuck = !!head.current && !!root.current && head.current.getBoundingClientRect().top > root.current.getBoundingClientRect().top;
+    flushSync(() => setShut(next));
+    if (next && stuck && !editing) root.current?.scrollIntoView({ block: 'start' });
+  };
+  const said = comments.length + threads;
+
   const bar = (children: ReactNode) => <div className="diff-bar">{children}</div>;
   return (
-    <section ref={root} className="scroll-mt-3 overflow-hidden rounded-lg border border-border">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-code px-3 py-1.5">
-        <PathLabel path={hunk.path} />
+    // Clip, not hidden: hidden would make this the scroller its header sticks to.
+    <section ref={root} className="scroll-mt-3 overflow-clip rounded-lg border border-border">
+      {/* Stays in view, so the box is in reach once you've read down a long change. */}
+      <div ref={head} className={`sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 bg-code px-3 py-1.5 ${shut ? '' : 'border-b border-border'}`}>
+        {onReviewed ? (
+          <button type="button" aria-expanded={!shut} className="flex min-w-0 items-start gap-1.5 text-left" onClick={() => setClosed(!shut)}>
+            <ChevronRight size={14} className={`mt-0.5 shrink-0 text-muted transition-transform ${shut ? '' : 'rotate-90'}`} aria-hidden />
+            <PathLabel path={hunk.path} />
+          </button>
+        ) : (
+          <PathLabel path={hunk.path} />
+        )}
         <span className="flex flex-wrap items-center gap-1.5">
-          {badge}
-          {risks.map((r) => (
-            <Pill key={r.code} tone={r.severity === 'high' ? 'caution' : 'default'} data-tooltip={riskReason(r) ?? undefined}>
-              {r.label}
+          {!shut && badge}
+          {!shut &&
+            risks.map((r) => (
+              <Pill key={r.code} tone={r.severity === 'high' ? 'caution' : 'default'} data-tooltip={riskReason(r) ?? undefined}>
+                {r.label}
+              </Pill>
+            ))}
+          {shut && said > 0 && (
+            <Pill tone="muted" icon={<MessageSquare size={12} aria-hidden />}>
+              {plural(said, 'comment')}
             </Pill>
-          ))}
+          )}
           <span className="font-mono text-meta text-faint">{hunk.rangeLabel}</span>
+          {onReviewed && (
+            <Checkbox
+              checked={reviewed}
+              className="ml-1.5 text-ui text-muted"
+              tooltip={reviewed ? 'Untick to review this change again' : 'Tick this change off and close it'}
+              onChange={(on) => {
+                setClosed(on);
+                onReviewed(on);
+              }}
+            >
+              Reviewed
+            </Checkbox>
+          )}
         </span>
       </div>
-      {showNote && hunk.note && (
+      {!shut && showNote && hunk.note && (
         // Before the code: it says what to look for while reading it.
         <div className="flex gap-2.5 border-b border-border bg-link/6 px-3 py-2">
           <Sparkles size={14} className="mt-0.5 shrink-0 text-link" aria-hidden />
@@ -253,7 +305,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
           </div>
         </div>
       )}
-      {!open ? (
+      {shut ? null : !open ? (
         <button type="button" className="diff-bar w-full text-left text-link hover:underline" onClick={() => setOpen(true)}>
           {collapsed} Show it
         </button>

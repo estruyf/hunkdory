@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { buildFixture } from '../../tools/wtv/test/fixture.mjs';
 import { normalizeWalkthrough, skeleton, verify } from '../../tools/wtv/src/verify.mjs';
 import { attention, buildSteps, diffLines, estimateMinutes, rangeText } from '../src/main/steps.ts';
-import { carryReviewed, isReviewed, orderSteps } from '../src/shared/order.ts';
+import { carryReviewed, isReviewed, markHunk, orderSteps } from '../src/shared/order.ts';
+import type { Step } from '../src/shared/types.ts';
 import { sendBackPrompt } from '../src/main/actions.ts';
 
 function fixture(edit?: (wt: { chapters: Record<string, unknown>[] }) => void) {
@@ -115,6 +116,24 @@ test('a reviewed step needs review again when its hunks change', () => {
   assert.ok(isReviewed(step, { [step.key]: [...step.hunkIds] }));
   assert.ok(!isReviewed(step, { [step.key]: [...step.hunkIds.slice(1), 'deadbeef00'] }));
   assert.ok(!isReviewed(step, {}));
+});
+
+test('ticking hunks off one by one reviews the step once all are ticked', () => {
+  const step = { key: 'k', hunkIds: ['a', 'b'] } as Step;
+  const one = markHunk(undefined, step.hunkIds, 'a', true);
+  assert.deepEqual(one, ['a']);
+  assert.ok(!isReviewed(step, { k: one }));
+  const both = markHunk(one, step.hunkIds, 'b', true);
+  assert.ok(isReviewed(step, { k: both }));
+  // Unticking one takes the step back to open.
+  assert.deepEqual(markHunk(both, step.hunkIds, 'a', false), ['b']);
+});
+
+test('ticking a hunk drops marks for hunks no longer in the step', () => {
+  const step = { key: 'k', hunkIds: ['a', 'new'] } as Step;
+  const seen = markHunk(['a', 'old'], step.hunkIds, 'new', true);
+  assert.deepEqual(seen, ['a', 'new']);
+  assert.ok(isReviewed(step, { k: seen }));
 });
 
 test('diff rows add context around a zero-context hunk', () => {

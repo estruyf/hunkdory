@@ -185,6 +185,13 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
       : null;
   };
 
+  /** One change's box: ticks it off within its step. */
+  const tick = (s: Step, hunkId: string) => ({
+    reviewed: !!state.reviewed[s.key]?.includes(hunkId),
+    onReviewed: (on: boolean) => void patch({ type: 'reviewed-hunk', stepKey: s.key, hunkIds: s.hunkIds, hunkId, on }),
+  });
+  const openThreads = (hunkId: string) => (placed.byHunk.get(hunkId) ?? []).filter((t) => !t.resolved).length;
+
   const careful = !!cur && isCareful(cur);
 
   const settle = async (d: PlanDecision, value: 'fine' | 'fix' | null) => {
@@ -391,6 +398,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
                   comments={state.comments.filter((c) => c.hunkId === id && c.line)}
                   onComment={(a, body, cid) => patch({ type: 'line-comment', id: cid, stepKey: x.key, hunkId: id, path: h.path, line: a.line, side: a.side, body })}
                   extraAt={threadsAt(id, false)}
+                  threads={openThreads(id)}
+                  {...tick(x, id)}
                   loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
                   noteBy={data.walkthrough === 'reviewer' ? 'reviewer' : 'agent'}
                 />
@@ -495,6 +504,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
 
 
   const changedSince = since?.byStep[cur.key];
+  const ticked = cur.hunkIds.filter((id) => state.reviewed[cur.key]?.includes(id)).length;
   const stepThreads = cur.hunkIds.flatMap((id) => placed.byHunk.get(id) ?? []).filter((t) => !t.resolved).length;
   // Where search sent you: the hunk with that line, else the file's first hunk in this step.
   const inFile = (id: string) => !!focus && (data.hunks[id]?.path === focus.path || data.hunks[id]?.oldPath === focus.path);
@@ -609,6 +619,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
           <span className="flex flex-wrap items-center gap-1.5">
             <span className="text-meta text-faint">
               {plural(cur.files.length, 'file')} · {plural(cur.hunkIds.length, 'change')}
+              {ticked > 0 && ` · ${ticked} reviewed`}
             </span>
             {/* With more than one file, a chip per file jumps to its first change. */}
             {cur.files.length > 1 &&
@@ -638,6 +649,9 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
               comments={state.comments.filter((c) => c.hunkId === id && c.line)}
               onComment={lineComment(id, h.path)}
               extraAt={threadsAt(id, true)}
+              threads={openThreads(id)}
+              startOpen={!!dec}
+              {...tick(cur, id)}
               loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
               collapsed={since?.reviewedBefore.has(id) ? 'You reviewed this exact change last time.' : null}
               badge={isNew ? <Pill tone="link">New since your last review</Pill> : null}

@@ -57,6 +57,21 @@ test('the prompt lists every hunk to cover by id, with its risks, and leaves out
   assert.match(p, /`title` names the change like a pull request title: under 70 characters/);
 });
 
+test('the prompt carries the diff, so the run has no need to fetch it', () => {
+  const rows = [{ kind: 'ctx', oldN: 2, newN: 2, text: 'keep' }, { kind: 'del', oldN: 3, newN: null, text: 'old' }, { kind: 'add', oldN: null, newN: 3, text: 'new' }] as HunkView['lines'];
+  const p = writerPrompt(input({ hunks: [hunk('1111111111', 'a.js', { lines: rows })] }));
+  assert.match(p, /h:1111111111 {2}a\.js[^\n]*\n```diff\n keep\n-old\n\+new\n```/);
+});
+
+test('a hunk too big for the prompt is listed without its diff, and smaller ones after it still fit', () => {
+  const row = (text: string) => [{ kind: 'add', oldN: null, newN: 1, text }] as HunkView['lines'];
+  const p = writerPrompt(input({ hunks: [hunk('1111111111', 'huge.js', { lines: row('x'.repeat(200_000)) }), hunk('2222222222', 'small.js', { lines: row('small') })] }));
+  assert.match(p, /h:1111111111 {2}huge\.js[^\n]*\nh:2222222222/);
+  assert.doesNotMatch(p, /xxxx/);
+  assert.match(p, /h:2222222222 {2}small\.js[^\n]*\n```diff\n\+small\n```/);
+  assert.match(p, /too big to show here: read it with the commands above/);
+});
+
 test('the walkthrough is written for a reviewer new to the code, in plain words', () => {
   const p = writerPrompt(input());
   assert.match(p, /didn't write this code and may not know this part of the codebase/);

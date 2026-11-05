@@ -13,7 +13,7 @@ import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
 import { installedEditors, openInEditor, pickEditor } from './editors.ts';
 import { addToStepComment, answerLine, removeFromStepComments, setAnswerLine } from '../shared/comments.ts';
-import { carryReviewed } from '../shared/order.ts';
+import { carryReviewed, markHunk } from '../shared/order.ts';
 import type { ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/types.ts';
 
 // The app icon. Packaged builds take icon.icns from resources/; this covers the dock and window in dev.
@@ -111,6 +111,10 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
     r.order = patch.order;
   } else if (patch.type === 'reviewed') {
     if (patch.on) r.reviewed[patch.stepKey] = patch.hunkIds;
+    else delete r.reviewed[patch.stepKey];
+  } else if (patch.type === 'reviewed-hunk') {
+    const seen = markHunk(r.reviewed[patch.stepKey], patch.hunkIds, patch.hunkId, patch.on);
+    if (seen.length) r.reviewed[patch.stepKey] = seen;
     else delete r.reviewed[patch.stepKey];
   } else if (patch.type === 'line-comment') {
     const body = patch.body.trim();

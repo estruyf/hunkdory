@@ -471,7 +471,7 @@ export interface ReviewState {
   order: ReviewOrder;
   startedAt: string | null;
   updatedAt: string;
-  /** Step key → hunk ids at the time it was marked reviewed. A step counts as reviewed only while they still match. */
+  /** Step key → the hunk ids you marked reviewed, as a whole or one by one. A step counts as reviewed only while they are exactly its hunks. */
   reviewed: Record<string, string[]>;
   comments: Comment[];
   decision: DecisionRecord | null;
@@ -726,6 +726,8 @@ export type ReviewPatch =
   | { type: 'start'; order: ReviewOrder }
   | { type: 'order'; order: ReviewOrder }
   | { type: 'reviewed'; stepKey: string; hunkIds: string[]; on: boolean }
+  /** Ticks one hunk of a step off, or back on. `hunkIds` are the step's hunks now. Ticking the last one makes the step reviewed. */
+  | { type: 'reviewed-hunk'; stepKey: string; hunkIds: string[]; hunkId: string; on: boolean }
   | { type: 'comment'; stepKey: string; body: string }
   /**
    * Settles a review plan decision. `comment` is the line a "needs a fix" adds to the step's comment;

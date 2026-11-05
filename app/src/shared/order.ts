@@ -29,6 +29,15 @@ export function isReviewed(step: Step, reviewed: Record<string, string[]>): bool
 }
 
 /**
+ * A step's marks with one of its hunks ticked or unticked. Marks for hunks no longer in the step go:
+ * they'd keep it from counting as reviewed once every hunk is ticked.
+ */
+export function markHunk(seen: string[] = [], hunkIds: string[], hunkId: string, on: boolean): string[] {
+  const set = new Set(seen);
+  return hunkIds.filter((id) => (id === hunkId ? on : set.has(id)));
+}
+
+/**
  * Your reviewed marks after the steps changed shape, e.g. a walkthrough replaced one step per file: a step
  * whose every hunk you already reviewed counts as reviewed. A mark for a step that is gone stays while some
  * of its hunks aren't in a reviewed step yet, so nothing you looked at is forgotten. Null when nothing changes.

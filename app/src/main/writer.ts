@@ -85,6 +85,21 @@ const hunkLine = (h: HunkView) => {
   return `h:${h.id}  ${h.path}  ${h.rangeLabel}  +${h.added} -${h.removed}${risks}`;
 };
 
+/** How much of the diff goes in the prompt. It saves the run fetching it; a change bigger than this gets the rest through git. */
+const INLINE_DIFF_CHARS = 100_000;
+const MARK = { add: '+', del: '-', ctx: ' ' } as const;
+
+/** The hunks to cover, each with its rows while they fit. Hunkdory has them already, and every fetch is another round trip for the model. */
+function hunkList(listed: HunkView[]): string[] {
+  let left = INLINE_DIFF_CHARS;
+  return listed.flatMap((h) => {
+    const rows = h.lines.map((l) => `${MARK[l.kind]}${l.text}`).join('\n');
+    if (!rows || rows.length > left) return [hunkLine(h)];
+    left -= rows.length;
+    return [hunkLine(h), '```diff', rows, '```'];
+  });
+}
+
 export const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n[cut off]` : s);
 
 /** The task for the headless run. Pure, so it can be tested. */
@@ -128,7 +143,8 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
   if (input.commits.length) lines.push('## Commits, oldest first', ...input.commits.slice(-60).map((c) => `- ${c}`), '');
   lines.push(
     `## The ${listed.length} hunks to cover`,
-    ...listed.map(hunkLine),
+    'Each with its diff where it fits. A hunk without one is too big to show here: read it with the commands above.',
+    ...hunkList(listed),
     ...(skipped ? ['', `${skipped} more hunk(s) are whitespace-only or generated files (lockfiles, build output). Leave those out.`] : []),
     '',
     '## How to write it',
@@ -152,7 +168,7 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
     '- `title` names the change like a pull request title: under 70 characters, no full stop.',
     "- `intent` is what the reviewer reads first: one or two short sentences on what the branch does and why, that someone who hasn't seen the code understands. Not a list of everything in it.",
     '',
-    'Read as much of the diff as you need to explain it, then return the walkthrough as structured output. Do not change any files.'
+    "Write from the diff above. Look further only where a hunk makes no sense without its surroundings, a few reads at most: you explain this change, you don't audit the code around it. Then return the walkthrough as structured output. Do not change any files."
   );
   if (feedback) {
     if (feedback.changed) {
