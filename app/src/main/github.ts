@@ -4,7 +4,8 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { shellEnv, which } from './shellEnv.ts';
 import * as g from './git.ts';
-import type { AgentChoice, CheckItem, GitHubEvent, GitHubFeedback, GitHubReview, GitHubThread, PrReview, PullRequest } from '../shared/types.ts';
+import { findRefs } from '../shared/issueRefs.ts';
+import type { AgentChoice, CheckItem, GitHubEvent, GitHubFeedback, GitHubReview, GitHubThread, IssueRef, IssueRefs, PrReview, PullRequest } from '../shared/types.ts';
 
 const run = promisify(execFile);
 
@@ -48,8 +49,9 @@ async function ghApi(method: string, path: string, cwd: string, body?: unknown):
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) return resolve(out.trim() ? JSON.parse(out) : null);
-      const e = ghError(apiErrorText(err, out)) as Error & { status?: number };
+      const e = ghError(apiErrorText(err, out)) as Error & { status?: number; stdout?: string };
       e.status = Number(err.match(/HTTP (\d{3})/)?.[1] ?? 0) || undefined;
+      e.stdout = out;
       reject(e);
     });
     child.stdin.end(body === undefined ? '' : JSON.stringify(body));
@@ -309,6 +311,66 @@ export async function prFeedback(root: string, repo: string, pr: number, maxAgeM
   const feedback = toFeedback(data.repository.pullRequest);
   feedbackCache.set(key, { at: Date.now(), feedback });
   return feedback;
+}
+
+/** At most this many are looked up: a list of hundreds in a PR's text shouldn't hold up opening it. */
+const MAX_REFS = 30;
+
+export interface RawIssueRef {
+  __typename: 'Issue' | 'PullRequest';
+  number: number;
+  title: string;
+  state: string;
+  url: string;
+  body?: string;
+}
+
+/** GitHub's answer per number, as Hunkdory shows it: closing issues first. Pure, so it can be tested. */
+export function toIssueRefs(repoUrl: string, wanted: { number: number; closes: boolean }[], answers: Record<string, RawIssueRef | null | undefined>): IssueRefs {
+  const refs: IssueRef[] = [];
+  const missing: number[] = [];
+  for (const { number, closes } of wanted) {
+    const a = answers[`n${number}`];
+    if (!a) {
+      missing.push(number);
+      continue;
+    }
+    refs.push({ number, kind: a.__typename === 'Issue' ? 'issue' : 'pr', title: a.title, state: a.state.toLowerCase() as IssueRef['state'], url: a.url, body: a.body ?? '', closes });
+  }
+  return { repoUrl, refs: refs.sort((a, b) => Number(b.closes) - Number(a.closes)), missing };
+}
+
+const refsCache = new Map<string, { at: number; refs: IssueRefs }>();
+
+/**
+ * Looks up what "#123" means in some text. A number GitHub doesn't know fails the whole call, with the other answers
+ * still in its output: those count. Read again after a minute. Without an answer, "#123" still links, without a title.
+ */
+export async function issueReferences(root: string, repo: string, repoUrl: string, texts: (string | null | undefined)[], maxAgeMs = 60_000): Promise<IssueRefs> {
+  const wanted = findRefs(texts, repoUrl).slice(0, MAX_REFS);
+  const none: IssueRefs = { repoUrl, refs: [], missing: [] };
+  if (!wanted.length) return none;
+  const key = `${repo}:${JSON.stringify(wanted)}`;
+  const hit = refsCache.get(key);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.refs;
+  const [owner, name] = repo.split('/');
+  const fields = wanted.map((w) => `n${w.number}: issueOrPullRequest(number: ${w.number}) { __typename ... on Issue { number title state url body } ... on PullRequest { number title state url } }`).join(' ');
+  const query = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`;
+  let res: { data?: { repository?: Record<string, RawIssueRef | null> | null }; errors?: { type?: string }[] } | null;
+  try {
+    res = await ghApi('POST', 'graphql', root, { query, variables: { owner, name } });
+  } catch (e) {
+    try {
+      res = JSON.parse((e as { stdout?: string }).stdout ?? '');
+    } catch {
+      return none;
+    }
+  }
+  // Only "no such number" leaves the rest usable: after anything else, a missing answer says nothing about the number.
+  if (!res?.data?.repository || res.errors?.some((e) => e.type !== 'NOT_FOUND')) return none;
+  const refs = toIssueRefs(repoUrl, wanted, res.data.repository);
+  refsCache.set(key, { at: Date.now(), refs });
+  return refs;
 }
 
 /** Replies in a review thread, as you. */

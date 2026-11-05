@@ -80,7 +80,8 @@ export function WalkthroughBar({ data, onSwitch }: { data: ReviewData; onSwitch(
   const job = useWalkthroughJobFor(data.projectId, data.branch);
   const running = job?.status === 'running';
   useTick(running);
-  if (data.walkthrough !== 'skeleton' || !job || (!running && job.status !== 'done')) return null;
+  // A run for another base, as before a rebase, has nothing to switch to: its walkthrough doesn't count here.
+  if (data.walkthrough !== 'skeleton' || !job || (!running && (job.status !== 'done' || job.baseSha !== data.baseSha))) return null;
   return (
     <div role="status" className="flex shrink-0 items-center gap-2 border-b border-link/30 bg-link/8 px-6 py-1.5 text-meta text-text">
       {running ? (

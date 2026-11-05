@@ -26,7 +26,7 @@ import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import { EmptyStepNotice, WalkthroughBar } from '../components/walkthrough.tsx';
 import { StepTraceDialog } from '../components/runLog.tsx';
-import { AgentChoices, AgentTests, AskedFor, CommentBox, NO_TEST_HINT, RiskNote, whyFallback } from './Review.tsx';
+import { AgentChoices, AgentTests, AskedFor, CommentBox, LinkedIssues, NO_TEST_HINT, RiskNote, hasLinkedIssues, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
 
 export function Walkthrough({ go, data, initialState, stepKey, decision, group, focus }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string; focus?: LineRef }) {
@@ -548,6 +548,12 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
           </button>
         )}
       </section>
+      {hasLinkedIssues(data) && (
+        <section className="flex flex-col gap-1.5">
+          <SectionHeader as="h3">Linked issues</SectionHeader>
+          <LinkedIssues data={data} clamp={240} />
+        </section>
+      )}
       {data.agentTests && (
         <section className="flex flex-col gap-1.5 text-ui">
           <SectionHeader as="h3">The agent’s tests</SectionHeader>

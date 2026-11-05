@@ -46,5 +46,12 @@ export function watchWalkthroughs(): () => void {
   });
 }
 
+/** After runs were forgotten, as when their walkthroughs were deleted: only the ones still known count. */
+export async function resyncWalkthroughs() {
+  const list = await window.api.walkthroughJobs();
+  const jobs = Object.fromEntries(list.map((j) => [jobKey(j.projectId, j.branch), j]));
+  useWalkthroughs.setState((s) => ({ jobs, ready: Object.fromEntries(Object.entries(s.ready).filter(([key]) => jobs[key])) }));
+}
+
 export const useWalkthroughJobFor = (projectId: string | undefined, branch: string | undefined) =>
   useWalkthroughs((s) => (projectId && branch ? (s.jobs[jobKey(projectId, branch)] ?? null) : null));

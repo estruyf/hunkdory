@@ -18,7 +18,8 @@ import { PrLink, PushToPrNotice, StackBar, checksText, checksTone } from '../com
 import { GitHubReviews } from '../components/githubThreads.tsx';
 import { placeThreads } from '../../shared/threads.ts';
 import { MessageSquare } from 'lucide-react';
-import { AgentTests, AskedFor, NO_TEST_HINT, ReviewError } from './Review.tsx';
+import { AgentTests, AskedFor, LinkedIssues, NO_TEST_HINT, ReviewError, hasLinkedIssues } from './Review.tsx';
+import { IssueRefsContext } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import type { LineRef } from '../components/diff.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
@@ -40,7 +41,11 @@ export function PlanScreen({ go, projectId, branch, preloaded }: { go: Go; proje
   const value = loaded.value ?? (version === 0 ? preloaded : undefined);
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
   if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
-  return <PlanView key={version} go={go} data={value.data} initialState={value.state} onReload={() => setVersion((v) => v + 1)} />;
+  return (
+    <IssueRefsContext.Provider value={value.data.references}>
+      <PlanView key={version} go={go} data={value.data} initialState={value.state} onReload={() => setVersion((v) => v + 1)} />
+    </IssueRefsContext.Provider>
+  );
 }
 
 const AUTO_BASE = '\0auto';
@@ -542,6 +547,7 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
   return (
     <section aria-label="The change" className="grid grid-cols-[minmax(96px,max-content)_1fr] gap-x-4 gap-y-3 rounded-xl border border-border bg-card p-4">
       {row(askedLabel(data), <AskedFor data={data} clamp={240} />)}
+      {hasLinkedIssues(data) && row('Linked issues', <LinkedIssues data={data} clamp={240} />)}
       {row('It did', data.intent ? <span className="select-text">{data.intent}</span> : <span className="text-muted">{data.walkthrough === 'skeleton' ? 'No walkthrough yet, so there is no summary: the steps are one per file.' : 'The walkthrough has no summary.'}</span>)}
       {row(
         'It also did',

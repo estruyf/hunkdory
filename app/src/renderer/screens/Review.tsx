@@ -6,8 +6,8 @@ import { Button } from '../components/ui/Button.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { TEXTAREA } from '../components/ui/field.ts';
-import type { AgentChoice, ReviewData, ReviewState, Step } from '../../shared/types.ts';
-import { Markdown } from '../components/markdown.tsx';
+import type { AgentChoice, IssueRef, ReviewData, ReviewState, Step } from '../../shared/types.ts';
+import { IssueRefsContext, Markdown } from '../components/markdown.tsx';
 import { timeAgo } from '../../shared/order.ts';
 import { Walkthrough } from './Walkthrough.tsx';
 import type { LineRef } from '../components/diff.tsx';
@@ -20,7 +20,11 @@ export function Review({ go, projectId, branch, stepKey, decision, group, focus,
   const value = loaded.value ?? preloaded;
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
   if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
-  return <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} focus={focus} />;
+  return (
+    <IssueRefsContext.Provider value={value.data.references}>
+      <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} focus={focus} />
+    </IssueRefsContext.Provider>
+  );
 }
 
 export function ReviewError({ go, message }: { go: Go; message: string }) {
@@ -47,6 +51,40 @@ export function AskedFor({ data, clamp }: { data: ReviewData; clamp?: number }) 
     <p className="text-body text-muted">
       {data.pr ? 'The pull request has no description, and no Claude Code session on this Mac worked on its branch.' : 'No Claude Code session ran on this branch, so there is no prompt to show.'}
     </p>
+  );
+}
+
+const linkedIssues = (data: ReviewData) => data.references?.refs.filter((r) => r.kind === 'issue') ?? [];
+export const hasLinkedIssues = (data: ReviewData) => linkedIssues(data).length > 0;
+
+/** The issues the PR points at: what the work is about, in the words of whoever reported it. PRs are left out: the stack shows those. */
+export function LinkedIssues({ data, clamp }: { data: ReviewData; clamp?: number }) {
+  return (
+    <div className="flex flex-col gap-3">
+      {linkedIssues(data).map((issue) => (
+        <LinkedIssue key={issue.number} issue={issue} clamp={clamp} />
+      ))}
+    </div>
+  );
+}
+
+/** The issue a PR fixes opens with its text; one it only mentions stays a title until you ask. */
+function LinkedIssue({ issue, clamp }: { issue: IssueRef; clamp?: number }) {
+  const [open, setOpen] = useState(issue.closes);
+  const body = issue.body.trim();
+  return (
+    <div className="flex flex-col gap-1 text-ui">
+      <button type="button" className="text-left break-words text-link hover:underline" onClick={() => window.api.openExternal(issue.url)}>
+        #{issue.number} {issue.title} ↗
+      </button>
+      {(issue.closes || issue.state !== 'open') && <span className="text-meta text-muted">{[issue.closes && 'This PR says it fixes this', issue.state !== 'open' && 'Closed'].filter(Boolean).join(' · ')}</span>}
+      {body && open && <Prompt text={body} clamp={clamp} />}
+      {body && !open && (
+        <button type="button" className="self-start text-link hover:underline" onClick={() => setOpen(true)}>
+          Show what it says
+        </button>
+      )}
+    </div>
   );
 }
 

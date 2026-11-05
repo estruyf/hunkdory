@@ -149,6 +149,27 @@ export interface GitHubFeedback {
   threads: GitHubThread[];
 }
 
+/** An issue or PR that a branch's PR or prompt points at. */
+export interface IssueRef {
+  number: number;
+  kind: 'issue' | 'pr';
+  title: string;
+  state: 'open' | 'closed' | 'merged';
+  url: string;
+  /** Issues only: a PR's own text is a review of its own. */
+  body: string;
+  /** Mentioned as "Fixes #1". GitHub's own link doesn't help here: it stays empty for a PR into a release branch. */
+  closes: boolean;
+}
+
+export interface IssueRefs {
+  /** For "#123" in other text, which wasn't looked up. */
+  repoUrl: string;
+  refs: IssueRef[];
+  /** Numbers GitHub doesn't know, as a task number from another tracker: these aren't links. */
+  missing: number[];
+}
+
 /** One pull request in a stack: each one's base is the head of the one below it. */
 export interface StackEntry {
   number: number;
@@ -270,6 +291,13 @@ export interface HunkView {
   note: string | null;
 }
 
+/** A walkthrough Hunkdory keeps in its own folder. */
+export interface SavedWalkthrough {
+  /** Milliseconds since the epoch. */
+  writtenAt: number;
+  bytes: number;
+}
+
 export type WalkthroughSource = 'agent' | 'reviewer' | 'skeleton';
 
 /** Hunkdory writing a walkthrough for a branch that has none. Lives in memory while the app runs. */
@@ -283,6 +311,8 @@ export interface WalkthroughJob {
   activity: string | null;
   /** 2 when the first walkthrough missed hunks and Claude is filling the gaps. */
   attempt: number;
+  /** The base the branch had when the run started. */
+  baseSha: string;
   error?: string;
 }
 
@@ -381,6 +411,8 @@ export interface ReviewData {
   stack: { base: string; prs: StackEntry[] } | null;
   /** Reviews and line comments on the pull request on GitHub. Null without a PR, or when GitHub couldn't be read. */
   github: GitHubFeedback | null;
+  /** What "#123" means in this review. Null when GitHub isn't linked. */
+  references: IssueRefs | null;
   /** Hunkdory's walkthrough was written with what the agent said in its session, not only from the code and commits. */
   walkthroughFromSession: boolean;
   /** Where Hunkdory's walkthrough came from when a teammate shared it on the PR. */
@@ -706,6 +738,9 @@ export interface ReviewerApi {
   walkthroughJob(projectId: string, branch: string): Promise<WalkthroughJob | null>;
   /** Every walkthrough run since the app started, for the sidebar. */
   walkthroughJobs(): Promise<WalkthroughJob[]>;
+  savedWalkthroughs(): Promise<SavedWalkthrough[]>;
+  /** Null deletes them all. Resolves with how many went. */
+  removeWalkthroughs(olderThanDays: number | null): Promise<number>;
   /** Has Hunkdory write a walkthrough. `auto` only starts for a branch without one, once per diff. */
   writeWalkthrough(projectId: string, branch: string, opts?: { auto?: boolean }): Promise<WalkthroughJob | null>;
   /** Brings Hunkdory's walkthrough up to date with a diff that changed, keeping its chapters. Null when it still covers the diff. */

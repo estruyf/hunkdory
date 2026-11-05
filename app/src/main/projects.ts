@@ -18,7 +18,7 @@ import type { GeneratedWalkthroughs } from './writer.ts';
 import type { Summaries, Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
 import { assistantFor } from './assistants/index.ts';
-import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, GitHubFeedback, HunkView, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -627,6 +627,20 @@ export class Projects {
     return gh.prFeedback(project.path, project.github, pr.number).catch(() => null);
   }
 
+  /** What the review shows from GitHub that changes while the diff doesn't. */
+  private async fromGitHub(project: Project, d: Discovered, prompt: string | null) {
+    const [github, references] = await Promise.all([this.feedback(project, d), this.references(project, d, prompt)]);
+    return { github, references };
+  }
+
+  /** What "#123" means in the branch's PR and prompt. The links don't depend on a PR, as long as GitHub is linked. */
+  private async references(project: Project, d: Discovered, prompt: string | null): Promise<IssueRefs | null> {
+    if (!project.github) return null;
+    const pr = d.branch.pr;
+    const repoUrl = pr ? pr.url.replace(/\/pull\/\d+$/, '') : `https://github.com/${project.github}`;
+    return gh.issueReferences(project.path, project.github, repoUrl, [pr?.title, pr?.body, prompt]);
+  }
+
   /** Replies to, or resolves, a review thread on the branch's PR. Returns what's on the PR now. */
   async onGitHub(projectId: string, branch: string, threadId: string, act: { reply: string } | { resolved: boolean }): Promise<GitHubFeedback | null> {
     const { project, d } = await this.find(projectId, branch);
@@ -828,7 +842,7 @@ export class Projects {
     const hit = this.cache.get(cacheId);
     // The stack holds your reviews of the other PRs in it, and GitHub holds what others said: both change while
     // this diff doesn't, so they're taken fresh. The inbox (no lines) has no use for the comments.
-    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p, stack: await this.stack(project, d), github: lines ? await this.feedback(project, d) : null };
+    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p, stack: await this.stack(project, d), ...(lines ? await this.fromGitHub(project, d, hit.data.prompt) : {}) };
 
     const out = await runner.run({ cwd, baseSha, head: inTree ? null : d.branch.headRef, walkthrough: wt.value, lines });
     const r = out.result;
@@ -891,6 +905,7 @@ export class Projects {
       uncommitted: d.branch.uncommitted,
       stack: await this.stack(project, d),
       github: null,
+      references: null,
       walkthroughFromSession: source === 'reviewer' && (wt.value as { generatedBy?: { fromSession?: boolean } } | null)?.generatedBy?.fromSession === true,
       sharedWalkthrough: source === 'reviewer' && shared ? shared : null,
       repo: project.github,
@@ -930,7 +945,7 @@ export class Projects {
       minutes: estimateMinutes(steps, r.hunks),
     };
     this.cache.set(cacheId, { key, pr: prKey, data, full: lines });
-    return lines ? { ...data, github: await this.feedback(project, d) } : data;
+    return lines ? { ...data, ...(await this.fromGitHub(project, d, data.prompt)) } : data;
   }
 
   private scanning: Promise<InboxScan> | null = null;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Go } from '../App.tsx';
 import { Plus, X } from 'lucide-react';
-import { Crumbs, isPlainKey, useAsync, usePref } from '../components/ui.tsx';
+import { Crumbs, cleanError, isPlainKey, plural, useAsync, usePref } from '../components/ui.tsx';
 import { matches } from '../lib/shortcuts.ts';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { ProjectIcon } from '../components/ProjectIcon.tsx';
@@ -13,7 +13,9 @@ import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { FIELD } from '../components/ui/field.ts';
 import type { DiffMode } from '../components/diff.tsx';
-import type { AcpAgentConfig, AppInfo, Theme } from '../../shared/types.ts';
+import { resyncWalkthroughs } from '../state/walkthroughs.ts';
+import { olderThan } from '../../shared/order.ts';
+import type { AcpAgentConfig, AppInfo, SavedWalkthrough, Theme } from '../../shared/types.ts';
 
 const THEMES: { value: Theme; label: string; hint: string }[] = [
   { value: 'light', label: 'Light', hint: 'Always light' },
@@ -249,6 +251,8 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
             </div>
           </Card>
 
+          <SavedWalkthroughs />
+
           <Card title="About">
             {info.value && (
               <>
@@ -272,6 +276,97 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const size = (bytes: number) => (bytes < 1_000_000 ? `${Math.max(1, Math.round(bytes / 1000))} KB` : `${(bytes / 1_000_000).toFixed(1)} MB`);
+
+/** The walkthroughs Hunkdory wrote pile up, one per branch. Only you decide when they go: a new one is a new run. */
+function SavedWalkthroughs() {
+  const [saved, setSaved] = useState<SavedWalkthrough[] | null>(null);
+  const [days, setDays] = useState('30');
+  // What you asked to delete and haven't confirmed yet. Null days: all of them.
+  const [asking, setAsking] = useState<{ days: number | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
+  const read = () => window.api.savedWalkthroughs().then(setSaved);
+  useEffect(() => {
+    void read();
+  }, []);
+
+  const parsed = Number(days);
+  const validDays = Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  const all = saved ?? [];
+  const old = validDays === null ? [] : all.filter((w) => olderThan(w.writtenAt, validDays));
+  const count = (d: number | null) => (d === null ? all.length : all.filter((w) => olderThan(w.writtenAt, d)).length);
+
+  const remove = async (d: number | null) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const removed = await window.api.removeWalkthroughs(d);
+      await resyncWalkthroughs();
+      setMessage({ error: false, text: `Deleted ${plural(removed, 'walkthrough')}.` });
+    } catch (e) {
+      setMessage({ error: true, text: `Deleting failed: ${cleanError(e)}` });
+    } finally {
+      setAsking(null);
+      setBusy(false);
+      await read();
+    }
+  };
+
+  return (
+    <Card title="Saved walkthroughs">
+      <p className="text-ui text-muted">
+        {saved === null ? 'Reading…' : all.length ? `${plural(all.length, 'walkthrough')}, ${size(all.reduce((n, w) => n + w.bytes, 0))} in Hunkdory’s own folder, not in your repositories.` : 'None yet. The ones Hunkdory writes are kept in its own folder, not in your repositories.'}
+      </p>
+      {all.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-ui">
+            Older than
+            <input
+              type="number"
+              min={1}
+              step={1}
+              aria-label="Days"
+              className={`${FIELD} w-20`}
+              value={days}
+              onChange={(e) => {
+                setDays(e.target.value);
+                setAsking(null);
+              }}
+            />
+            days
+          </label>
+          <Button disabled={busy || old.length === 0} onClick={() => setAsking({ days: validDays })}>
+            {validDays === null ? 'Enter a number of days' : old.length ? `Delete ${old.length}` : 'None that old'}
+          </Button>
+          <Button variant="quiet" disabled={busy} onClick={() => setAsking({ days: null })}>
+            Delete all {all.length}
+          </Button>
+        </div>
+      )}
+      {asking && (
+        <Notice
+          tone="warn"
+          role="alert"
+          actions={
+            <>
+              <Button variant="danger" filled disabled={busy} aria-busy={busy} onClick={() => remove(asking.days)}>
+                {busy ? 'Deleting…' : 'Delete'}
+              </Button>
+              <Button disabled={busy} onClick={() => setAsking(null)}>
+                Keep them
+              </Button>
+            </>
+          }
+        >
+          <strong className="font-semibold">Delete {plural(count(asking.days), 'walkthrough')}{asking.days === null ? '' : ` older than ${plural(asking.days, 'day')}`}?</strong> This can’t be undone. If you open one of those branches again, a project set to write walkthroughs starts a new Claude Code run for it, which costs usage. Your review progress stays.
+        </Notice>
+      )}
+      {message && <p className={`text-ui ${message.error ? 'text-error' : 'text-muted'}`} role="status">{message.text}</p>}
+    </Card>
   );
 }
 

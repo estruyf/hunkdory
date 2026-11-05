@@ -1,7 +1,7 @@
 // Hunkdory writes a walkthrough itself for branches that don't have one, with a headless Claude Code run.
 // The result is kept in Hunkdory's own data folder, never in the repository.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assistantFor } from './assistants/index.ts';
 import type { AssistantRun } from './assistants/types.ts';
@@ -9,8 +9,9 @@ import * as g from './git.ts';
 import * as gh from './github.ts';
 import type { Projects } from './projects.ts';
 import { readSessionDigest } from './sessions/trace.ts';
+import { olderThan } from '../shared/order.ts';
 import { buildPlan, decisionsForComment } from '../shared/plan.ts';
-import type { HunkView, ReviewData, WalkthroughJob } from '../shared/types.ts';
+import type { HunkView, ReviewData, SavedWalkthrough, WalkthroughJob } from '../shared/types.ts';
 
 /** Walkthroughs Hunkdory wrote, one JSON file per branch. */
 export class GeneratedWalkthroughs {
@@ -34,6 +35,33 @@ export class GeneratedWalkthroughs {
     const file = this.file(projectId, branch);
     writeFileSync(`${file}.tmp`, `${JSON.stringify(walkthrough, null, 2)}\n`);
     renameSync(`${file}.tmp`, file);
+  }
+
+  /** Only names Hunkdory gives its files: nothing else that ends up in this folder is its to delete. */
+  private files(): string[] {
+    return existsSync(this.dir) ? readdirSync(this.dir).filter((f) => /^[0-9a-f]{16}\.json(\.tmp)?$/.test(f)) : [];
+  }
+
+  /** Every walkthrough kept, with when it was last written. */
+  list(): SavedWalkthrough[] {
+    return this.files()
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => {
+        const st = statSync(join(this.dir, f));
+        return { writtenAt: st.mtimeMs, bytes: st.size };
+      });
+  }
+
+  /** Deletes what wasn't written for this many days, or everything with null. Says how many walkthroughs went. */
+  remove(days: number | null, now = Date.now()): number {
+    let removed = 0;
+    for (const f of this.files()) {
+      const file = join(this.dir, f);
+      if (days !== null && !olderThan(statSync(file).mtimeMs, days, now)) continue;
+      rmSync(file);
+      if (f.endsWith('.json')) removed++;
+    }
+    return removed;
   }
 }
 
@@ -209,8 +237,8 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
 const MAX_ATTEMPTS = 2;
 const TIMEOUT_MS = 20 * 60_000;
 const id = (projectId: string, branch: string) => `${projectId}::${branch}`;
-/** Identifies the diff a walkthrough was written for: the set of hunks. */
-const diffKey = (data: ReviewData) => createHash('sha1').update(Object.keys(data.hunks).sort().join(',')).digest('hex').slice(0, 16);
+/** Identifies the diff a walkthrough was written for: the set of hunks, and the base, since a rebase keeps the hunks. */
+const diffKey = (data: ReviewData) => createHash('sha1').update(`${data.baseSha}\0${Object.keys(data.hunks).sort().join(',')}`).digest('hex').slice(0, 16);
 
 export class Writer {
   private projects: Projects;
@@ -237,6 +265,16 @@ export class Writer {
     if (!j) return null;
     const { diffKey: _k, ...job } = j;
     return job;
+  }
+
+  /**
+   * Deletes kept walkthroughs. A finished run whose walkthrough is gone is forgotten: it has nothing to offer any more,
+   * and it shouldn't stop the branch getting a new one. A failed one stays, so that doesn't start another run by itself.
+   */
+  cleanUp(days: number | null): number {
+    const removed = this.generated.remove(days);
+    for (const [key, j] of this.jobs) if (j.status === 'done' && !this.generated.read(j.projectId, j.branch)) this.jobs.delete(key);
+    return removed;
   }
 
   private update(key: string, patch: Partial<WalkthroughJob>) {
@@ -281,7 +319,7 @@ export class Writer {
   }
 
   private launch(key: string, projectId: string, branch: string, data: ReviewData, feedback?: WriterFeedback): WalkthroughJob | null {
-    this.jobs.set(key, { projectId, branch, status: 'running', startedAt: new Date().toISOString(), finishedAt: null, activity: `Starting ${data.assistant?.name ?? 'the assistant'}…`, attempt: 1, diffKey: diffKey(data) });
+    this.jobs.set(key, { projectId, branch, status: 'running', startedAt: new Date().toISOString(), finishedAt: null, activity: `Starting ${data.assistant?.name ?? 'the assistant'}…`, attempt: 1, baseSha: data.baseSha, diffKey: diffKey(data) });
     this.onChange(this.job(projectId, branch)!);
     this.run(key, projectId, branch, data, feedback).catch((e) => {
       if (this.jobs.get(key)?.status === 'running') this.update(key, { status: 'failed', finishedAt: new Date().toISOString(), activity: null, error: (e as Error).message });
@@ -303,7 +341,7 @@ export class Writer {
   /** With `update`, starts from that walkthrough instead of from nothing. */
   private async run(key: string, projectId: string, branch: string, data: ReviewData, update?: WriterFeedback) {
     const ctx = await this.projects.runContext(projectId, branch);
-    if (!update && (await this.useShared(key, projectId, branch, ctx.baseSha))) return;
+    if (!update && ((await this.useRebased(key, projectId, branch, ctx.baseSha, data.head)) || (await this.useShared(key, projectId, branch, ctx.baseSha)))) return;
     const commits = (await g.tryGit(['log', '--reverse', '--format=%s', `${ctx.baseSha}..${ctx.headRef}`], ctx.root))?.split('\n').filter(Boolean) ?? [];
     const { match } = (await this.projects.find(projectId, branch)).d;
     const input: WriterInput = {
@@ -336,6 +374,25 @@ export class Writer {
     if (this.jobs.get(key)?.status !== 'running' || !walkthrough) return;
     this.generated.write(projectId, branch, walkthrough);
     this.update(key, { status: 'done', finishedAt: new Date().toISOString(), activity: null });
+  }
+
+  /**
+   * A rebase moves the branch to a new base, and a walkthrough only counts for its own base. If the old one
+   * still covers every change, the rebase didn't change the diff: it moves along instead of costing a new run.
+   */
+  private async useRebased(key: string, projectId: string, branch: string, baseSha: string, head: string): Promise<boolean> {
+    let wt: { base?: string; chapters?: unknown[] } | null = null;
+    try {
+      wt = JSON.parse(this.generated.read(projectId, branch) ?? 'null');
+    } catch {}
+    if (!wt || wt.base === baseSha || !Array.isArray(wt.chapters)) return false;
+    this.update(key, { activity: 'Checking the walkthrough still fits…' });
+    const r = await this.projects.check(projectId, branch, wt);
+    if (r.buckets.unnarrated.length || r.buckets.phantom.length) return false;
+    if (this.jobs.get(key)?.status !== 'running') return true;
+    this.generated.write(projectId, branch, { ...wt, base: baseSha, head });
+    this.update(key, { status: 'done', finishedAt: new Date().toISOString(), activity: null });
+    return true;
   }
 
   /**

@@ -75,7 +75,7 @@ test('a GitHub review puts line comments on lines and the rest in the text', () 
 test('a GitHub review with nothing to say says who reviewed it', () => {
   const steps = [step('auth', ['1'], 3)];
   const empty = { note: '', dropStepKeys: [] };
-  assert.deepEqual(githubReview({ steps }, { comments: [] }, empty, { inline: true, copilot: false, reviewer: 'eliostruyf' }), { body: 'Reviewed by eliostruyf in Hunkdory.', comments: [] });
+  assert.deepEqual(githubReview({ steps }, { comments: [] }, empty, { inline: true, copilot: false, reviewer: 'eliostruyf' }), { body: 'Reviewed by @eliostruyf in Hunkdory.', comments: [] });
   assert.equal(githubReview({ steps }, { comments: [] }, empty, { inline: true, copilot: false }).body, 'Reviewed in Hunkdory.');
   // With a summary, the summary is the text.
   assert.match(githubReview({ steps }, { comments: [] }, { note: 'LGTM', dropStepKeys: [] }, { inline: true, copilot: false, reviewer: 'eliostruyf' }).body, /^LGTM\n\n<sub>/);

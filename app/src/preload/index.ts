@@ -30,6 +30,8 @@ const methods: (keyof ReviewerApi)[] = [
   'stepTrace',
   'walkthroughJob',
   'walkthroughJobs',
+  'savedWalkthroughs',
+  'removeWalkthroughs',
   'writeWalkthrough',
   'updateWalkthrough',
   'cancelWalkthrough',

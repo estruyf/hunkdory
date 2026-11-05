@@ -262,6 +262,12 @@ const api: ReviewerApi = {
   },
   walkthroughJob: async (projectId, branch) => writer.job(projectId, branch),
   walkthroughJobs: async () => writer.jobsAll(),
+  savedWalkthroughs: async () => generated.list(),
+  removeWalkthroughs: async (days) => {
+    const removed = writer.cleanUp(days);
+    win?.webContents.send('reviews-changed');
+    return removed;
+  },
   writeWalkthrough: (projectId, branch, opts) => writer.start(projectId, branch, opts),
   updateWalkthrough: (projectId, branch) => writer.refresh(projectId, branch),
   cancelWalkthrough: async (projectId, branch) => writer.cancel(projectId, branch),

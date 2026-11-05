@@ -74,6 +74,9 @@ export function delta(added: number, removed: number): string {
   return parts.join(' ') || '±0';
 }
 
+/** Last touched more than this many days ago. */
+export const olderThan = (at: number, days: number, now = Date.now()) => at < now - days * 86_400_000;
+
 export function timeAgo(iso: string | null, now = Date.now()): string {
   if (!iso) return '';
   const s = Math.max(0, (now - Date.parse(iso)) / 1000);
