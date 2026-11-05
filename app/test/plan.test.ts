@@ -10,6 +10,18 @@ const step = (i: number, over: Partial<Step> = {}): Step => ({
   hunkIds: [`h${i}`], files: [`src/area${i % 2}/file${i}.ts`], added: 1, removed: 0, ...over,
 });
 
+test('a serious AI finding you haven’t dismissed takes a step out of the skim', () => {
+  const steps = [step(0), step(1), step(2)];
+  const finding = (hunkId: string, severity: 'high' | 'medium' | 'low', dismissed = false) => ({ id: hunkId, severity, area: 'bugs' as const, title: 't', fails: 'f', hunkId, path: 'a', line: 1, side: 'RIGHT' as const, dismissed, commentId: null });
+  const plan = (findings: ReturnType<typeof finding>[]) =>
+    buildPlan({ steps, attention: [], pr: null, prompt: 'x' }, { order: 'story', aiReview: { status: 'done', activity: null, error: null, startedAt: 'now', result: { finishedAt: 'now', assistant: 'A', areas: ['bugs'], depth: 'quick', hunkIds: [], findings, dropped: 0, cut: 0, costUsd: null } } });
+  assert.deepEqual(plan([]).careful, []);
+  assert.deepEqual(plan([finding('h1', 'high'), finding('h2', 'medium')]).careful.map((s) => s.key), ['k1', 'k2']);
+  assert.deepEqual(plan([finding('h1', 'low')]).careful, [], 'a low one only gets a label');
+  assert.deepEqual(plan([finding('h1', 'high', true)]).careful, [], 'dismissed');
+  assert.deepEqual(plan([finding('h1', 'high')]).skim.map((s) => s.key), ['k0', 'k2']);
+});
+
 test('outside-the-task steps become one decision, however many there are', () => {
   const steps = [step(0), step(1, { outsideTask: true }), step(2, { outsideTask: true })];
   const flags: AttentionFlag[] = [

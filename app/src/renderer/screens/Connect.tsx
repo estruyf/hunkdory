@@ -10,11 +10,13 @@ import { Pill } from '../components/ui/Pill.tsx';
 import { Radio, RadioGroup } from '../components/ui/Radio.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { Select } from '../components/ui/Select.tsx';
-import { FIELD, FIELD_LG } from '../components/ui/field.ts';
+import { FIELD, FIELD_LG, TEXTAREA } from '../components/ui/field.ts';
+import { Toggle } from '../components/ui/Toggle.tsx';
+import { DEFAULT_AI_REVIEW, FINDING_LIMITS, REVIEW_AREAS, aiReviewSettings } from '../../shared/aiReview.ts';
 import { matches } from '../lib/shortcuts.ts';
 import { useTabActive } from '../state/tabPane.ts';
 import { FoundOnThisMac } from '../components/found.tsx';
-import type { AssistantChoice, Project, RepoCheck, Watch } from '../../shared/types.ts';
+import type { AiReviewSettings, AssistantChoice, Project, RepoCheck, Watch } from '../../shared/types.ts';
 
 /** Connect a new project, or change one you connected before (`projectId`). */
 export function Connect({ go, initialPath, projectId, back }: { go: Go; initialPath?: string; projectId?: string; back: Route }) {
@@ -34,6 +36,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const [assistants, setAssistants] = useState<AssistantChoice[]>([]);
   // null until the assistant list loaded, then a new project defaults to the first one installed.
   const [assistant, setAssistant] = useState<string | null>(null);
+  const [aiReview, setAiReview] = useState<AiReviewSettings>(DEFAULT_AI_REVIEW);
   const [linking, setLinking] = useState(false);
   const [githubError, setGithubError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +65,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       setGithub(p.github ?? null);
       setWriteWalkthroughs(p.writeWalkthroughs);
       setAssistant(p.assistant ?? 'claude-code');
+      setAiReview(aiReviewSettings(p.aiReview));
       setAnyBranch(p.watch.anyBranch);
       setUsePattern(p.watch.pattern !== null);
       if (p.watch.pattern) setPattern(p.watch.pattern);
@@ -117,9 +121,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
     const assistantInput = assistant ?? 'claude-code';
     try {
       if (existing) {
-        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput });
+        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview });
         rememberProjectName(saved.id, saved.name);
-      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput });
+      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview });
       go({ name: 'home' });
     } catch (e) {
       setError(cleanError(e));
@@ -267,6 +271,65 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                 ))}
               </RadioGroup>
               {writeWalkthroughs === undefined && <p className="text-meta text-muted">Not chosen yet: Hunkdory asks the first time a branch opens without a walkthrough.</p>}
+            </Section>
+          )}
+
+          {assistant !== 'manual' && (
+            <Section title="AI review">
+              <Toggle
+                label="Offer an AI review on this project's branches"
+                detail={`Adds a Run AI review button to each plan. ${assistants.find((a) => a.id === assistant)?.name ?? 'The assistant you picked above'} does the review, and only when you press it.`}
+                checked={aiReview.enabled}
+                attr="data-ai-review"
+                onChange={(enabled) => setAiReview({ ...aiReview, enabled })}
+              />
+              {aiReview.enabled && (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <SectionHeader as="h3">What to check</SectionHeader>
+                    {REVIEW_AREAS.map((a) => (
+                      <div key={a.id} className="flex flex-col">
+                        <Checkbox checked={aiReview.areas.includes(a.id)} onChange={(on) => setAiReview({ ...aiReview, areas: on ? [...aiReview.areas, a.id] : aiReview.areas.filter((x) => x !== a.id) })}>
+                          {a.label}
+                        </Checkbox>
+                        <span className="pl-6 text-meta text-muted">{a.detail}</span>
+                      </div>
+                    ))}
+                    {aiReview.areas.length === 0 && <span role="alert" className="text-meta text-error">Choose at least one, or turn AI review off.</span>}
+                  </div>
+                  <label className="flex flex-col gap-1 text-ui font-semibold">
+                    Your own instructions (optional)
+                    <textarea
+                      rows={3}
+                      className={`${TEXTAREA} font-normal`}
+                      value={aiReview.instructions}
+                      onChange={(e) => setAiReview({ ...aiReview, instructions: e.target.value })}
+                      placeholder="e.g. We target WCAG 2.2 AA. Money is always in cents. Ignore files in src/legacy."
+                    />
+                    <span className="text-meta font-normal text-muted">Saved in Hunkdory on this Mac, not in the repo, so a branch can't change the rules of its own review.</span>
+                  </label>
+                  <div className="flex flex-col gap-1.5">
+                    <SectionHeader as="h3">How deep</SectionHeader>
+                    <RadioGroup label="How deep" className="flex flex-col gap-1.5">
+                      {[
+                        { value: 'quick' as const, title: 'Quick', detail: 'Reads the diff and little else. Faster and cheaper, but it can miss problems in how the code fits together.' },
+                        { value: 'thorough' as const, title: 'Thorough', detail: "Also reads the code around the change. Slower, and it uses more of your assistant's usage." },
+                      ].map((o) => (
+                        <Radio key={o.value} checked={aiReview.depth === o.value} tabbable={aiReview.depth === o.value} onSelect={() => setAiReview({ ...aiReview, depth: o.value })}>
+                          <span className="flex flex-col">
+                            <span>{o.title}</span>
+                            <span className="text-meta text-muted">{o.detail}</span>
+                          </span>
+                        </Radio>
+                      ))}
+                    </RadioGroup>
+                  </div>
+                  <div className="flex items-center gap-2 text-ui font-semibold">
+                    <span>Most findings to show</span>
+                    <Select<string> label="Most findings to show" value={String(aiReview.maxFindings)} options={FINDING_LIMITS.map((n) => ({ value: String(n), label: String(n) }))} onChange={(v) => setAiReview({ ...aiReview, maxFindings: Number(v) })} />
+                  </div>
+                </>
+              )}
             </Section>
           )}
 

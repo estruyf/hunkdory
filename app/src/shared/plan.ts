@@ -145,9 +145,12 @@ export function skimGroups(skim: Step[], max = 6): SkimGroup[] {
   return groups.map((g) => ({ ...g, files: new Set(g.steps.flatMap((s) => s.files)).size }));
 }
 
-export function buildPlan(data: Pick<ReviewData, 'steps' | 'attention' | 'pr' | 'prompt'>, state: Pick<ReviewState, 'order'>): Plan {
-  const careful = orderSteps(data.steps.filter(isCareful), state.order);
-  const skim = orderSteps(data.steps.filter((s) => !isCareful(s)), state.order);
+export function buildPlan(data: Pick<ReviewData, 'steps' | 'attention' | 'pr' | 'prompt'>, state: Pick<ReviewState, 'order' | 'aiReview'>): Plan {
+  // A serious AI finding you haven't dismissed: telling you to skim that code would contradict it.
+  const flagged = new Set(state.aiReview?.result?.findings.filter((f) => !f.dismissed && f.severity !== 'low').map((f) => f.hunkId));
+  const close = (s: Step) => isCareful(s) || (s.source !== 'skipped' && s.hunkIds.some((id) => flagged.has(id)));
+  const careful = orderSteps(data.steps.filter(close), state.order);
+  const skim = orderSteps(data.steps.filter((s) => !close(s)), state.order);
   const groups = skimGroups(skim);
   const all = buildDecisions(data.steps, data.attention, data.pr?.checks ?? [], !!(data.prompt || data.pr?.body.trim()));
   const isNote = (d: PlanDecision) => d.kind === 'flag' && d.severity === 'medium' && d.stepKeys.length > 0;

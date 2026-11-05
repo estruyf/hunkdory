@@ -9,10 +9,12 @@ import { Summaries } from './summaries.ts';
 import { Actions } from './actions.ts';
 import { readRunLog } from './runLog.ts';
 import { readStepTrace } from './sessions/trace.ts';
+import { AiReviews } from './aiReview.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
 import { installedEditors, openInEditor, pickEditor } from './editors.ts';
+import { actOnFinding } from '../shared/aiReview.ts';
 import { addToStepComment, answerLine, removeFromStepComments, setAnswerLine } from '../shared/comments.ts';
 import { carryReviewed, markHunk } from '../shared/order.ts';
 import type { ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/types.ts';
@@ -77,6 +79,12 @@ const conversations = new Conversations({
   wtvBin,
   onChange: (review) => win?.webContents.send('review-state-changed', review),
   onBranchChanged: (projectId, branch) => writer.refresh(projectId, branch),
+});
+const aiReviews = new AiReviews({
+  store,
+  projects,
+  logDir,
+  onChange: (review) => win?.webContents.send('review-state-changed', review),
 });
 const actions = new Actions({
   store,
@@ -152,6 +160,8 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
     if (patch.value === 'no' && patch.note?.trim()) notes[patch.index] = patch.note.trim();
     else if (patch.value !== 'no') delete notes[patch.index];
     setAnswerLine(r, patch.stepKey, patch.question, answerLine(patch.question, patch.value, notes[patch.index]));
+  } else if (patch.type === 'ai-finding') {
+    actOnFinding(r, patch, () => crypto.randomUUID(), new Date().toISOString());
   }
 }
 
@@ -203,6 +213,7 @@ const api: ReviewerApi = {
     await projects.setBase(projectId, branch, base);
     // A walkthrough being written is for the old diff.
     writer.cancel(projectId, branch);
+    aiReviews.cancel(projectId, branch);
     win?.webContents.send('reviews-changed');
   },
   closeWindow: async () => win?.close(),
@@ -263,6 +274,8 @@ const api: ReviewerApi = {
   writeWalkthrough: (projectId, branch, opts) => writer.start(projectId, branch, opts),
   updateWalkthrough: (projectId, branch) => writer.refresh(projectId, branch),
   cancelWalkthrough: async (projectId, branch) => writer.cancel(projectId, branch),
+  runAiReview: (projectId, branch) => aiReviews.start(projectId, branch),
+  cancelAiReview: async (projectId, branch) => aiReviews.cancel(projectId, branch),
   ask: (projectId, branch, stepKey, kind, text, check) => conversations.ask(projectId, branch, stepKey, kind, text, check),
   fileLines: (projectId, branch, path, side, from, to) => projects.fileLines(projectId, branch, path, side, from, to),
   searchCode: (projectId, branch, query) => projects.searchCode(projectId, branch, query),
@@ -395,6 +408,7 @@ app.on('before-quit', () => {
   quitting = true;
   writer.stopAll();
   conversations.stopAll();
+  aiReviews.stopAll();
 });
 
 app.whenReady().then(() => {
@@ -404,6 +418,7 @@ app.whenReady().then(() => {
   nativeTheme.on('updated', () => win?.setBackgroundColor(windowBackground()));
   settleStaleRuns();
   conversations.settleStale();
+  aiReviews.settleStale();
   registerIpc();
   createWindow();
   createTray();

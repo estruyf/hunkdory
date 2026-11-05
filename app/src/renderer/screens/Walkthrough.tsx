@@ -17,13 +17,15 @@ import { GitHubThreadCard, askDraft } from '../components/githubThreads.tsx';
 import { placeThreads } from '../../shared/threads.ts';
 import { ChecksCard, PrLink, PushToPrNotice, StackBar } from '../components/github.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
+import { findingsView } from '../../shared/aiReview.ts';
 import { OUTSIDE_HINT, isReviewed } from '../../shared/order.ts';
-import { buildPlan, decisionLabels, isCareful, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
+import { buildPlan, decisionLabels, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
 import type { CheckAnswer, GitHubThread, ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 import { answerLine } from '../../shared/comments.ts';
 import { AskPanel, CheckFollowUp, Thread } from '../components/ask.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
+import { FindingAtLine, StepFindings } from '../components/aiReview.tsx';
 import { StepEffects } from '../components/understand.tsx';
 import { EmptyStepNotice, WalkthroughBar } from '../components/walkthrough.tsx';
 import { StepTraceDialog } from '../components/runLog.tsx';
@@ -37,7 +39,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   latestState.current = state;
   // A review reads the branch once, so this is how old the diff on screen is. "Show the new diff" remounts it.
   const [loadedAt] = useState(() => new Date().toISOString());
-  const plan = useMemo(() => buildPlan(data, state), [data, state.order]);
+  const plan = useMemo(() => buildPlan(data, state), [data, state.order, state.aiReview]);
   const steps = plan.sequence;
   // Where you are comes from the route, so back and forward move between steps and decisions.
   // Opened without a place ("Continue review"): the first thing not done yet, decisions first.
@@ -208,6 +210,23 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
       : null;
   };
 
+  /** What goes under a line of the diff: its GitHub threads, then what the AI review said about it. */
+  const openFindings = findingsView(state.aiReview?.result, data, state.comments).open;
+  const extrasAt = (hunkId: string, ask: boolean) => (a: Anchor) => {
+    const threads = threadsAt(hunkId, ask)(a);
+    const found = openFindings.filter(({ finding: f }) => f.hunkId === hunkId && f.side === a.side && f.line === a.line);
+    if (!found.length) return threads;
+    return (
+      <>
+        {threads}
+        {found.map(({ finding, commented }) => (
+          <FindingAtLine key={finding.id} finding={finding} commented={commented} />
+        ))}
+      </>
+    );
+  };
+  const actOn = (p: Extract<ReviewPatch, { type: 'ai-finding' }>) => void patch(p);
+
   /** One change's box: ticks it off within its step. */
   const tick = (s: Step, hunkId: string) => ({
     reviewed: !!state.reviewed[s.key]?.includes(hunkId),
@@ -215,7 +234,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   });
   const openThreads = (hunkId: string) => (placed.byHunk.get(hunkId) ?? []).filter((t) => !t.resolved).length;
 
-  const careful = !!cur && isCareful(cur);
+  const careful = !!cur && plan.careful.some((s) => s.key === cur.key);
 
   const settle = async (d: PlanDecision, value: 'fine' | 'fix' | null) => {
     const comment = settleComment(d, cur?.key);
@@ -441,6 +460,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
             {x.why && <p className="text-body text-text select-text">{x.why}</p>}
             {traceLink(x)}
             <StepEffects step={x} />
+            <StepFindings data={data} state={state} step={x} act={actOn} />
             {x.riskNote && <RiskNote text={x.riskNote} />}
             {x.choices.length > 0 && <AgentChoices choices={x.choices} by={data.walkthrough} />}
             {x.hunkIds.map((id) => {
@@ -454,7 +474,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
                   wrap={wrap}
                   comments={state.comments.filter((c) => c.hunkId === id && c.line)}
                   onComment={(a, body, cid) => patch({ type: 'line-comment', id: cid, stepKey: x.key, hunkId: id, path: h.path, line: a.line, side: a.side, body })}
-                  extraAt={threadsAt(id, false)}
+                  extraAt={extrasAt(id, false)}
                   threads={openThreads(id)}
                   {...tick(x, id)}
                   loadLines={(side, from, to) => window.api.fileLines(data.projectId, data.branch, side === 'old' ? (h.oldPath ?? h.path) : h.path, side, from, to)}
@@ -617,6 +637,17 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
 
       <StepEffects step={cur} />
 
+      <StepFindings
+        data={data}
+        state={state}
+        step={cur}
+        act={actOn}
+        onAsk={(text) => {
+          setDraft({ text, n: Date.now() });
+          openAsk();
+        }}
+      />
+
       {cur.riskNote && <RiskNote text={cur.riskNote} />}
 
       {cur.choices.length > 0 && <AgentChoices choices={cur.choices} by={data.walkthrough} />}
@@ -720,7 +751,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
               wrap={wrap}
               comments={state.comments.filter((c) => c.hunkId === id && c.line)}
               onComment={lineComment(id, h.path)}
-              extraAt={threadsAt(id, true)}
+              extraAt={extrasAt(id, true)}
               threads={openThreads(id)}
               startOpen={!!dec}
               {...tick(cur, id)}

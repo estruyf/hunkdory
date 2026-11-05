@@ -13,6 +13,7 @@ import { belongsTo as copilotBelongsTo, readCopilotSessions } from './sessions/c
 import * as gh from './github.ts';
 import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback, type BranchSessions } from './match.ts';
 import { attention, buildSteps, estimateMinutes, overview } from './steps.ts';
+import { aiReviewSettings } from '../shared/aiReview.ts';
 import { projectName, toWatch, withProjectName, type Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
 import { asOfNow, type Summaries, type Summary } from './summaries.ts';
@@ -156,6 +157,7 @@ export class Projects {
       github: input.github,
       writeWalkthroughs: input.writeWalkthroughs,
       assistant: input.assistant,
+      ...(input.aiReview && { aiReview: aiReviewSettings(input.aiReview) }),
       addedAt: new Date().toISOString(),
     };
     this.store.addProject(project);
@@ -172,6 +174,7 @@ export class Projects {
       github: input.github,
       writeWalkthroughs: input.writeWalkthroughs ?? project.writeWalkthroughs,
       assistant: input.assistant ?? project.assistant,
+      aiReview: input.aiReview ? aiReviewSettings(input.aiReview) : project.aiReview,
       remote: await g.remoteUrl(project.path),
     };
     this.store.addProject(updated);
@@ -897,6 +900,7 @@ export class Projects {
     const data: ReviewData = {
       ask: askAbility(session, d.branch, assistant.id === 'manual'),
       assistant: assistant.id === 'manual' ? null : { id: assistant.id, name: assistant.name },
+      aiReviewSettings: aiReviewSettings(project.aiReview),
       agent: d.match ? d.match.origin.agent : d.branch.pr?.copilot ? 'copilot' : null,
       headSha: d.branch.headSha,
       dirty: d.branch.dirtyFiles > 0,

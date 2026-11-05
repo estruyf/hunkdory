@@ -37,6 +37,8 @@ const methods: (keyof ReviewerApi)[] = [
   'writeWalkthrough',
   'updateWalkthrough',
   'cancelWalkthrough',
+  'runAiReview',
+  'cancelAiReview',
   'ask',
   'cancelExchange',
   'fileLines',

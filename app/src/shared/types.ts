@@ -33,7 +33,68 @@ export interface Project {
    * is `acp:<the agent's id in AppSettings.acpAgents>`.
    */
   assistant?: string;
+  /** What the AI review checks and how. Unset means the defaults in shared/aiReview.ts. */
+  aiReview?: AiReviewSettings;
   addedAt: string;
+}
+
+export type ReviewArea = 'bugs' | 'accessibility' | 'security' | 'performance';
+
+/** A project's AI review. It always runs with the project's own assistant, and only when you press the button. */
+export interface AiReviewSettings {
+  /** Offers the button on this project's reviews. */
+  enabled: boolean;
+  areas: ReviewArea[];
+  /** The project's own rules for the review. Kept in Hunkdory, not the repo, so a branch can't change its own review. */
+  instructions: string;
+  /** `quick` works from the diff; `thorough` also reads the code around it. */
+  depth: 'quick' | 'thorough';
+  maxFindings: number;
+}
+
+/** A problem an AI review found on a changed line. */
+export interface AiFinding {
+  /** Stable across runs while the code is the same: a dismissed finding stays dismissed. */
+  id: string;
+  severity: 'high' | 'medium' | 'low';
+  area: ReviewArea;
+  title: string;
+  /** The way it fails: what happens, and when. */
+  fails: string;
+  hunkId: string;
+  path: string;
+  line: number;
+  side: 'LEFT' | 'RIGHT';
+  dismissed: boolean;
+  /** The line comment you made of it. It counts for as long as that comment exists. */
+  commentId: string | null;
+}
+
+/** What one finished AI review found, and what it looked at. */
+export interface AiReviewResult {
+  finishedAt: string;
+  /** The assistant's name, as it was when this ran. */
+  assistant: string;
+  areas: ReviewArea[];
+  depth: AiReviewSettings['depth'];
+  /** The diff it saw, to tell when the branch moved on. */
+  hunkIds: string[];
+  findings: AiFinding[];
+  /** Findings dropped because they pointed at something the diff didn't change. */
+  dropped: number;
+  /** Findings left out because of the project's limit. */
+  cut: number;
+  /** What the run cost, when the assistant says. */
+  costUsd: number | null;
+}
+
+/** The AI review of a branch. A new run keeps the last result until it has a new one. */
+export interface AiReview {
+  status: 'running' | 'done' | 'failed' | 'cancelled';
+  activity: string | null;
+  error: string | null;
+  startedAt: string;
+  result: AiReviewResult | null;
 }
 
 /** A branch you can compare a review against, with how many of the branch's commits aren't on it. */
@@ -479,6 +540,7 @@ export interface ReviewData {
   repo: string | null;
   /** The assistant this project uses for walkthroughs, questions and changes. Null for Manual: no AI involved. */
   assistant: { id: string; name: string } | null;
+  aiReviewSettings: AiReviewSettings;
 }
 
 /** A question about a step, or a change you asked Claude to make there, with how it went. */
@@ -604,6 +666,7 @@ export interface ReviewState {
   exchanges?: Exchange[];
   /** Review plan decisions you made, by decision id: fine as is, or needs a fix (for changes outside the task: drop them). */
   settled?: Record<string, 'fine' | 'fix'>;
+  aiReview?: AiReview;
   /** Your answers to a step's "check these" questions, by step key and question index. */
   answers?: Record<string, Record<number, CheckAnswer>>;
   /** What should change, for questions you answered "Needs a change", by step key and question index. */
@@ -811,6 +874,9 @@ export interface ReviewerApi {
   /** Asks Claude about a step, or to change something there. Returns the review with the new exchange. */
   ask(projectId: string, branch: string, stepKey: string, kind: Exchange['kind'], text: string, check?: number): Promise<ReviewState>;
   cancelExchange(projectId: string, branch: string, exchangeId: string): Promise<void>;
+  /** Starts an AI review of the branch with the project's assistant. Returns the review with the run in it. */
+  runAiReview(projectId: string, branch: string): Promise<ReviewState>;
+  cancelAiReview(projectId: string, branch: string): Promise<void>;
   /** Replies to a review thread on the pull request. Returns what's on the PR now. */
   replyOnGitHub(projectId: string, branch: string, threadId: string, body: string): Promise<GitHubFeedback | null>;
   /** The editors installed on this Mac, and the one Hunkdory opens folders in (null when there's none). */
@@ -849,6 +915,8 @@ export interface ProjectInput {
   writeWalkthroughs?: boolean;
   /** Left out: keep what the project had. */
   assistant?: string;
+  /** Left out: keep what the project had. */
+  aiReview?: AiReviewSettings;
 }
 
 export type ReviewPatch =
@@ -868,5 +936,8 @@ export type ReviewPatch =
    * with your review; `note` is what should change. Another answer replaces that line, `null` clears the answer.
    */
   | { type: 'answer'; stepKey: string; index: number; question: string; value: CheckAnswer | null; note?: string }
+  /** Acts on one finding of the AI review. `comment` needs the step the line comment goes on. */
+  | { type: 'ai-finding'; id: string; action: 'dismiss' | 'restore' | 'uncomment' }
+  | { type: 'ai-finding'; id: string; action: 'comment'; stepKey: string }
   /** Adds a line comment, or edits it when `id` is set. An empty body removes it. */
   | { type: 'line-comment'; id?: string; stepKey: string; hunkId: string; path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string };

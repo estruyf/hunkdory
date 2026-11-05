@@ -26,11 +26,14 @@ you merge, send it back to the agent, or discard it.
 3. **The steps.** One step at a time, with the reason next to each change, the
    choices the agent says it made, and how it got there in its session.
    Comment on a line, ask Claude about the step, or ask it to change the code.
+   If you want a second opinion first, run an AI review from the plan: the
+   project's assistant looks for bugs, accessibility issues and more, and puts
+   what it finds next to the lines. Each project sets what it checks.
 4. **Finish.** Merge, open a pull request, post your review on GitHub, send it
    back to the agent with your comments, or discard it.
 
 Hunkdory runs on your Mac. It only sends code to Claude when you let it write a
-walkthrough, ask a question, or send work back. When the same assistant ran the
+walkthrough, ask a question, run an AI review, or send work back. When the same assistant ran the
 agent's session, a walkthrough also gets what the agent said and thought on that
 branch, so sharing one on a pull request can carry that reasoning to GitHub.
 

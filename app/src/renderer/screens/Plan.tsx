@@ -23,6 +23,7 @@ import { AgentTests, AskedFor, LinkedIssues, NO_TEST_HINT, ReviewError, hasLinke
 import { IssueRefsContext, Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import type { LineRef } from '../components/diff.tsx';
+import { AiReviewCard, FindingsPill, openFindingsIn } from '../components/aiReview.tsx';
 import { ChangeOverview, RequestedList } from '../components/understand.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
@@ -154,7 +155,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
   const [allCareful, setAllCareful] = useState(false);
   const [skipSeen, setSkipSeen] = useState(true);
   const [copied, setCopied] = useState(false);
-  const plan = useMemo(() => buildPlan(data, state), [data, state.order]);
+  const plan = useMemo(() => buildPlan(data, state), [data, state.order, state.aiReview]);
   const progress = planProgress(plan, state);
   // What people said on GitHub. Replying or resolving here changes it without reading the branch again.
   const [feedback, setFeedback] = useState(data.github);
@@ -399,6 +400,16 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
           <HowItWorks />
           <RequestCard data={data} onOpen={open} />
           <ChangeOverview data={data} onOpen={open} />
+          <AiReviewCard
+            data={data}
+            state={state}
+            act={async (p) => {
+              // A comment belongs to a review: it starts here, like settling a decision does.
+              if (p.action !== 'comment' || (await begin())) await patch(p);
+            }}
+            onOpen={({ finding: f, step }) => enter({ stepKey: step.key, focus: { path: f.path, line: f.line, side: f.side } })}
+            onSettings={() => go({ name: 'connect', projectId: data.projectId })}
+          />
           {feedback && (
             <GitHubReviews
               data={data}
@@ -460,6 +471,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                         <RiskPill risk={s.risk} />
                         {s.outsideTask && <Pill data-tooltip={OUTSIDE_HINT}>Outside your request</Pill>}
                         {s.noTestChange && <Pill tone="muted" data-tooltip={NO_TEST_HINT}>No test changed</Pill>}
+                        <FindingsPill data={data} state={state} step={s} />
                         <span className="w-14 text-right text-meta text-faint">{plural(s.files.length, 'file')}</span>
                         <span className={`w-20 text-right text-ui ${done ? 'text-muted' : 'text-link opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}>{done ? 'Reviewed' : 'Review →'}</span>
                       </button>
@@ -486,6 +498,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                 {plan.skimGroups.map((g) => {
                   const done = g.steps.filter((s) => isReviewed(s, state.reviewed)).length;
                   const threads = openThreadsIn(g.steps);
+                  const findings = g.steps.reduce((n, s) => n + openFindingsIn(data, state, s).length, 0);
                   return (
                     <div key={g.name} className="flex flex-col gap-1 rounded-lg border border-border p-3">
                       <span className="font-mono text-ui font-semibold break-all">{g.name}</span>
@@ -493,6 +506,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                         {plural(g.steps.length, 'step')} · {plural(g.files, 'file')}
                         {done && done < g.steps.length ? ` · ${done} reviewed` : ''}
                         {threads ? ` · ${plural(threads, 'comment')} on GitHub` : ''}
+                        {findings ? ` · ${plural(findings, 'AI finding')}` : ''}
                       </span>
                       <Button size="sm" className="mt-1 self-start" onClick={() => enter({ group: g.name })}>
                         {done === g.steps.length ? 'Reviewed ✓' : 'Skim folder'}

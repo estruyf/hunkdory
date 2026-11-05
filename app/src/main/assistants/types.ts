@@ -16,6 +16,8 @@ export interface AssistantResult {
   /** The final message. */
   text: string;
   structured: Record<string, unknown> | null;
+  /** What the run cost, when the CLI says. */
+  costUsd?: number;
 }
 
 export interface AssistantRun {

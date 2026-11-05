@@ -85,7 +85,7 @@ function runClaude(opts: { claude: string; cwd: string; env: NodeJS.ProcessEnv; 
   let killed = false;
   const timer = setTimeout(() => child.kill(), opts.timeoutMs);
 
-  type Result = { is_error?: boolean; subtype?: string; result?: string; structured_output?: Record<string, unknown> };
+  type Result = { is_error?: boolean; subtype?: string; result?: string; structured_output?: Record<string, unknown>; total_cost_usd?: number };
   const got: { result: Result | null } = { result: null };
   let stderr = '';
   child.stderr!.on('data', (b: Buffer) => {
@@ -119,7 +119,7 @@ function runClaude(opts: { claude: string; cwd: string; env: NodeJS.ProcessEnv; 
     .then((code) => {
       if (killed) throw new Error('Stopped.');
       const r = got.result;
-      if (r && !r.is_error) return { text: r.result ?? '', structured: r.structured_output ?? null };
+      if (r && !r.is_error) return { text: r.result ?? '', structured: r.structured_output ?? null, ...(typeof r.total_cost_usd === 'number' && { costUsd: r.total_cost_usd }) };
       const why = r?.is_error ? r.result || r.subtype : stderr.trim().split('\n').at(-1) || (code === null ? `it took longer than ${Math.round(opts.timeoutMs / 60_000)} minutes` : `exit code ${code}`);
       throw new Error(`Claude Code stopped without an answer (${why}).`);
     });
