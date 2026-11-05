@@ -9,6 +9,7 @@ import { openSettings, useNav } from './state/nav.ts';
 import { TabPane } from './state/tabPane.ts';
 import { activate, activeRoute, closeTab, INBOX, move, navigate, reopenTab, restoreTabs, routeOf, savedTabs, startTabs, stepTab, tabAt, withoutProjectsGone, type Tabs } from './state/tabs.ts';
 import { jobKey, useWalkthroughs, watchWalkthroughs } from './state/walkthroughs.ts';
+import { rememberReadState } from './state/reviewReads.ts';
 import { Welcome } from './screens/Welcome.tsx';
 import { Connect } from './screens/Connect.tsx';
 import { focusInboxSearch, Home } from './screens/Home.tsx';
@@ -75,6 +76,7 @@ export function App() {
     return window.events.onReviewStateChanged((r) => {
       latest.current.set(`${r.projectId}::${r.branch}`, r);
       rememberReview(r);
+      rememberReadState(r);
     });
   }, []);
 

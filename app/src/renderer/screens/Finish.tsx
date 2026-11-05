@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Crumbs, LoadingPage, cleanError, isPlainKey, plural, reviewCrumbs, useAsync } from '../components/ui.tsx';
+import { Crumbs, cleanError, isPlainKey, plural, reviewCrumbs, useAsync } from '../components/ui.tsx';
+import { LoadingPage } from '../components/LoadingPage.tsx';
+import { lastRead, readReview } from '../state/reviewReads.ts';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Checkbox } from '../components/ui/Checkbox.tsx';
@@ -27,16 +29,20 @@ const EVENTS: { id: GitHubEvent; title: string }[] = [
 ];
 
 export function Finish({ go, projectId, branch }: { go: Go; projectId: string; branch: string }) {
-  const loaded = useAsync(() => window.api.loadReview(projectId, branch), [projectId, branch]);
+  // What you saw last shows at once. Finishing reads the branch itself, so this can't merge something old.
+  const [shown] = useState(() => lastRead(projectId, branch));
+  const loaded = useAsync(() => readReview(projectId, branch), [projectId, branch]);
   useOnReturn(loaded.reload);
+  const value = loaded.value ?? shown;
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
-  if (!loaded.value) return <LoadingPage label="Reading the branch…" detail={branch} />;
-  return <FinishForm go={go} data={loaded.value.data} state={loaded.value.state} />;
+  if (!value) return <LoadingPage shape="plan" projectId={projectId} branch={branch} />;
+  return <FinishForm go={go} data={value.data} state={value.state} />;
 }
 
 function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewData; state: ReviewState }) {
   // Removing a comment here updates the review, and what you finish with.
   const [state, setState] = useState(initialState);
+  useEffect(() => setState(initialState), [initialState]);
   useEffect(
     () =>
       window.events.onReviewStateChanged((r) => {

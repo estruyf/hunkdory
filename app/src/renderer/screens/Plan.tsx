@@ -2,7 +2,9 @@
 // Opening a branch lands here. One button starts (or continues) the review where it makes sense.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Crumbs, LoadingPage, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
+import { Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
+import { LoadingPage } from '../components/LoadingPage.tsx';
+import { lastRead, readReview } from '../state/reviewReads.ts';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { buttonClass } from '../components/ui/buttonStyles.ts';
@@ -41,16 +43,14 @@ const ORDERS: { id: ReviewOrder; label: string }[] = [
 export function PlanScreen({ go, projectId, branch, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }) {
   // A new walkthrough changes the steps: `version` reads the branch again.
   const [version, setVersion] = useState(0);
+  // Coming back to a branch shows what you saw last at once. The read replaces it when it's in.
+  const [shown] = useState(() => preloaded ?? lastRead(projectId, branch));
+  const loaded = useAsync(() => readReview(projectId, branch), [projectId, branch, version]);
   // Back on this tab after a while: read the branch again, in place. Someone may have pushed or replied since.
-  const away = useRef(false);
-  const loaded = useAsync(() => (preloaded && version === 0 && !away.current ? Promise.resolve(preloaded) : window.api.loadReview(projectId, branch)), [projectId, branch, version]);
-  useOnReturn(() => {
-    away.current = true;
-    loaded.reload();
-  });
-  const value = loaded.value ?? (version === 0 ? preloaded : undefined);
+  useOnReturn(loaded.reload);
+  const value = loaded.value ?? (version === 0 ? shown : undefined);
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
-  if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
+  if (!value) return <LoadingPage shape="plan" projectId={projectId} branch={branch} />;
   return (
     <IssueRefsContext.Provider value={value.data.references}>
       <PlanView key={version} go={go} data={value.data} initialState={value.state} onReload={() => setVersion((v) => v + 1)} />
@@ -152,6 +152,8 @@ function headline(decisions: number, careful: number, skim: number) {
 
 function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewData; initialState: ReviewState; onReload: () => void }) {
   const [state, setState] = useState(initialState);
+  // A new read of the branch knows best, also over what was shown until it came in.
+  useEffect(() => setState(initialState), [initialState]);
   const [error, setError] = useState<string | null>(null);
   const [allCareful, setAllCareful] = useState(false);
   const [skipSeen, setSkipSeen] = useState(true);
