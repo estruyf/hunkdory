@@ -228,7 +228,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
 
   const failed = job?.status === 'failed' ? job.error : w.error;
   if (data.walkthrough === 'reviewer') {
-    const from = [data.pr ? 'the pull request' : data.prompt ? 'your prompt' : null, 'the commits', 'the code'].filter(Boolean).join(', ');
+    const from = [data.pr ? 'the pull request' : data.prompt ? 'your prompt' : null, 'the commits', 'the code', data.walkthroughFromSession ? 'the agent’s session' : null].filter(Boolean).join(', ');
     const shared = data.sharedWalkthrough;
     const share = async () => {
       setSharing('busy');

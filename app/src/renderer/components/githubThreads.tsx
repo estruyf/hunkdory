@@ -100,7 +100,7 @@ export function GitHubThreadCard({
                 <span className="font-semibold text-text">@{c.author}</span> · {timeAgo(c.at)}
               </span>
               <div className="min-w-0 break-words select-text">
-                <Markdown text={c.body} />
+                <Markdown text={c.body} path={t.path} />
               </div>
             </div>
           ))}

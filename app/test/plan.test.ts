@@ -6,7 +6,7 @@ import { prDescription } from '../src/main/actions.ts';
 import type { AttentionFlag, CheckItem, ReviewState, Step } from '../src/shared/types.ts';
 
 const step = (i: number, over: Partial<Step> = {}): Step => ({
-  key: `k${i}`, index: i, title: `Step ${i}`, why: '', checks: [], risk: 'low', outsideTask: false, noTestChange: false, choices: [], source: 'chapter',
+  key: `k${i}`, index: i, title: `Step ${i}`, why: '', checks: [], risk: 'low', riskNote: null, outsideTask: false, noTestChange: false, choices: [], source: 'chapter',
   hunkIds: [`h${i}`], files: [`src/area${i % 2}/file${i}.ts`], added: 1, removed: 0, ...over,
 });
 

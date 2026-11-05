@@ -376,21 +376,23 @@ export function foldComments(body: string, comments: LineComment[]): string {
 const MARK = '<!-- reviewer:walkthrough -->';
 const DATA = /<!-- reviewer:data:([A-Za-z0-9+/=]+) -->/;
 
+/** Text that ends like a sentence, so the next one doesn't run into it. */
+const sentence = (s: string) => (/[.!?:]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
+
 /** A walkthrough as a PR comment people can read, with the data for other Hunkdory users hidden at the end. Pure. */
 export function walkthroughComment(
-  wt: { title?: string; intent?: string; beforeApproving?: string[]; chapters: { title: string; why?: string; risk?: string; checks?: string[]; outsideTask?: boolean; files?: string[]; choices?: AgentChoice[] }[] },
+  wt: { title?: string; intent?: string; beforeApproving?: string[]; fromSession?: boolean; chapters: { title: string; why?: string; risk?: string; checks?: string[]; outsideTask?: boolean; files?: string[]; choices?: AgentChoice[] }[] },
   data: unknown
 ): string {
   const n = wt.chapters.length;
   const lines = [MARK, '## Review walkthrough', '', wt.intent ?? '', ''];
   if (wt.beforeApproving?.length) lines.push('### Before approving', '', ...wt.beforeApproving.map((l) => `- ${l}`), '');
-  lines.push(`<details><summary>${n} step${n === 1 ? '' : 's'}, written by Hunkdory from the diff</summary>`, '');
+  lines.push(`<details><summary>${n} step${n === 1 ? '' : 's'}, explained by Hunkdory from the diff${wt.fromSession ? ' and the agent’s session' : ''}</summary>`, '');
   wt.chapters.forEach((c, i) => {
     lines.push(`### ${i + 1}. ${c.title}${c.outsideTask ? ' (outside the task)' : ''}`, '', c.why ?? '');
-    // Without questions of its own, a step asks its risk as its question.
-    if (c.risk && !c.checks?.includes(c.risk)) lines.push('', `**Risk:** ${c.risk}`);
+    if (c.risk) lines.push('', `**Risk:** ${c.risk}`);
     if (c.checks?.length) lines.push('', ...c.checks.map((q) => `- [ ] ${q}`));
-    if (c.choices?.length) lines.push('', '**Choices the agent made:**', ...c.choices.map((x) => `- ${x.question} ${x.chose}${x.why ? ` ${x.why}` : ''}${x.rejected.length ? ` Set aside: ${x.rejected.join('; ')}.` : ''}`));
+    if (c.choices?.length) lines.push('', '**Choices the agent made:**', ...c.choices.map((x) => `- ${[x.question, sentence(x.chose), x.why && sentence(x.why), x.rejected.length && sentence(`Set aside: ${x.rejected.join('; ')}`)].filter(Boolean).join(' ')}`));
     if (c.files?.length) lines.push('', `Files: ${c.files.map((f) => `\`${f}\``).join(', ')}`);
     lines.push('');
   });

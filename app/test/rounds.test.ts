@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sinceLastRound } from '../src/shared/rounds.ts';
-import { ignoreWhitespace, languageFor, splitRows } from '../src/shared/diff.ts';
+import { codeLanguage, ignoreWhitespace, languageFor, splitRows } from '../src/shared/diff.ts';
 import { githubReview, stepAnchor } from '../src/main/actions.ts';
 import { apiComment } from '../src/main/github.ts';
 import type { DecisionRecord, DiffLine, HunkView, Step } from '../src/shared/types.ts';
 
-const step = (key: string, hunkIds: string[], index = 0): Step => ({ key, index, title: key, why: '', checks: [], risk: 'low', outsideTask: false, noTestChange: false, choices: [], source: 'chapter', hunkIds, files: [`${key}.ts`], added: 1, removed: 0 });
+const step = (key: string, hunkIds: string[], index = 0): Step => ({ key, index, title: key, why: '', checks: [], risk: 'low', riskNote: null, outsideTask: false, noTestChange: false, choices: [], source: 'chapter', hunkIds, files: [`${key}.ts`], added: 1, removed: 0 });
 const decision = (hunkIds?: string[]): DecisionRecord => ({ kind: 'send-back', note: '', dropStepKeys: [], at: '2026-10-28T10:00:00Z', result: 'ok', message: '', hunkIds });
 
 test('no earlier round, nothing to compare', () => {
@@ -46,6 +46,15 @@ test('highlighting picks the language from the file name', () => {
   assert.equal(languageFor('src/app/page.tsx'), 'typescript');
   assert.equal(languageFor('Dockerfile'), 'dockerfile');
   assert.equal(languageFor('docs/notes.txt'), null);
+});
+
+test("a code block uses the language it names, else its file's, and never guesses", () => {
+  assert.equal(codeLanguage('Python', 'src/auth.js'), 'python', 'a named language wins over the file');
+  assert.equal(codeLanguage(null, 'src/auth.js'), 'javascript', 'a bot often leaves the name out');
+  assert.equal(codeLanguage('suggestion', 'src/auth.ts'), 'typescript', "a suggestion is code for that file");
+  assert.equal(codeLanguage('text', 'src/auth.js'), 'text', 'asking for plain text stays plain');
+  assert.equal(codeLanguage(null), null);
+  assert.equal(codeLanguage('suggestion'), null);
 });
 
 test('a GitHub review puts line comments on lines and the rest in the text', () => {

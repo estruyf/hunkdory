@@ -70,6 +70,15 @@ export function languageFor(path: string): string | null {
   return LANGS[ext] ?? null;
 }
 
+/**
+ * The language for a code block in markdown: the one it names, else its file's when it's about one. Bots often leave
+ * the name out, and a GitHub suggestion is code for that file. Null without either, since guessing often looks wrong.
+ */
+export function codeLanguage(fence: string | null, path?: string): string | null {
+  if (fence && fence.toLowerCase() !== 'suggestion') return fence.toLowerCase();
+  return path ? languageFor(path) : null;
+}
+
 /** "Matched “role” on line 68", to say why a risk tag is there. */
 export function riskReason(r: Pick<Risk, 'match'>, path?: string) {
   if (!r.match) return null;

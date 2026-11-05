@@ -219,3 +219,22 @@ test("a chapter's choices reach its step, and malformed ones are dropped", () =>
   assert.deepEqual(steps[0].choices, [choice, { question: 'Bare', chose: 'This.', why: null, rejected: [] }]);
   assert.deepEqual(steps[1].choices, []);
 });
+
+test("a chapter's risk text stays with the step, unless it became the step's only question", () => {
+  const steps = buildSteps(
+    fixture((wt) => {
+      wt.chapters[0].risk = 'Retries could double-send';
+      wt.chapters[0].checks = ['Is that fine?'];
+      wt.chapters[1].risk = 'Only this';
+      wt.chapters[1].checks = [];
+      wt.chapters[2].risk = 'TODO';
+    }).r,
+    'agent'
+  );
+  assert.equal(steps[0].riskNote, 'Retries could double-send');
+  assert.deepEqual(steps[0].checks, ['Is that fine?']);
+  assert.equal(steps[1].riskNote, null);
+  assert.deepEqual(steps[1].checks, ['Only this']);
+  assert.equal(steps[2].riskNote, null);
+  assert.equal(steps.at(-1)!.riskNote, null);
+});

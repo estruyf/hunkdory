@@ -72,8 +72,20 @@ export function AgentTests({ data }: { data: ReviewData }) {
 
 export const NO_TEST_HINT = 'No test file changed in this step. Tests that already exist may still cover this code.';
 
-/** What the agent decided in a step and what it set aside. Its own account, so it's marked as one. */
-export function AgentChoices({ choices }: { choices: AgentChoice[] }) {
+/** What could break in a step, in the walkthrough's words. */
+export function RiskNote({ text }: { text: string }) {
+  return (
+    <Notice tone="caution" role="note">
+      <strong className="font-semibold">What could break</strong>
+      <div className="break-words select-text">
+        <Markdown text={text} />
+      </div>
+    </Notice>
+  );
+}
+
+/** What the agent decided in a step and what it set aside, marked with whose account it is. */
+export function AgentChoices({ choices, by }: { choices: AgentChoice[]; by: ReviewData['walkthrough'] }) {
   return (
     <section className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-4">
       <SectionHeader as="h2" count={choices.length}>
@@ -81,15 +93,23 @@ export function AgentChoices({ choices }: { choices: AgentChoice[] }) {
       </SectionHeader>
       {choices.map((c, i) => (
         <div key={i} className="flex flex-col gap-0.5 text-body break-words select-text">
-          <strong className="font-semibold">{c.question}</strong>
-          <span>
-            {c.chose}
-            {c.why ? ` ${c.why}` : ''}
-          </span>
-          {c.rejected.length > 0 && <span className="text-ui text-muted">Set aside: {c.rejected.join('; ')}</span>}
+          <strong className="font-semibold">
+            <Markdown text={c.question} />
+          </strong>
+          <Markdown text={c.chose} />
+          {c.why && (
+            <div className="text-ui text-muted">
+              <Markdown text={c.why} />
+            </div>
+          )}
+          {c.rejected.length > 0 && (
+            <div className="text-ui text-muted">
+              <Markdown text={`Set aside: ${c.rejected.join('; ')}`} />
+            </div>
+          )}
         </div>
       ))}
-      <span className="text-meta text-faint">From the agent’s own account. Hunkdory doesn’t check this against the code.</span>
+      <span className="text-meta text-faint">{by === 'reviewer' ? 'Hunkdory’s reading of the agent’s session, not checked against the code.' : 'The agent’s own account, not checked against the code.'}</span>
     </section>
   );
 }

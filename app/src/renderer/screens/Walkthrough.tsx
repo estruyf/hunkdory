@@ -26,7 +26,7 @@ import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import { EmptyStepNotice, WalkthroughBar } from '../components/walkthrough.tsx';
 import { StepTraceDialog } from '../components/runLog.tsx';
-import { AgentChoices, AgentTests, AskedFor, CommentBox, NO_TEST_HINT, whyFallback } from './Review.tsx';
+import { AgentChoices, AgentTests, AskedFor, CommentBox, NO_TEST_HINT, RiskNote, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
 
 export function Walkthrough({ go, data, initialState, stepKey, decision, group, focus }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string; focus?: LineRef }) {
@@ -412,7 +412,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
             </div>
             {x.why && <p className="text-body text-text select-text">{x.why}</p>}
             {traceLink(x)}
-            {x.choices.length > 0 && <AgentChoices choices={x.choices} />}
+            {x.riskNote && <RiskNote text={x.riskNote} />}
+            {x.choices.length > 0 && <AgentChoices choices={x.choices} by={data.walkthrough} />}
             {x.hunkIds.map((id) => {
               const h = data.hunks[id];
               return h ? (
@@ -578,7 +579,9 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
         {traceLink(cur)}
       </div>
 
-      {cur.choices.length > 0 && <AgentChoices choices={cur.choices} />}
+      {cur.riskNote && <RiskNote text={cur.riskNote} />}
+
+      {cur.choices.length > 0 && <AgentChoices choices={cur.choices} by={data.walkthrough} />}
 
       {stepFlags.map((f) => {
         const labels = decisionLabels(f);

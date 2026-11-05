@@ -891,6 +891,7 @@ export class Projects {
       uncommitted: d.branch.uncommitted,
       stack: await this.stack(project, d),
       github: null,
+      walkthroughFromSession: source === 'reviewer' && (wt.value as { generatedBy?: { fromSession?: boolean } } | null)?.generatedBy?.fromSession === true,
       sharedWalkthrough: source === 'reviewer' && shared ? shared : null,
       repo: project.github,
       projectId: project.id,

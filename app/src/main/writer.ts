@@ -80,12 +80,12 @@ export const WALKTHROUGH_SCHEMA = {
             type: 'array',
             items: {
               type: 'object',
-              required: ['question', 'chose'],
+              required: ['question', 'chose', 'rejected'],
               properties: {
                 question: { type: 'string' },
                 chose: { type: 'string' },
                 why: { type: 'string' },
-                rejected: { type: 'array', items: { type: 'string' } },
+                rejected: { type: 'array', minItems: 1, items: { type: 'string' } },
               },
             },
           },
@@ -183,7 +183,7 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
       ? '- Set `outsideTask: true` on a chapter whose changes the request above did not ask for (refactors, config, stray files). Routine upkeep the repo expects with every change, like a package version bump or a changelog entry, is not outside the task.'
       : '- There is no stated request, so leave `outsideTask` out.',
     input.agentSession
-      ? "- `choices` (optional) lists real choices the agent made for this chapter: the `question` it faced, what it `chose`, `why`, and what it `rejected`. Only what the agent's messages above show it weighing. Most chapters have none: leave it out rather than guess at alternatives."
+      ? "- `choices` (optional) lists real choices the agent made for this chapter: the `question` it faced, what it `chose`, `why`, and what it `rejected`. Only what the agent's messages above show it weighing: it must name at least one alternative it set aside, and that goes in `rejected`. A behaviour it only states isn't a choice, and neither is a reason you found in the code or a README. Most chapters have none: leave it out rather than guess at alternatives."
       : "- There are no agent messages to go by, so leave `choices` out.",
     '- `notes` (optional) maps one of the chapter\'s refs to a one-line remark on that hunk.',
     '- `title` names the change like a pull request title: under 70 characters, no full stop.',
@@ -325,7 +325,7 @@ export class Writer {
       this.update(key, { attempt, activity: attempt > 1 ? 'Covering the changes it missed…' : update ? 'Updating it for the new changes…' : 'Reading the change…' });
       const out = await this.claude(key, ctx.cwd, !ctx.inTree, writerPrompt(input, feedback), data.assistant?.id);
       if (this.jobs.get(key)?.status !== 'running') return;
-      walkthrough = { version: 1, ...out, base: ctx.baseSha, head: data.head, generatedBy: { tool: 'reviewer', at: new Date().toISOString() } };
+      walkthrough = { version: 1, ...out, base: ctx.baseSha, head: data.head, generatedBy: { tool: 'reviewer', at: new Date().toISOString(), fromSession: !!input.agentSession } };
 
       this.update(key, { activity: 'Checking it against the diff…' });
       const r = await this.projects.check(projectId, branch, walkthrough);
@@ -369,10 +369,10 @@ export class Writer {
     if (!text) throw new Error('Hunkdory has no walkthrough for this branch yet.');
     const { shared: _s, ...wt } = JSON.parse(text);
     const { project, pr, repo } = await this.projects.pullRequest(projectId, branch);
-    // Chapters come out of wtv in the walkthrough's order, so the risk it wrote for each is at the same place.
-    const chapters = data.steps.filter((s) => s.source === 'chapter').map((s, i) => ({ title: s.title, why: s.why, risk: wt.chapters?.[i]?.risk, checks: s.checks, outsideTask: s.outsideTask, files: s.files, choices: s.choices }));
+    // Every step, in order: "Before approving" points at steps by number, and the unexplained ones are often why.
+    const chapters = data.steps.map((s) => ({ title: s.title, why: s.why, risk: s.riskNote ?? undefined, checks: s.checks, outsideTask: s.outsideTask, files: s.files, choices: s.choices }));
     const beforeApproving = decisionsForComment(buildPlan(data, { order: 'story' }).decisions);
-    const body = gh.walkthroughComment({ title: wt.title, intent: wt.intent, chapters, beforeApproving }, wt);
+    const body = gh.walkthroughComment({ title: wt.title, intent: wt.intent, chapters, beforeApproving, fromSession: data.walkthroughFromSession }, wt);
     // Update the comment you posted before rather than adding another one.
     const before = await gh.sharedWalkthrough(project.path, repo, pr.number);
     const me = await gh.login(project.path);

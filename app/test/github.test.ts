@@ -184,16 +184,17 @@ test('the comment leads with what to look at, and each step gets its risk and th
       beforeApproving: ['**Outside the request.** Step 2: Bump lint.', '**Touches auth or security.** token.js in step 1.'],
       chapters: [
         { title: 'Cache', why: 'Faster reads', risk: 'Stale entries', checks: ['Is a minute short enough?'], choices: [{ question: 'Where to keep it?', chose: 'In memory.', why: 'One instance only.', rejected: ['Redis: too much to run'] }] },
-        { title: 'Lint', risk: 'Only the risk', checks: ['Only the risk'], choices: [{ question: 'Which rule?', chose: 'The strict one.', why: null, rejected: [] }] },
+        { title: 'Lint', choices: [{ question: 'Which rule?', chose: 'The strict one', why: 'Fewer bugs', rejected: ['The loose one'] }] },
       ],
     },
     {}
   );
   assert.match(body, /Add a cache\.\n\n### Before approving\n\n- \*\*Outside the request\.\*\* Step 2: Bump lint\.\n- \*\*Touches auth or security\.\*\* token\.js in step 1\.\n\n<details>/);
   assert.match(body, /\*\*Risk:\*\* Stale entries/);
-  assert.ok(!body.includes('**Risk:** Only the risk'), 'a risk asked as the question is not said twice');
   assert.match(body, /- Where to keep it\? In memory\. One instance only\. Set aside: Redis: too much to run\./);
-  assert.match(body, /- Which rule\? The strict one\.\n/);
+  assert.match(body, /- Which rule\? The strict one\. Fewer bugs\. Set aside: The loose one\.\n/, 'sentences without a full stop do not run together');
+  assert.match(body, /<summary>2 steps, explained by Hunkdory from the diff<\/summary>/);
+  assert.match(walkthroughComment({ fromSession: true, chapters: [{ title: 'One' }] }, {}), /<summary>1 step, explained by Hunkdory from the diff and the agent’s session<\/summary>/);
 
   assert.ok(!walkthroughComment({ chapters: [] }, {}).includes('Before approving'), 'nothing to look at, no heading');
 });

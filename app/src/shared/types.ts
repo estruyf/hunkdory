@@ -306,6 +306,8 @@ export interface Step {
   why: string;
   checks: string[];
   risk: RiskLevel;
+  /** What could break, in the walkthrough's words. Null when there's none, or when it became the step's only question. */
+  riskNote: string | null;
   outsideTask: boolean;
   /** Changes code without changing a test file. Says nothing about tests that already cover that code. */
   noTestChange: boolean;
@@ -379,6 +381,8 @@ export interface ReviewData {
   stack: { base: string; prs: StackEntry[] } | null;
   /** Reviews and line comments on the pull request on GitHub. Null without a PR, or when GitHub couldn't be read. */
   github: GitHubFeedback | null;
+  /** Hunkdory's walkthrough was written with what the agent said in its session, not only from the code and commits. */
+  walkthroughFromSession: boolean;
   /** Where Hunkdory's walkthrough came from when a teammate shared it on the PR. */
   sharedWalkthrough: { url: string; by: string } | null;
   /** The linked GitHub repo ("owner/name"), or null when the project has none. */

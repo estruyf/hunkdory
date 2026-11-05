@@ -31,11 +31,12 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
     return key;
   };
 
-  const make = (s: Omit<Step, 'index' | 'files' | 'added' | 'removed' | 'risk' | 'noTestChange' | 'choices'> & { minRisk?: RiskLevel; choices?: Step['choices'] }): Step => {
+  const make = (s: Omit<Step, 'index' | 'files' | 'added' | 'removed' | 'risk' | 'riskNote' | 'noTestChange' | 'choices'> & { minRisk?: RiskLevel; riskNote?: string | null; choices?: Step['choices'] }): Step => {
     const hs = s.hunkIds.map((id) => byId.get(id)!).filter(Boolean);
     const { minRisk, ...rest } = s;
     return {
       ...rest,
+      riskNote: rest.riskNote ?? null,
       choices: rest.choices ?? [],
       // Only a chapter can say this: it holds the tests of its code, while the other steps split a change by file.
       noTestChange: s.source === 'chapter' && hs.some(isCode) && !hs.some((h) => h.isTest && !h.whitespaceOnly),
@@ -49,13 +50,15 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
 
   for (const ch of r.chapters) {
     const skeleton = source === 'skeleton';
-    const checks = ch.checks.length ? ch.checks : ch.risk && !isTodo(ch.risk) ? [ch.risk] : [];
+    const risk = isTodo(ch.risk) ? null : ch.risk;
+    const checks = ch.checks.length ? ch.checks : risk ? [risk] : [];
     steps.push(
       make({
         key: uniqueKey(skeleton ? `file:${ch.title}` : `ch:${slug(ch.title)}`),
         title: ch.title,
         why: isTodo(ch.why) ? '' : ch.why,
         checks,
+        riskNote: ch.checks.length ? risk : null,
         outsideTask: ch.outsideTask,
         choices: ch.choices,
         minRisk: ch.outsideTask ? 'medium' : undefined,
