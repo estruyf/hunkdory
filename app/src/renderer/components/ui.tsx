@@ -129,7 +129,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
 type Inbox = Awaited<ReturnType<ReviewerApi['inbox']>>;
 type InboxOpts = NonNullable<Parameters<ReviewerApi['inbox']>[0]>;
 
-// The inbox as last seen. A scan takes seconds, so going back to the inbox shows this while a new one runs.
+// The inbox as last seen, from the last run until the first scan is in. A scan takes seconds, so the inbox shows this while a new one runs.
 let lastInbox: Inbox | undefined;
 const inboxListeners = new Set<(v: Inbox) => void>();
 
@@ -157,6 +157,7 @@ export function useInbox() {
   const next = useRef<InboxOpts>({});
   useEffect(() => {
     inboxListeners.add(setValue);
+    if (!lastInbox) void window.api.inboxCached().then((v) => v && !lastInbox && setLastInbox(v));
     return () => void inboxListeners.delete(setValue);
   }, []);
   useEffect(() => {

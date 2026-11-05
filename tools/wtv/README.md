@@ -47,9 +47,21 @@ including untracked files. The `.review/` folder is never part of the diff.
 - **Chapters** have `title`, `why`, optional `risk`, and `hunks` (refs). Optional
   review fields: `checks` (questions for the reviewer), `outsideTask: true`
   (work the prompt didn't ask for), `notes` (`{ "<ref>": "text" }`, an agent
-  note on specific hunks), and `choices` (`{ question, chose, why, rejected }`,
-  what the agent decided here and what it set aside). Older walkthroughs without
-  these still work.
+  note on specific hunks), `choices` (`{ question, chose, why, rejected }`,
+  what the agent decided here and what it set aside), `behaviour`
+  (`{ before, after, example }`) and `dependents` (`{ path, what }`, up to 5 files
+  outside the diff that use what changed). Older walkthroughs without these still
+  work.
+- **The whole change** can also have `background` (how this part of the code works
+  today), `requested` (`{ item, status, chapters, note }`, with `status` as `done`,
+  `partly` or `missing`), `tryIt` (`{ do, expect }`) and `diagram`
+  (`{ summary, nodes: [{ id, label, kind, files, unchanged }], edges: [{ from, to, label }] }`).
+- **Claims get checked** where the diff can settle them. A dependent or an
+  `unchanged` box has to be a file in the branch that isn't in the diff, and any
+  other box may only list files in the diff. A `requested` item that is `done` or
+  `partly` has to name a chapter. Whatever fails is dropped, and a diagram left with
+  fewer than 3 boxes, more than 10, or no arrows goes entirely. Arrows and wording
+  can't be checked this way.
 - **Refs** in a chapter can be `h:<id>`, `path:10-20`, `path` or `folder/`.
 - **Buckets**: narrated, unnarrated, noise (whitespace-only), generated
   (lockfiles, dist), phantom (refs matching nothing), weak (high-risk hunk only
@@ -80,8 +92,9 @@ can't loop, and it never blocks when something goes wrong (no git, no changes).
 
 ## JSON contract (for a review UI)
 
-`wtv verify --json` returns `ok`, `intent`, `base`, `head`, `chapters` (with
-`hunkIds`, `checks`, `outsideTask`, `choices` and `notes` resolved to `hunkIds`), `hunks` (full content, `bucket`, `risks`, `level`, `isTest`, `chapters`;
+`wtv verify --json` returns `ok`, `intent`, `background`, `requested` (with
+`chapters` resolved to chapter indexes), `tryIt`, `diagram`, `base`, `head`, `chapters` (with
+`hunkIds`, `checks`, `outsideTask`, `choices`, `behaviour`, `dependents` and `notes` resolved to `hunkIds`), `hunks` (full content, `bucket`, `risks`, `level`, `isTest`, `chapters`;
 each risk has `code`, `severity`, `label` and, when a line set it off, `match: { term, line }`),
 `buckets` and `findings`. A UI renders chapters in order and puts
 `buckets.unnarrated` at the top.

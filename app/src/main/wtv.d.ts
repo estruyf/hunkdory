@@ -42,6 +42,8 @@ interface WtvChapter {
   checks: string[];
   outsideTask: boolean;
   choices: { question: string; chose: string; why: string | null; rejected: string[] }[];
+  behaviour: { before: string; after: string; example: string | null } | null;
+  dependents: { path: string; what: string }[];
   notes: { ref: string; text: string; hunkIds: string[] }[];
   refs: { ref: string; kind: string; matched: string[] }[];
   hunkIds: string[];
@@ -50,6 +52,14 @@ interface WtvChapter {
 interface WtvResult {
   ok: boolean;
   intent: string | null;
+  background: string | null;
+  requested: { item: string; status: 'done' | 'partly' | 'missing'; chapters: number[]; note: string | null }[];
+  tryIt: { do: string; expect: string | null }[];
+  diagram: {
+    summary: string | null;
+    nodes: { id: string; label: string; kind: string | null; files: string[]; unchanged: boolean }[];
+    edges: { from: string; to: string; label: string | null }[];
+  } | null;
   base: string;
   head: string;
   files: number;

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useInboxData, type InboxData } from './components/inbox/useInboxData.ts';
 import { ShortcutsSheet } from './components/shortcuts/ShortcutsSheet.tsx';
+import { TabStrip } from './components/TabStrip.tsx';
 import { TooltipLayer } from './components/ui/Tooltip.tsx';
 import { matches, type ShortcutContext } from './lib/shortcuts.ts';
 import { stepBranch, useBranches } from './state/branches.ts';
 import { openSettings, useNav } from './state/nav.ts';
+import { TabPane } from './state/tabPane.ts';
+import { activate, activeRoute, closeTab, INBOX, move, navigate, reopenTab, restoreTabs, routeOf, savedTabs, startTabs, stepTab, tabAt, withoutProjectsGone, type Tabs } from './state/tabs.ts';
 import { jobKey, useWalkthroughs, watchWalkthroughs } from './state/walkthroughs.ts';
 import { Welcome } from './screens/Welcome.tsx';
 import { Connect } from './screens/Connect.tsx';
@@ -34,22 +37,40 @@ export type Route =
 
 export type Go = (r: Route) => void;
 
+const SAVED_TABS = 'open-tabs';
+
+function readSavedTabs(): unknown {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_TABS) ?? 'null');
+  } catch {
+    return null;
+  }
+}
+
+/** A dialog or menu has the keys until it's closed: leaving its tab would keep it open, out of sight. */
+const modalOpen = () => document.querySelector('[aria-modal="true"], [data-popover]') !== null;
+
 export function App() {
-  // Every screen you went to, so the mouse's back and forward buttons work like in a browser.
-  const [nav, setNav] = useState<{ stack: Route[]; at: number }>({ stack: [], at: -1 });
-  const route = nav.stack[nav.at] ?? null;
+  // The open tabs, each with every screen you went to, so the mouse's back and forward buttons work like in a browser.
+  const [nav, setNav] = useState<Tabs>({ tabs: [], active: INBOX });
+  const tabsNow = useRef(nav);
+  tabsNow.current = nav;
+  const route = activeRoute(nav);
+  // Tabs from an earlier run wait until you open them: each one reads its branch and may write a walkthrough.
+  const visited = useRef(new Set<string>());
+  visited.current.add(nav.active);
   const [hasProjects, setHasProjects] = useState(false);
   const [sheet, setSheet] = useState<ShortcutContext | null>(null);
   const settings = useNav((s) => s.settings);
   // The newest state of each review. A screen you go back to may carry an older one.
   const latest = useRef(new Map<string, ReviewState>());
-  // Read here rather than in Home, so the order ⌃⇥ steps through stays current on every screen.
+  // Read here rather than in Home, so the order branches step through stays current on every screen.
   const inbox = useInboxData();
 
   useEffect(() => {
     window.api.listProjects().then((ps) => {
       setHasProjects(ps.length > 0);
-      setNav({ stack: [ps.length ? { name: 'home' } : { name: 'welcome' }], at: 0 });
+      setNav(ps.length ? restoreTabs(readSavedTabs(), new Set(ps.map((p) => p.id))) : startTabs({ name: 'welcome' }));
     });
     return window.events.onReviewStateChanged((r) => {
       latest.current.set(`${r.projectId}::${r.branch}`, r);
@@ -57,33 +78,62 @@ export function App() {
     });
   }, []);
 
-  const go: Go = (r) => {
-    if (r.name === 'home') setHasProjects(true);
-    // A finished review can't be finished again: back from Done goes to the inbox.
-    setNav((n) => (r.name === 'done' ? { stack: [{ name: 'home' }, r], at: 1 } : { stack: [...n.stack.slice(0, n.at + 1), r], at: n.at + 1 }));
-  };
+  // Waiting on someone can take days: the tabs come back when Hunkdory does.
+  useEffect(() => {
+    if (!nav.tabs.length) return;
+    try {
+      localStorage.setItem(SAVED_TABS, JSON.stringify(savedTabs(nav)));
+    } catch {
+      // Storage full or blocked: the tabs last until you quit.
+    }
+  }, [nav]);
 
-  const move = (by: -1 | 1) =>
+  useEffect(() => {
+    if (inbox.projects.length) setNav((n) => withoutProjectsGone(n, new Set(inbox.projects.map((p) => p.id))));
+  }, [inbox.projects]);
+
+  const goFrom =
+    (from?: string): Go =>
+    (r) => {
+      if (r.name === 'home') setHasProjects(true);
+      setNav((n) => navigate(n, r, from ?? n.active));
+    };
+  const go = goFrom();
+
+  /** A screen you go back to: with the newest state, or read again when a walkthrough finished since. */
+  const freshen = (r: Route): Route => {
+    if ((r.name !== 'plan' && r.name !== 'review') || !r.preloaded) return r;
+    // A walkthrough finished since you were here: read the branch again rather than show one step per file.
+    if (r.preloaded.data.walkthrough === 'skeleton' && useWalkthroughs.getState().jobs[jobKey(r.projectId, r.branch)]?.status === 'done') {
+      const { preloaded: _stale, ...again } = r;
+      return again;
+    }
+    const fresh = latest.current.get(`${r.projectId}::${r.branch}`);
+    return fresh ? { ...r, preloaded: { ...r.preloaded, state: fresh } } : r;
+  };
+  const step = (by: -1 | 1) => {
+    if (!modalOpen()) setNav((n) => move(n, by, freshen));
+  };
+  const switchTo = (pick: (n: Tabs) => string | null) => {
+    openSettings(false);
     setNav((n) => {
-      const at = n.at + by;
-      const r = n.stack[at];
-      if (!r) return n;
-      const pre = (r.name === 'plan' || r.name === 'review') && r.preloaded;
-      // A walkthrough finished since you were here: read the branch again rather than show one step per file.
-      if (pre && pre.data.walkthrough === 'skeleton' && useWalkthroughs.getState().jobs[jobKey(r.projectId, r.branch)]?.status === 'done') {
-        const { preloaded: _stale, ...again } = r;
-        return { stack: n.stack.map((x, i) => (i === at ? again : x)), at };
-      }
-      const fresh = pre ? latest.current.get(`${r.projectId}::${r.branch}`) : undefined;
-      const stack = pre && fresh ? n.stack.map((x, i) => (i === at ? { ...r, preloaded: { ...pre, state: fresh } } : x)) : n.stack;
-      return { stack, at };
+      const id = pick(n);
+      return id ? activate(n, id) : n;
     });
+  };
+  const closeCurrent = () => {
+    if (useNav.getState().settings) return openSettings(false);
+    if (modalOpen()) return;
+    // The inbox has no tab to close: ⌘W closes the window, as it always did.
+    if (tabsNow.current.active === INBOX) void window.api.closeWindow();
+    else setNav((n) => closeTab(n, n.active));
+  };
 
   // The shell reads where you are.
   useEffect(() => {
-    useNav.setState({ go, route });
+    useNav.setState({ go, route, tabs: hasProjects });
     if (route && 'branch' in route) useWalkthroughs.getState().seen(route.projectId, route.branch);
-  }, [route]);
+  }, [route, hasProjects]);
 
   // Walkthroughs keep being written while you're elsewhere; "Walkthrough ready" notifications open their branch.
   useEffect(() => {
@@ -100,7 +150,7 @@ export function App() {
     const onMouse = (e: MouseEvent) => {
       if (e.button !== 3 && e.button !== 4) return;
       e.preventDefault();
-      move(e.button === 3 ? -1 : 1);
+      step(e.button === 3 ? -1 : 1);
     };
     const onKey = (e: KeyboardEvent) => {
       const current = useNav.getState().route;
@@ -110,12 +160,21 @@ export function App() {
         fn();
       };
       if (matches(e, 'shortcuts')) run(() => setSheet((s) => (s ? null : sheetContext(current))));
-      else if (matches(e, 'home')) run(() => go({ name: 'home' }));
       else if (matches(e, 'settings')) run(() => openSettings(!useNav.getState().settings));
+      else if (modalOpen()) return;
+      else if (matches(e, 'home')) run(() => go({ name: 'home' }));
       else if (matches(e, 'branch.goto')) run(focusInboxSearch);
       else if (matches(e, 'branch.other')) run(() => go({ name: 'pick', projectId: branch?.projectId }));
-      else if (matches(e, 'nav.back')) run(() => move(-1));
-      else if (matches(e, 'nav.forward')) run(() => move(1));
+      else if (matches(e, 'nav.back')) run(() => step(-1));
+      else if (matches(e, 'nav.forward')) run(() => step(1));
+      else if (matches(e, 'tab.reopen')) {
+        run(() => {
+          openSettings(false);
+          setNav(reopenTab);
+        });
+      } else if (matches(e, 'tab.next') || matches(e, 'tab.previous')) run(() => switchTo((n) => stepTab(n, matches(e, 'tab.next') ? 1 : -1)));
+      // On Connect these keys pick a repo.
+      else if (matches(e, 'tab.goto') && current?.name !== 'connect' && current?.name !== 'welcome') run(() => switchTo((n) => tabAt(n, Number(e.key))));
       else if (matches(e, 'branch.next') || matches(e, 'branch.previous')) {
         const to = stepBranch(useBranches.getState().order, branch, matches(e, 'branch.next') ? 1 : -1);
         if (to) run(() => go({ name: 'plan', ...to }));
@@ -123,11 +182,13 @@ export function App() {
     };
     window.addEventListener('mouseup', onMouse);
     window.addEventListener('keydown', onKey);
-    const off = window.events.onNavigate((dir) => move(dir === 'back' ? -1 : 1));
+    const off = window.events.onNavigate((dir) => step(dir === 'back' ? -1 : 1));
+    const offClose = window.events.onCloseTab(closeCurrent);
     return () => {
       window.removeEventListener('mouseup', onMouse);
       window.removeEventListener('keydown', onKey);
       off();
+      offClose();
     };
   }, []);
 
@@ -149,19 +210,30 @@ export function App() {
     );
   return (
     <main className="relative flex h-full min-w-0 flex-col">
-      {view(route, go, hasProjects, inbox)}
-      {/* Settings covers the view, and closing it leaves you where you were. */}
-      {settings && (
-        <div className="absolute inset-0 z-20 flex bg-bg">
-          <Settings
-            go={(r) => {
-              openSettings(false);
-              go(r);
-            }}
-            onClose={() => openSettings(false)}
-          />
-        </div>
-      )}
+      {hasProjects && <TabStrip tabs={nav.tabs} active={nav.active} inbox={inbox} onPick={(id) => switchTo(() => id)} onClose={(id) => setNav((n) => closeTab(n, id))} />}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {nav.tabs
+          .filter((tab) => visited.current.has(tab.id))
+          .map((tab) => (
+            <TabPane key={tab.id} value={tab.id === nav.active}>
+              <div data-tab-active={tab.id === nav.active || undefined} className={tab.id === nav.active ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+                {view(routeOf(tab), goFrom(tab.id), hasProjects, inbox)}
+              </div>
+            </TabPane>
+          ))}
+        {/* Settings covers the view, and closing it leaves you where you were. */}
+        {settings && (
+          <div className="absolute inset-0 z-20 flex bg-bg">
+            <Settings
+              go={(r) => {
+                openSettings(false);
+                go(r);
+              }}
+              onClose={() => openSettings(false)}
+            />
+          </div>
+        )}
+      </div>
       {overlays}
     </main>
   );

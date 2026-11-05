@@ -9,7 +9,7 @@ import { branchGroups, withWalkthroughs, type BranchRow } from './branchRows.ts'
 
 /**
  * Everything the inbox shows: the branches in groups, the filters, and Ignore. App reads it once, so the
- * order ⌃⇥ steps through stays current on every screen, and hands it to Home.
+ * order branches step through stays current on every screen, and hands it to Home.
  */
 export function useInboxData() {
   const routeName = useNav((s) => s.route?.name);
@@ -65,7 +65,7 @@ export function useInboxData() {
     });
   }, [inbox.value, names, filter, q, people, me, order, jobs, ready]);
 
-  // The order ⌃⇥ steps through, and what Open the first one opens.
+  // The order branches step through, and what Open the first one opens.
   useEffect(() => {
     const listed = groups.filter((g) => g.id !== 'ignored').flatMap((g) => g.rows);
     const review = groups.find((g) => g.id === 'review')!.rows;

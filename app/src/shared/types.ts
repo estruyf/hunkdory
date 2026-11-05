@@ -327,6 +327,57 @@ export interface AgentChoice {
   rejected: string[];
 }
 
+/** What behaves differently after a step, in the walkthrough's words. */
+export interface BehaviourChange {
+  before: string;
+  after: string;
+  example: string | null;
+}
+
+/** A file outside the diff that uses what a step changes. wtv checked that it's in the branch. */
+export interface Dependent {
+  path: string;
+  what: string;
+}
+
+/** One thing the request asked for. `done` means the walkthrough found code for it, not that it works. */
+export interface RequestedItem {
+  item: string;
+  status: 'done' | 'partly' | 'missing';
+  note: string | null;
+  stepKeys: string[];
+}
+
+/** One thing to do to see the change working. Shown, never run. */
+export interface TryItStep {
+  do: string;
+  expect: string | null;
+}
+
+export interface DiagramNode {
+  id: string;
+  label: string;
+  kind: string | null;
+  files: string[];
+  /** Code the change relies on but doesn't edit. */
+  unchanged: boolean;
+  /** The steps that change this box's files, in story order. */
+  stepKeys: string[];
+}
+
+export interface DiagramEdge {
+  from: string;
+  to: string;
+  label: string | null;
+}
+
+/** How the parts of a change connect. wtv checked the boxes against the diff; the arrows are the walkthrough's reading of the code. */
+export interface ChangeDiagram {
+  summary: string | null;
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+}
+
 export interface Step {
   /** Stable across reloads: survives line shifts, changes when the step's content changes. */
   key: string;
@@ -342,6 +393,8 @@ export interface Step {
   /** Changes code without changing a test file. Says nothing about tests that already cover that code. */
   noTestChange: boolean;
   choices: AgentChoice[];
+  behaviour: BehaviourChange | null;
+  dependents: Dependent[];
   source: StepSource;
   hunkIds: string[];
   files: string[];
@@ -381,6 +434,11 @@ export interface ReviewData {
   /** Who wrote the walkthrough: the branch's author or agent, Hunkdory itself, or nobody (wtv's one-step-per-file fallback). */
   walkthrough: WalkthroughSource;
   intent: string | null;
+  /** How this part of the code works today, for someone new to it. */
+  background: string | null;
+  requested: RequestedItem[];
+  tryIt: TryItStep[];
+  diagram: ChangeDiagram | null;
   title: string;
   prompt: string | null;
   session: SessionInfo | null;
@@ -722,11 +780,15 @@ export interface ReviewerApi {
   listBases(projectId: string, branch: string): Promise<BaseChoice[]>;
   /** Compares one branch against `base`, whatever the project's base. `null` goes back to Hunkdory's pick. */
   setBase(projectId: string, branch: string, base: string | null): Promise<void>;
+  /** Closes the window the way its close button does: Hunkdory stays in the menu bar. */
+  closeWindow(): Promise<void>;
   openExternal(url: string): Promise<void>;
   /**
    * `me` is who gh is signed in as, null without GitHub. `projectId` reads that project again and keeps the others
    * as last read; `refetch` asks GitHub for its pull requests rather than use the ones read in the last minute.
    */
+  /** The inbox as the last scan left it, even one from an earlier run; null with nothing to show. */
+  inboxCached(): Promise<{ waiting: InboxItem[]; done: ReviewState[]; scans: ProjectScan[]; me: string | null } | null>;
   inbox(opts?: { refresh?: boolean; projectId?: string; refetch?: boolean }): Promise<{ waiting: InboxItem[]; done: ReviewState[]; scans: ProjectScan[]; me: string | null }>;
   loadReview(projectId: string, branch: string, opts?: { refresh?: boolean }): Promise<{ data: ReviewData; state: ReviewState }>;
   updateReview(projectId: string, branch: string, patch: ReviewPatch): Promise<ReviewState>;

@@ -1,5 +1,5 @@
 // wtv verify result → review steps and "Needs your attention" flags. Pure.
-import type { AttentionFlag, DiffLine, RiskLevel, Step, WalkthroughSource } from '../shared/types.ts';
+import type { AttentionFlag, DiffLine, ReviewData, RiskLevel, Step, WalkthroughSource } from '../shared/types.ts';
 import { riskReason } from '../shared/diff.ts';
 
 const RANK = { none: 0, low: 1, medium: 2, high: 3 } as const;
@@ -31,13 +31,15 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
     return key;
   };
 
-  const make = (s: Omit<Step, 'index' | 'files' | 'added' | 'removed' | 'risk' | 'riskNote' | 'noTestChange' | 'choices'> & { minRisk?: RiskLevel; riskNote?: string | null; choices?: Step['choices'] }): Step => {
+  const make = (s: Omit<Step, 'index' | 'files' | 'added' | 'removed' | 'risk' | 'riskNote' | 'noTestChange' | 'choices' | 'behaviour' | 'dependents'> & { minRisk?: RiskLevel; riskNote?: string | null; choices?: Step['choices']; behaviour?: Step['behaviour']; dependents?: Step['dependents'] }): Step => {
     const hs = s.hunkIds.map((id) => byId.get(id)!).filter(Boolean);
     const { minRisk, ...rest } = s;
     return {
       ...rest,
       riskNote: rest.riskNote ?? null,
       choices: rest.choices ?? [],
+      behaviour: rest.behaviour ?? null,
+      dependents: rest.dependents ?? [],
       // Only a chapter can say this: it holds the tests of its code, while the other steps split a change by file.
       noTestChange: s.source === 'chapter' && hs.some(isCode) && !hs.some((h) => h.isTest && !h.whitespaceOnly),
       index: steps.length,
@@ -61,6 +63,8 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
         riskNote: ch.checks.length ? risk : null,
         outsideTask: ch.outsideTask,
         choices: ch.choices,
+        behaviour: ch.behaviour,
+        dependents: ch.dependents,
         minRisk: ch.outsideTask ? 'medium' : undefined,
         source: skeleton ? 'skeleton' : 'chapter',
         hunkIds: ch.hunkIds,
@@ -110,6 +114,19 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
   return steps;
 }
 
+/** What the walkthrough says about the change as a whole, pointing at steps. Chapters come first in the steps, in the same order. */
+export function overview(r: WtvResult, steps: Step[]): Pick<ReviewData, 'background' | 'requested' | 'tryIt' | 'diagram'> {
+  return {
+    background: r.background,
+    requested: r.requested.map(({ chapters, ...item }) => ({ ...item, stepKeys: chapters.flatMap((i) => steps[i]?.key ?? []) })),
+    tryIt: r.tryIt,
+    diagram: r.diagram && {
+      ...r.diagram,
+      nodes: r.diagram.nodes.map((n) => ({ ...n, stepKeys: n.unchanged ? [] : steps.filter((s) => s.source !== 'skipped' && s.files.some((f) => n.files.includes(f))).map((s) => s.key) })),
+    },
+  };
+}
+
 const FINDING_TITLES: Record<string, string> = {
   'missing-why': 'Step without a reason',
   'empty-chapter': 'Empty step',
@@ -135,6 +152,10 @@ export function attention(r: WtvResult, steps: Step[], source: WalkthroughSource
       detail: `Step ${s.index + 1} changes ${s.files.join(', ')}.`,
       stepKey: s.key,
     });
+  }
+
+  for (const item of r.requested.filter((x) => x.status === 'missing')) {
+    flags.push({ severity: 'medium', title: 'Asked for, but not found', detail: `${item.item}${item.note ? `: ${item.note}` : ''}`, stepKey: null });
   }
 
   // One flag per risk type and severity, listing where it happens. Security comes in two strengths with their own labels.

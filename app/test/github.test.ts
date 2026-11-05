@@ -177,6 +177,50 @@ test('a push or fetch turned away at sign-in goes again through gh; other failur
   assert.ok(!signInFailed('ssh: Could not resolve host: github.com'));
 });
 
+test('the comment explains the change for people without the app', () => {
+  const body = walkthroughComment(
+    {
+      intent: 'Add a cache.',
+      background: 'Reads go straight to the database.',
+      requested: [
+        { item: 'Cache reads', status: 'done', note: null, steps: [1, 2] },
+        { item: 'A setting for it', status: 'missing', note: 'Looked in config', steps: [] },
+      ],
+      tryIt: [{ do: 'Run `npm test`', expect: 'It passes.' }, { do: 'Open the list', expect: null }],
+      chapters: [{ title: 'Cache', behaviour: { before: 'Every read hit the database.', after: 'Repeat reads use memory.', example: 'A second load takes 2 ms.' }, dependents: [{ path: 'src/list.ts', what: 'Calls `read`.' }] }],
+    },
+    {}
+  );
+  assert.match(body, /\*\*To know first:\*\* Reads go straight to the database\./);
+  assert.match(body, /- \*\*Code found:\*\* Cache reads \(steps 1, 2\)\n- \*\*Not found:\*\* A setting for it\. Looked in config\./);
+  assert.match(body, /1\. Run `npm test` You should see: It passes\.\n2\. Open the list\n/);
+  assert.match(body, /\*\*Before:\*\* Every read hit the database\.\n\n\*\*Now:\*\* Repeat reads use memory\.\n\n\*\*For example:\*\* A second load takes 2 ms\./);
+  assert.match(body, /- `src\/list\.ts`: Calls `read`\./);
+  for (const heading of ['What was asked for', 'How to try it']) assert.ok(!walkthroughComment({ chapters: [] }, {}).includes(heading), 'nothing to say, no heading');
+});
+
+test('the comment draws the diagram for GitHub, with labels that cannot break out', () => {
+  const body = walkthroughComment(
+    {
+      chapters: [],
+      diagram: {
+        summary: 'Reads go through a cache.',
+        nodes: [
+          { id: 'handler', label: 'List "handler"', kind: null, files: ['a.ts'], unchanged: false, stepKeys: [] },
+          { id: 'db', label: 'Database', kind: null, files: ['b.ts'], unchanged: true, stepKeys: [] },
+        ],
+        edges: [{ from: 'handler', to: 'db', label: 'reads\nrows' }, { from: 'db', to: 'handler', label: null }],
+      },
+    },
+    {}
+  );
+  assert.match(body, /### How it fits together\n\nReads go through a cache\.\n\n```mermaid\nflowchart TD\n/);
+  assert.ok(body.includes('n0["List #quot;handler#quot;"]'));
+  assert.ok(body.includes('n1["Database (no changes)"]'));
+  assert.ok(body.includes('n0 -->|"reads rows"| n1'));
+  assert.ok(body.includes('n1 --> n0'));
+});
+
 test('the comment leads with what to look at, and each step gets its risk and the choices made', () => {
   const body = walkthroughComment(
     {

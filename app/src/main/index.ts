@@ -22,8 +22,8 @@ const ICON = join(__dirname, '../../resources/icon.png');
 
 // The window's colour before the page draws: --bg in styles.css, light or dark.
 // Switchboard's Demo Time background, so the window never flashes another colour before the page paints.
-/** Where the traffic lights sit: centred in the 52px header, with room before the header's controls. */
-const WINDOW_BUTTONS = { default: { x: 18, y: 19 } } as const;
+/** Where the traffic lights sit: centred in the 40px tab strip, with room before its first tab. */
+const WINDOW_BUTTONS = { default: { x: 18, y: 14 } } as const;
 
 const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#15181f' : '#ffffff');
 
@@ -205,26 +205,18 @@ const api: ReviewerApi = {
     writer.cancel(projectId, branch);
     win?.webContents.send('reviews-changed');
   },
+  closeWindow: async () => win?.close(),
   openExternal: async (url) => {
     // Only links Hunkdory shows itself, like a pull request on GitHub.
     if (/^https:\/\//.test(url)) await shell.openExternal(url);
   },
+  inboxCached: async () => {
+    const cached = projects.cachedInbox();
+    return cached && { waiting: cached.items, done: reviewedThisWeek(), scans: cached.scans, me: cached.me };
+  },
   inbox: async (opts) => {
     const { items: waiting, scans, me } = await projects.inbox(opts?.refresh, { projectId: opts?.projectId, refetch: opts?.refetch });
-    const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
-    const done = store
-      .reviews()
-      .filter((r) => r.decision && r.decision.at >= weekAgo)
-      .sort((a, b) => b.decision!.at.localeCompare(a.decision!.at));
-    // Earlier rounds of a review that is open again still count as reviewed this week.
-    for (const r of store.reviews()) {
-      const last = r.rounds?.at(-1);
-      if (!r.decision && last && last.decision.at >= weekAgo) {
-        done.push({ ...r, decision: last.decision, status: last.decision.kind === 'merge' ? 'merged' : last.decision.kind === 'discard' ? 'discarded' : 'sent-back' });
-      }
-    }
-    done.sort((a, b) => b.decision!.at.localeCompare(a.decision!.at));
-    return { waiting, done, scans, me };
+    return { waiting, done: reviewedThisWeek(), scans, me };
   },
   loadReview: async (projectId, branch, opts) => {
     const data = await projects.review(projectId, branch, opts?.refresh);
@@ -292,6 +284,24 @@ const api: ReviewerApi = {
   cancelExchange: async (projectId, branch, id) => conversations.cancel(projectId, branch, id),
 };
 
+/** What you finished in the last week, whether or not it's open again. */
+function reviewedThisWeek() {
+  const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const done = store
+    .reviews()
+    .filter((r) => r.decision && r.decision.at >= weekAgo)
+    .sort((a, b) => b.decision!.at.localeCompare(a.decision!.at));
+  // Earlier rounds of a review that is open again still count as reviewed this week.
+  for (const r of store.reviews()) {
+    const last = r.rounds?.at(-1);
+    if (!r.decision && last && last.decision.at >= weekAgo) {
+      done.push({ ...r, decision: last.decision, status: last.decision.kind === 'merge' ? 'merged' : last.decision.kind === 'discard' ? 'discarded' : 'sent-back' });
+    }
+  }
+  done.sort((a, b) => b.decision!.at.localeCompare(a.decision!.at));
+  return done;
+}
+
 function registerIpc() {
   for (const [name, fn] of Object.entries(api)) {
     ipcMain.handle(`api:${name}`, (_e, ...args) => (fn as (...a: unknown[]) => unknown)(...args));
@@ -327,6 +337,13 @@ function createWindow() {
   });
   win.on('swipe', (_e, dir) => {
     if (dir === 'left' || dir === 'right') win?.webContents.send('navigate', dir === 'left' ? 'back' : 'forward');
+  });
+  // ⌘W closes the tab on screen, ahead of the menu's Close. The page closes the window when there's no tab to close.
+  win.webContents.on('before-input-event', (e, input) => {
+    const mod = process.platform === 'darwin' ? input.meta : input.control;
+    if (input.type !== 'keyDown' || !mod || input.alt || input.shift || input.key.toLowerCase() !== 'w') return;
+    e.preventDefault();
+    win?.webContents.send('close-tab');
   });
   // Closing the window keeps Hunkdory in the menu bar. Quit from the tray or with Cmd+Q.
   win.on('close', (e) => {

@@ -2,6 +2,7 @@ import { Loading, plural, useAsync } from './ui.tsx';
 import { ProjectIcon } from './ProjectIcon.tsx';
 import { useEffect } from 'react';
 import { matches } from '../lib/shortcuts.ts';
+import { useTabActive } from '../state/tabPane.ts';
 import { Kbd } from './ui/Kbd.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
@@ -14,7 +15,9 @@ import { timeAgo } from '../../shared/order.ts';
 export function FoundOnThisMac({ onPick, title = 'Found on this Mac', primary = true }: { onPick: (path: string) => void; title?: string; primary?: boolean }) {
   const found = useAsync(() => window.api.foundOnThisMac(), []);
   // ⌘1 to ⌘9 pick the repo on that row.
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!matches(e, 'welcome.pick')) return;
       const f = found.value?.[Number(e.key) - 1];
@@ -24,7 +27,7 @@ export function FoundOnThisMac({ onPick, title = 'Found on this Mac', primary = 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [found.value, onPick]);
+  }, [found.value, onPick, onScreen]);
   return (
     <section className="flex flex-col gap-1" aria-label={title}>
       <SectionHeader count={found.value?.length ?? null}>{title}</SectionHeader>

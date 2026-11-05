@@ -9,7 +9,7 @@ import { currentPlatform } from '../lib/platform.ts';
 export function Welcome({ go }: { go: Go }) {
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
-      <header className={`drag flex h-13 shrink-0 items-center gap-2 pr-4 ${currentPlatform() === 'darwin' ? 'pl-24' : 'pl-4'}`}>
+      <header className={`drag flex h-10 shrink-0 items-center gap-2 pr-4 ${currentPlatform() === 'darwin' ? 'pl-24' : 'pl-4'}`}>
         <Logo />
         <span className="text-body font-semibold">Hunkdory</span>
       </header>

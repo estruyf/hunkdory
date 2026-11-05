@@ -21,7 +21,9 @@ const methods: (keyof ReviewerApi)[] = [
   'listBases',
   'setBase',
   'openExternal',
+  'closeWindow',
   'inbox',
+  'inboxCached',
   'loadReview',
   'updateReview',
   'finish',
@@ -80,6 +82,11 @@ contextBridge.exposeInMainWorld('events', {
     const listener = (_e: unknown, dir: 'back' | 'forward') => fn(dir);
     ipcRenderer.on('navigate', listener);
     return () => ipcRenderer.removeListener('navigate', listener);
+  },
+  onCloseTab(fn: () => void) {
+    const listener = () => fn();
+    ipcRenderer.on('close-tab', listener);
+    return () => ipcRenderer.removeListener('close-tab', listener);
   },
   onOpenBranch(fn: (to: { projectId: string; branch: string }) => void) {
     const listener = (_e: unknown, to: { projectId: string; branch: string }) => fn(to);

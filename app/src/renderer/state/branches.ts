@@ -1,4 +1,4 @@
-// The branches in the inbox's order, for ⌃⇥ and ⌃⇧⇥ from any view, and for the inbox's Open the first one.
+// The branches in the inbox's order, for stepping through them from any view, and for the inbox's Open the first one.
 import { create } from 'zustand';
 
 export interface BranchRef {

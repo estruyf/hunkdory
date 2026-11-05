@@ -11,6 +11,7 @@ import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { FIELD_LG } from '../components/ui/field.ts';
 import { matches } from '../lib/shortcuts.ts';
+import { useTabActive } from '../state/tabPane.ts';
 import { timeAgo } from '../../shared/order.ts';
 
 /** Review any branch: yours, a colleague's, or one an agent made without a session. */
@@ -30,7 +31,9 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
   const list = (branches.value ?? []).filter((b) => !q || `${b.name} ${b.author} ${b.subject}`.toLowerCase().includes(q));
 
   // ⌘F finds a branch.
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!matches(e, 'pick.find')) return;
       e.preventDefault();
@@ -38,7 +41,7 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [onScreen]);
 
   const pickUncommitted = async (name: string) => {
     try {

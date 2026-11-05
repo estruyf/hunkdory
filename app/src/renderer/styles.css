@@ -330,9 +330,10 @@ html[data-keyboard-nav] :is(button, a, summary, input, textarea, [contenteditabl
 
 /* Diffs: Switchboard's code surface and line tints, SF Mono at the ui size. */
 .diff { font-family: var(--font-mono); font-size: var(--text-ui); line-height: 20px; min-width: 560px; user-select: text; }
-/* Unified lines don't wrap: the diff is as wide as its longest line, so every row's tint runs under the text when you scroll sideways. */
+/* Unified lines don't wrap unless you ask: the diff is as wide as its longest line, so every row's tint runs under the text when you scroll sideways. */
 .diff-scroll { overflow-x: auto; container-type: inline-size; }
 .diff:not(.split) { width: max-content; min-width: max(100%, 560px); }
+.diff.wrap:not(.split) { width: auto; min-width: 0; }
 .diff-row { display: flex; }
 .diff-row.add, .diff-cell.add { background: var(--sb-diff-added); }
 .diff-row.del, .diff-cell.del { background: var(--sb-diff-removed); }
@@ -342,7 +343,8 @@ html[data-keyboard-nav] :is(button, a, summary, input, textarea, [contenteditabl
 .diff-n { width: 44px; flex: none; text-align: right; padding-right: 8px; color: var(--sb-faint); user-select: none; }
 .diff-mark { width: 18px; flex: none; text-align: center; font-weight: 600; color: var(--sb-muted); user-select: none; }
 .diff-text { white-space: pre; padding-right: 16px; }
-.diff-n-btn { position: relative; border: 0; background: transparent; font: inherit; cursor: pointer; }
+/* At the top of its row: a button centres its text, which on a wrapped line would put the number halfway down. */
+.diff-n-btn { position: relative; align-self: flex-start; border: 0; background: transparent; font: inherit; cursor: pointer; }
 .diff-n-btn:hover, .diff-n-btn:focus-visible { color: var(--sb-text); font-weight: 600; }
 /* A "+" next to the line number shows where a line comment goes. */
 .diff-row:hover .diff-n-btn::before, .diff-cell:hover .diff-n-btn::before { content: '+'; position: absolute; left: 4px; top: 1px; width: 16px; height: 18px; border-radius: 4px; background: var(--sb-accent); color: var(--sb-on-accent); font-weight: 700; text-align: center; line-height: 18px; }
@@ -351,7 +353,7 @@ html[data-keyboard-nav] :is(button, a, summary, input, textarea, [contenteditabl
 .diff-cell { flex: 1 1 50%; min-width: 0; display: flex; }
 .diff-cell + .diff-cell { border-left: 1px solid var(--sb-border); }
 .diff-cell.empty { background: var(--sb-code-bg); }
-.diff.split .diff-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.diff.split .diff-text, .diff.wrap .diff-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .diff.split { min-width: 0; }
 .diff-thread { position: sticky; left: 0; width: 100cqw; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 10px 74px; background: var(--sb-bg); border-top: 1px solid var(--sb-border); border-bottom: 1px solid var(--sb-border); font-family: var(--font-sans); }
 .diff-bar { display: flex; gap: 16px; padding: 6px 12px; border-top: 1px solid var(--sb-border); background: var(--sb-code-bg); font-family: var(--font-sans); font-size: var(--text-ui); font-weight: 500; }

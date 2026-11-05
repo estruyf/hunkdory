@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { shellEnv, which } from './shellEnv.ts';
 import * as g from './git.ts';
 import { findRefs } from '../shared/issueRefs.ts';
-import type { AgentChoice, CheckItem, GitHubEvent, GitHubFeedback, GitHubReview, GitHubThread, IssueRef, IssueRefs, PrReview, PullRequest } from '../shared/types.ts';
+import type { AgentChoice, BehaviourChange, ChangeDiagram, CheckItem, Dependent, GitHubEvent, GitHubFeedback, GitHubReview, GitHubThread, IssueRef, IssueRefs, PrReview, PullRequest, RequestedItem, TryItStep } from '../shared/types.ts';
 
 const run = promisify(execFile);
 
@@ -441,20 +441,54 @@ const DATA = /<!-- reviewer:data:([A-Za-z0-9+/=]+) -->/;
 /** Text that ends like a sentence, so the next one doesn't run into it. */
 const sentence = (s: string) => (/[.!?:]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`);
 
+const REQUEST_STATUS = { done: 'Code found', partly: 'Partly', missing: 'Not found' } as const;
+
+/** A diagram as a Mermaid chart, which GitHub draws. Labels are quoted, so only a quote or a line break can break out of one. */
+function mermaid(d: Pick<ChangeDiagram, 'nodes' | 'edges'>): string[] {
+  const quote = (s: string) => `"${s.replace(/\s+/g, ' ').replace(/"/g, '#quot;')}"`;
+  const ids = new Map(d.nodes.map((n, i) => [n.id, `n${i}`]));
+  return [
+    '```mermaid',
+    'flowchart TD',
+    ...d.nodes.map((n) => `  ${ids.get(n.id)}[${quote(n.unchanged ? `${n.label} (no changes)` : n.label)}]`),
+    ...d.edges.map((e) => `  ${ids.get(e.from)} -->${e.label ? `|${quote(e.label)}|` : ''} ${ids.get(e.to)}`),
+    '```',
+  ];
+}
+
 /** A walkthrough as a PR comment people can read, with the data for other Hunkdory users hidden at the end. Pure. */
 export function walkthroughComment(
-  wt: { title?: string; intent?: string; beforeApproving?: string[]; fromSession?: boolean; chapters: { title: string; why?: string; risk?: string; checks?: string[]; outsideTask?: boolean; files?: string[]; choices?: AgentChoice[] }[] },
+  wt: {
+    title?: string;
+    intent?: string;
+    background?: string | null;
+    requested?: { item: string; status: RequestedItem['status']; note: string | null; steps: number[] }[];
+    tryIt?: TryItStep[];
+    diagram?: ChangeDiagram | null;
+    beforeApproving?: string[];
+    fromSession?: boolean;
+    chapters: { title: string; why?: string; risk?: string; checks?: string[]; outsideTask?: boolean; files?: string[]; choices?: AgentChoice[]; behaviour?: BehaviourChange | null; dependents?: Dependent[] }[];
+  },
   data: unknown
 ): string {
   const n = wt.chapters.length;
   const lines = [MARK, '## Review walkthrough', '', wt.intent ?? '', ''];
+  if (wt.background) lines.push(`**To know first:** ${wt.background}`, '');
   if (wt.beforeApproving?.length) lines.push('### Before approving', '', ...wt.beforeApproving.map((l) => `- ${l}`), '');
+  if (wt.requested?.length) {
+    const steps = (s: number[]) => (s.length ? ` (step${s.length > 1 ? 's' : ''} ${s.join(', ')})` : '');
+    lines.push('### What was asked for', '', ...wt.requested.map((r) => `- **${REQUEST_STATUS[r.status]}:** ${r.item}${steps(r.steps)}${r.note ? `. ${sentence(r.note)}` : ''}`), '');
+  }
+  if (wt.diagram) lines.push('### How it fits together', '', ...(wt.diagram.summary ? [wt.diagram.summary, ''] : []), ...mermaid(wt.diagram), '');
+  if (wt.tryIt?.length) lines.push('### How to try it', '', ...wt.tryIt.map((t, i) => `${i + 1}. ${t.do}${t.expect ? ` You should see: ${t.expect}` : ''}`), '');
   lines.push(`<details><summary>${n} step${n === 1 ? '' : 's'}, explained by Hunkdory from the diff${wt.fromSession ? ' and the agent’s session' : ''}</summary>`, '');
   wt.chapters.forEach((c, i) => {
     lines.push(`### ${i + 1}. ${c.title}${c.outsideTask ? ' (outside the task)' : ''}`, '', c.why ?? '');
+    if (c.behaviour) lines.push('', `**Before:** ${c.behaviour.before}`, '', `**Now:** ${c.behaviour.after}`, ...(c.behaviour.example ? ['', `**For example:** ${c.behaviour.example}`] : []));
     if (c.risk) lines.push('', `**Risk:** ${c.risk}`);
     if (c.checks?.length) lines.push('', ...c.checks.map((q) => `- [ ] ${q}`));
     if (c.choices?.length) lines.push('', '**Choices the agent made:**', ...c.choices.map((x) => `- ${[x.question, sentence(x.chose), x.why && sentence(x.why), x.rejected.length && sentence(`Set aside: ${x.rejected.join('; ')}`)].filter(Boolean).join(' ')}`));
+    if (c.dependents?.length) lines.push('', '**Unchanged code that relies on this:**', ...c.dependents.map((d) => `- \`${d.path}\`: ${d.what}`));
     if (c.files?.length) lines.push('', `Files: ${c.files.map((f) => `\`${f}\``).join(', ')}`);
     lines.push('');
   });

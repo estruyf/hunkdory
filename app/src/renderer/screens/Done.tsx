@@ -11,6 +11,7 @@ import { Notice } from '../components/ui/Notice.tsx';
 import { Pill } from '../components/ui/Pill.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { matches } from '../lib/shortcuts.ts';
+import { useTabActive } from '../state/tabPane.ts';
 import { formatDuration, suggestedOrder } from '../../shared/order.ts';
 import type { FinishResult, InboxItem, ReviewData, StackEntry } from '../../shared/types.ts';
 
@@ -40,7 +41,9 @@ export function Done({ go, projectId, branch, result, stack }: { go: Go; project
   const heading = kind === 'send-back' && decision?.github ? 'Sent back to Copilot' : decision?.commit ? 'Committed' : HEADINGS[kind];
 
   // ⌘↵ reviews the next branch.
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (showLog || !(stackNext || next) || !matches(e, 'done.next')) return;
       e.preventDefault();

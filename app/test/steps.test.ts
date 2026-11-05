@@ -5,7 +5,7 @@ import { join } from 'node:path';
 // The real wtv engine on its own "sneaky agent" fixture repo.
 import { buildFixture } from '../../tools/wtv/test/fixture.mjs';
 import { normalizeWalkthrough, skeleton, verify } from '../../tools/wtv/src/verify.mjs';
-import { attention, buildSteps, diffLines, estimateMinutes, rangeText } from '../src/main/steps.ts';
+import { attention, buildSteps, diffLines, estimateMinutes, overview, rangeText } from '../src/main/steps.ts';
 import { carryReviewed, isReviewed, markHunk, orderSteps } from '../src/shared/order.ts';
 import type { Step } from '../src/shared/types.ts';
 import { sendBackPrompt } from '../src/main/actions.ts';
@@ -218,6 +218,57 @@ test("a chapter's choices reach its step, and malformed ones are dropped", () =>
   const steps = buildSteps(fixture((wt) => (wt.chapters[0].choices = [choice, { question: 'No answer' }, 'nonsense', { question: 'Bare', chose: 'This.' }])).r, 'agent');
   assert.deepEqual(steps[0].choices, [choice, { question: 'Bare', chose: 'This.', why: null, rejected: [] }]);
   assert.deepEqual(steps[1].choices, []);
+});
+
+test("a chapter's behaviour change and dependents reach its step", () => {
+  const steps = buildSteps(
+    fixture((wt) => {
+      wt.chapters[0].behaviour = { before: 'One failure ended the sync.', after: 'It retries three times.' };
+      wt.chapters[0].dependents = [{ path: 'nowhere.js', what: 'Made up, so wtv drops it.' }];
+    }).r,
+    'agent'
+  );
+  assert.deepEqual(steps[0].behaviour, { before: 'One failure ended the sync.', after: 'It retries three times.', example: null });
+  assert.deepEqual(steps[0].dependents, []);
+  assert.equal(steps[1].behaviour, null);
+  assert.equal(steps.at(-1)!.behaviour, null, 'a step without a chapter has none');
+});
+
+test('what was asked for and the diagram point at steps, and a chapter comes first in them', () => {
+  const { r } = fixture((wt) => {
+    Object.assign(wt, {
+      background: 'Sync pushes items one by one.',
+      requested: [
+        { item: 'Retry pushes', status: 'done', chapters: ['Use retry in sync', 'Retry helper'] },
+        { item: 'A setting for attempts', status: 'missing', note: 'Attempts are fixed at 3.' },
+      ],
+      tryIt: [{ do: 'Run the tests' }],
+      diagram: {
+        nodes: [
+          { id: 'sync', label: 'Sync', files: ['src/sync.js'] },
+          { id: 'retry', label: 'Retry', files: ['src/retry.js'] },
+          { id: 'test', label: 'Sync test', files: ['test/sync.test.js'] },
+        ],
+        edges: [{ from: 'test', to: 'sync' }, { from: 'sync', to: 'retry' }],
+      },
+    });
+  });
+  const steps = buildSteps(r, 'agent');
+  const o = overview(r, steps);
+  assert.equal(o.background, 'Sync pushes items one by one.');
+  assert.deepEqual(o.tryIt, [{ do: 'Run the tests', expect: null }]);
+  assert.deepEqual(o.requested[0], { item: 'Retry pushes', status: 'done', note: null, stepKeys: [steps[1].key, steps[0].key] });
+  assert.deepEqual(o.requested[1].stepKeys, []);
+  const stepsOf = (id: string) => o.diagram!.nodes.find((n) => n.id === id)!.stepKeys;
+  assert.deepEqual(stepsOf('sync'), [steps[1].key]);
+  assert.deepEqual(stepsOf('test'), [steps.find((s) => s.files.includes('test/sync.test.js'))!.key], 'a step outside the walkthrough counts too');
+});
+
+test('something asked for and not found needs a decision', () => {
+  const { r } = fixture((wt) => Object.assign(wt, { requested: [{ item: 'A setting for attempts', status: 'missing', note: 'Attempts are fixed at 3.' }, { item: 'Retry', status: 'done', chapters: ['Retry helper'] }] }));
+  const steps = buildSteps(r, 'agent');
+  const flags = attention(r, steps, 'agent').filter((f) => f.title === 'Asked for, but not found');
+  assert.deepEqual(flags, [{ severity: 'medium', title: 'Asked for, but not found', detail: 'A setting for attempts: Attempts are fixed at 3.', stepKey: null }]);
 });
 
 test("a chapter's risk text stays with the step, unless it became the step's only question", () => {

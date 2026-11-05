@@ -10,6 +10,7 @@ import { Radio, RadioGroup } from '../components/ui/Radio.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { FIELD, TEXTAREA } from '../components/ui/field.ts';
 import { matches } from '../lib/shortcuts.ts';
+import { useOnReturn, useTabActive } from '../state/tabPane.ts';
 import { ReviewError } from './Review.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { PrLink } from '../components/github.tsx';
@@ -26,6 +27,7 @@ const EVENTS: { id: GitHubEvent; title: string }[] = [
 
 export function Finish({ go, projectId, branch }: { go: Go; projectId: string; branch: string }) {
   const loaded = useAsync(() => window.api.loadReview(projectId, branch), [projectId, branch]);
+  useOnReturn(loaded.reload);
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
   if (!loaded.value) return <LoadingPage label="Reading the branch…" detail={branch} />;
   return <FinishForm go={go} data={loaded.value.data} state={loaded.value.state} />;
@@ -165,6 +167,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   };
 
   // 1 to 4 pick an option, ⌘↵ does it, Esc keeps reviewing: the registry's `finish.*` keys.
+  const onScreen = useTabActive();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (matches(e, 'finish.submit')) {
@@ -184,7 +187,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
         choose(o.id);
       }
     };
-    window.addEventListener('keydown', onKey);
+    if (onScreen) window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 

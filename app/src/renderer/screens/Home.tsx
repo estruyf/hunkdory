@@ -18,6 +18,7 @@ import type { PeopleFilter } from '../../shared/people.ts';
 import { matches } from '../lib/shortcuts.ts';
 import { useBranches } from '../state/branches.ts';
 import { openSettings, useNav } from '../state/nav.ts';
+import { useTabActive } from '../state/tabPane.ts';
 import type { Project, ProjectScan } from '../../shared/types.ts';
 
 const SEARCH_ID = 'inbox-search';
@@ -31,7 +32,8 @@ export function focusInboxSearch() {
   let tries = 20;
   const focus = () => {
     const input = document.getElementById(SEARCH_ID) as HTMLInputElement | null;
-    if (input) {
+    // In the inbox's tab, it's only there to focus once that tab is on screen.
+    if (input?.getClientRects().length) {
       input.focus();
       input.select();
     } else if (tries-- > 0) setTimeout(focus, 25);
@@ -70,7 +72,9 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
     if (initialProject) data.setProject(initialProject);
   }, []);
 
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!first || !matches(e, 'home.open')) return;
       e.preventDefault();

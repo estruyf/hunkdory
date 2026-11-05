@@ -49,6 +49,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
   // The same prefs the review screens keep when you change them in place.
   const [mode, setMode] = usePref<DiffMode>('diff-mode', 'unified');
   const [ignoreSpace, setIgnoreSpace] = usePref<boolean>('diff-ignore-space', false);
+  const [wrap, setWrap] = usePref<boolean>('diff-wrap', false);
   const [showContext, setShowContext] = usePref<boolean>('walkthrough-context', true);
   const [order, setOrder] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
   const [howItWorks, setHowItWorks] = usePref<boolean>('plan-how-it-works', true);
@@ -165,6 +166,9 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
             </Row>
             <Checkbox checked={ignoreSpace} onChange={setIgnoreSpace}>
               Hide whitespace changes in diffs
+            </Checkbox>
+            <Checkbox checked={wrap} onChange={setWrap}>
+              Wrap long lines in unified diffs
             </Checkbox>
             <Checkbox checked={showContext} onChange={setShowContext}>
               Show the Context panel next to a step when the window is wide enough

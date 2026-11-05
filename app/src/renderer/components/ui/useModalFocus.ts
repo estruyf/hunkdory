@@ -1,4 +1,5 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useTabActive } from '../../state/tabPane.ts';
 
 // Elements taken out of the Tab order (tabindex="-1", such as rows driven by arrow keys) don't count.
 const FOCUSABLE = ['button:not(:disabled)', '[href]', 'input:not(:disabled)', 'textarea:not(:disabled)', 'select:not(:disabled)', '[tabindex]', '[contenteditable="true"]'].map((s) => `${s}:not([tabindex="-1"])`).join(', ');
@@ -52,6 +53,8 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>) {
   // from the palette renders while the palette is still open, so its opener is the palette's field,
   // gone by the time the dialog closes: the palette's own opener (the message box) is next in line.
   const [returnTo] = useState(returnTargets);
+  const onScreen = useRef(true);
+  onScreen.current = useTabActive();
 
   useEffect(() => {
     const root = ref.current;
@@ -61,7 +64,7 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>) {
     stack.push({ root, returnTo });
     window.dispatchEvent(new CustomEvent<HTMLElement>(MODAL_OPENED_EVENT, { detail: root }));
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab' || event.defaultPrevented || !isTopModal(root)) return;
+      if (!onScreen.current || event.key !== 'Tab' || event.defaultPrevented || !isTopModal(root)) return;
       const items = focusableIn(root);
       if (items.length === 0) {
         event.preventDefault();

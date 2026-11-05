@@ -10,6 +10,8 @@ declare global {
       onWalkthroughChanged(fn: (job: WalkthroughJob) => void): () => void;
       /** Clicked "Walkthrough ready": open that branch. */
       onOpenBranch(fn: (to: { projectId: string; branch: string }) => void): () => void;
+      /** ⌘W: the page's to answer, as it knows which tab is on screen. */
+      onCloseTab(fn: () => void): () => void;
       onNavigate(fn: (dir: 'back' | 'forward') => void): () => void;
       onReviewStateChanged(fn: (review: ReviewState) => void): () => void;
     };

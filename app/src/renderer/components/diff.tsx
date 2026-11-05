@@ -51,6 +51,8 @@ interface Props {
   showNote?: boolean;
   mode?: DiffMode;
   ignoreSpace?: boolean;
+  /** Long lines wrap instead of scrolling sideways. Side by side always wraps. */
+  wrap?: boolean;
   /** Line comments on this hunk. */
   comments?: Comment[];
   /** Saves a line comment; an empty body removes it. Without it, lines can't be commented on. */
@@ -94,7 +96,7 @@ function PathLabel({ path }: { path: string }) {
   );
 }
 
-export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace = false, comments = [], onComment, loadLines, collapsed, badge, noteBy = 'agent', extraAt, focus, reviewed = false, onReviewed, startOpen = false, threads = 0 }: Props) {
+export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace = false, wrap = false, comments = [], onComment, loadLines, collapsed, badge, noteBy = 'agent', extraAt, focus, reviewed = false, onReviewed, startOpen = false, threads = 0 }: Props) {
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState(!collapsed);
   const [wantShut, setShut] = useState(reviewed && !startOpen);
@@ -227,7 +229,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
     );
   } else {
     body = (
-      <div className="diff">
+      <div className={wrap ? 'diff wrap' : 'diff'}>
         {lines.flatMap((l, i) => {
           const a = anchorOf(l);
           return [

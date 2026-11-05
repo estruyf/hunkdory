@@ -12,10 +12,10 @@ import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './s
 import { belongsTo as copilotBelongsTo, readCopilotSessions } from './sessions/copilot.ts';
 import * as gh from './github.ts';
 import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback, type BranchSessions } from './match.ts';
-import { attention, buildSteps, estimateMinutes } from './steps.ts';
+import { attention, buildSteps, estimateMinutes, overview } from './steps.ts';
 import { projectName, toWatch, withProjectName, type Store } from './store.ts';
 import type { GeneratedWalkthroughs } from './writer.ts';
-import type { Summaries, Summary } from './summaries.ts';
+import { asOfNow, type Summaries, type Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
 import { assistantFor } from './assistants/index.ts';
 import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
@@ -930,6 +930,7 @@ export class Projects {
       author: d.match || d.branch.uncommitted ? null : author || null,
       walkthrough: source,
       intent,
+      ...overview(r, steps),
       title,
       prompt,
       session,
@@ -951,6 +952,13 @@ export class Projects {
   private scanning: Promise<InboxScan> | null = null;
   /** The last scan, so one project can be read again without the others. */
   private last: InboxScan | null = null;
+
+  /** The inbox as the last scan left it, even one from an earlier run, to show while a new scan runs. Null with nothing to show: that's not the same as an empty inbox. */
+  cachedInbox(): InboxScan | null {
+    const saved = this.last ?? this.summaries.lastScan;
+    const now = saved && asOfNow(saved, this.store.projects(), (projectId, branch) => this.store.review(projectId, branch));
+    return now?.items.length ? now : null;
+  }
 
   /**
    * Two screens asking at once share one scan. `projectId` reads that project alone and keeps the others as the
@@ -978,6 +986,7 @@ export class Projects {
     scans.splice(at === -1 ? scans.length : at, 0, scan);
     const next = { items: [...last.items.filter((i) => ids.has(i.projectId) && i.projectId !== project.id), ...items].sort(newestFirst), scans, me: last.me };
     this.last = next;
+    this.summaries.rememberScan(next);
     return next;
   }
 
@@ -992,6 +1001,7 @@ export class Projects {
     const items = per.flatMap((r) => r.items);
     items.sort(newestFirst);
     this.last = { items, scans: per.map((r) => r.scan), me: await me };
+    this.summaries.rememberScan(this.last);
     return this.last;
   }
 
@@ -1097,7 +1107,7 @@ export class Projects {
   }
 }
 
-type InboxScan = { items: InboxItem[]; scans: ProjectScan[]; me: string | null };
+export type InboxScan = { items: InboxItem[]; scans: ProjectScan[]; me: string | null };
 
 const newestFirst = (a: InboxItem, b: InboxItem) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
 

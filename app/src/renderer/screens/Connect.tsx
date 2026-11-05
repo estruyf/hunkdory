@@ -12,6 +12,7 @@ import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { FIELD, FIELD_LG } from '../components/ui/field.ts';
 import { matches } from '../lib/shortcuts.ts';
+import { useTabActive } from '../state/tabPane.ts';
 import { FoundOnThisMac } from '../components/found.tsx';
 import type { AssistantChoice, Project, RepoCheck, Watch } from '../../shared/types.ts';
 
@@ -150,7 +151,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
           : null;
 
   // ⌘↵ connects the project or saves its settings.
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!matches(e, 'connect.save') || blocked || saving) return;
       e.preventDefault();

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeSearchResult, ReviewData } from '../../shared/types.ts';
 import { Search, X } from 'lucide-react';
 import { matches } from '../lib/shortcuts.ts';
+import { useTabActive } from '../state/tabPane.ts';
 import { cleanError, plural } from './ui.tsx';
 import { Button } from './ui/Button.tsx';
 import { Pill } from './ui/Pill.tsx';
@@ -44,7 +45,9 @@ export function useCodeSearch(data: ReviewData, onShowStep: (stepKey: string, at
     setOpen(true);
   };
 
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!matches(e, 'find')) return;
       e.preventDefault();
@@ -52,7 +55,7 @@ export function useCodeSearch(data: ReviewData, onShowStep: (stepKey: string, at
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [onScreen]);
 
   const button = (
     <Button

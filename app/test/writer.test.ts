@@ -167,6 +167,35 @@ test("the agent's messages go in as material, and choices are only asked for whe
   assert.ok('choices' in WALKTHROUGH_SCHEMA.properties.chapters.items.properties);
 });
 
+test('the fields that help you understand a change are optional, and what was asked for is only asked with a request', () => {
+  assert.deepEqual(WALKTHROUGH_SCHEMA.required, ['title', 'intent', 'chapters']);
+  for (const field of ['background', 'requested', 'tryIt', 'diagram']) assert.ok(field in WALKTHROUGH_SCHEMA.properties, field);
+  for (const field of ['behaviour', 'dependents']) assert.ok(field in WALKTHROUGH_SCHEMA.properties.chapters.items.properties, field);
+
+  const withRequest = writerPrompt(input());
+  assert.match(withRequest, /`requested` lists each separate thing/);
+  assert.match(withRequest, /`done` means you found code for it, not that it works/);
+  assert.match(withRequest, /a missing field is better than a wrong one/);
+  assert.match(withRequest, /leave out any arrow you're guessing/);
+
+  const without = writerPrompt(input({ pr: { number: 1, title: 'x', body: '  ' }, prompt: null }));
+  assert.match(without, /no stated request, so leave `requested` out/);
+  assert.match(without, /no stated request, so leave `outsideTask` out/);
+});
+
+test('an issue the PR fixes counts as part of the request', () => {
+  const p = writerPrompt(input({ pr: { number: 1, title: 'x', body: '' }, issues: [{ number: 7, title: 'Sync fails', body: 'Retry failed pushes.' }] }));
+  assert.match(p, /## Issue #7, which this fixes: Sync fails\nRetry failed pushes\./);
+  assert.match(p, /`requested` lists each separate thing/);
+  assert.match(p, /Set `outsideTask: true`/);
+});
+
+test('how to try it asks for commands from the repo, and nothing that does damage', () => {
+  const p = writerPrompt(input());
+  assert.match(p, /Use only commands and screens you found in the repo/);
+  assert.match(p, /never include anything that deletes or overwrites data/);
+});
+
 /** A writer on a branch you can rebase. Getting as far as looking up the session means it would run the assistant. */
 function rebasable(stored: object | null, opts: { covers?: boolean } = {}) {
   const generated = new GeneratedWalkthroughs(mkdtempSync(join(tmpdir(), 'hunkdory-writer-')));

@@ -24,8 +24,10 @@ import { answerLine } from '../../shared/comments.ts';
 import { AskPanel, CheckFollowUp, Thread } from '../components/ask.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
+import { StepEffects } from '../components/understand.tsx';
 import { EmptyStepNotice, WalkthroughBar } from '../components/walkthrough.tsx';
 import { StepTraceDialog } from '../components/runLog.tsx';
+import { useOnReturn, useTabActive } from '../state/tabPane.ts';
 import { AgentChoices, AgentTests, AskedFor, CommentBox, LinkedIssues, NO_TEST_HINT, RiskNote, hasLinkedIssues, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
 
@@ -56,6 +58,18 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   // What people said on GitHub, kept here: replying or resolving changes it without reading the branch again.
   const [feedback, setFeedback] = useState(data.github);
   const placed = useMemo(() => placeThreads(feedback?.threads ?? [], data.hunks), [feedback, data.hunks]);
+  // Back on this tab after a while: new replies show right away, and new code is yours to bring in, so nothing moves as you read.
+  const [moved, setMoved] = useState(false);
+  useOnReturn(() => {
+    window.api.loadReview(data.projectId, data.branch).then(
+      ({ data: now }) => {
+        if (now.headSha !== data.headSha || now.dirtyFiles !== data.dirtyFiles) setMoved(true);
+        else setFeedback(now.github);
+      },
+      // It can't be read right now: what's on screen stays, as it would without looking.
+      () => {}
+    );
+  });
   // The question you just answered "Needs a change" or "Not sure", so its box takes the focus.
   const [answered, setAnswered] = useState<{ stepKey: string; index: number } | null>(null);
   const [commenting, setCommenting] = useState(false);
@@ -65,6 +79,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   const [showContext, setShowContext] = usePref<boolean>('walkthrough-context', true);
   const [mode, setMode] = usePref<DiffMode>('diff-mode', 'unified');
   const [ignoreSpace, setIgnoreSpace] = usePref<boolean>('diff-ignore-space', false);
+  const [wrap, setWrap] = usePref<boolean>('diff-wrap', false);
   // Context steps aside when the diff needs the room: side by side, or a narrow window. You can still open it.
   const wide = useMediaQuery('(min-width: 1400px)');
   const autoHide = mode === 'split' || !wide;
@@ -136,7 +151,9 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
 
   // The review's keys, from the registry: j and k move, r says it looks good (or gives a decision its main
   // answer), n needs a fix, c comments, a asks Claude, s and w change the diff, Esc goes back to the plan.
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       // The dialog has the keys while it's open: Esc closes it instead of leaving for the plan.
       if (!isPlainKey(e) || tracing) return;
@@ -148,6 +165,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
       if (matches(e, 'review.finish')) return run(() => go({ name: 'finish', projectId: data.projectId, branch: data.branch }));
       if (matches(e, 'review.layout')) return run(() => setMode(mode === 'split' ? 'unified' : 'split'));
       if (matches(e, 'review.whitespace')) return run(() => setIgnoreSpace(!ignoreSpace));
+      if (matches(e, 'review.wrap') && mode !== 'split') return run(() => setWrap(!wrap));
       if (skimGroup) {
         if (matches(e, 'review.good')) run(() => keys.current.groupDone());
         return;
@@ -168,12 +186,12 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
 
   const openComment = () => {
     setCommenting(true);
-    setTimeout(() => document.getElementById('feedback')?.focus(), 0);
+    setTimeout(() => (document.querySelector('[data-tab-active] #feedback') as HTMLElement | null)?.focus(), 0);
   };
   const openAsk = () => {
     setAsking(true);
     setTimeout(() => {
-      const box = document.querySelector('[aria-label="Your question or change"]') as HTMLTextAreaElement | null;
+      const box = document.querySelector('[data-tab-active] [aria-label="Your question or change"]') as HTMLTextAreaElement | null;
       box?.focus();
       box?.setSelectionRange(box.value.length, box.value.length);
     }, 0);
@@ -350,6 +368,16 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {header}
       <WalkthroughBar data={data} onSwitch={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, reload: Date.now() })} />
+      {moved && (
+        <div role="status" className="flex shrink-0 items-center gap-2 border-b border-link/30 bg-link/8 px-6 py-1.5 text-meta text-text">
+          <span className="min-w-0 flex-1 truncate">
+            <strong className="font-semibold">This branch changed while you were away.</strong> You're still looking at the diff from when you opened it.
+          </span>
+          <Button size="sm" variant="primary" onClick={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: selKey, decision: dec?.id, group, reload: Date.now() })}>
+            Show the new diff
+          </Button>
+        </div>
+      )}
       {search.panel}
       <div className="flex min-h-0 flex-1">
         <div ref={scroller} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -399,7 +427,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
           <h1 className="font-mono text-hero font-semibold break-all">{skimGroup.name}</h1>
           <p className="text-body text-muted">Everything low risk in this folder, on one page. Scroll through, comment on a line where something looks off, then mark the whole folder reviewed.</p>
         </div>
-        <DiffToolbar mode={mode} setMode={setMode} ignoreSpace={ignoreSpace} setIgnoreSpace={setIgnoreSpace} />
+        <DiffToolbar mode={mode} setMode={setMode} ignoreSpace={ignoreSpace} setIgnoreSpace={setIgnoreSpace} wrap={wrap} setWrap={setWrap} />
         {groupSteps.map((x) => (
           <section key={x.key} className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -412,6 +440,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
             </div>
             {x.why && <p className="text-body text-text select-text">{x.why}</p>}
             {traceLink(x)}
+            <StepEffects step={x} />
             {x.riskNote && <RiskNote text={x.riskNote} />}
             {x.choices.length > 0 && <AgentChoices choices={x.choices} by={data.walkthrough} />}
             {x.hunkIds.map((id) => {
@@ -422,6 +451,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
                   hunk={h}
                   mode={mode}
                   ignoreSpace={ignoreSpace}
+                  wrap={wrap}
                   comments={state.comments.filter((c) => c.hunkId === id && c.line)}
                   onComment={(a, body, cid) => patch({ type: 'line-comment', id: cid, stepKey: x.key, hunkId: id, path: h.path, line: a.line, side: a.side, body })}
                   extraAt={threadsAt(id, false)}
@@ -585,6 +615,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
         {traceLink(cur)}
       </div>
 
+      <StepEffects step={cur} />
+
       {cur.riskNote && <RiskNote text={cur.riskNote} />}
 
       {cur.choices.length > 0 && <AgentChoices choices={cur.choices} by={data.walkthrough} />}
@@ -665,13 +697,13 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
               cur.files.map((f) => {
                 const first = cur.hunkIds.find((id) => data.hunks[id]?.path === f);
                 return first ? (
-                  <Pill key={f} tone="muted" className="font-mono" data-tooltip={f} onClick={() => document.getElementById(`hunk-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+                  <Pill key={f} tone="muted" className="font-mono" data-tooltip={f} onClick={() => document.querySelector(`[data-tab-active] [id="hunk-${first}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
                     {f.split('/').pop()}
                   </Pill>
                 ) : null;
               })}
           </span>
-          <DiffToolbar mode={mode} setMode={setMode} ignoreSpace={ignoreSpace} setIgnoreSpace={setIgnoreSpace} />
+          <DiffToolbar mode={mode} setMode={setMode} ignoreSpace={ignoreSpace} setIgnoreSpace={setIgnoreSpace} wrap={wrap} setWrap={setWrap} />
         </div>
       )}
 
@@ -685,6 +717,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
               hunk={h}
               mode={mode}
               ignoreSpace={ignoreSpace}
+              wrap={wrap}
               comments={state.comments.filter((c) => c.hunkId === id && c.line)}
               onComment={lineComment(id, h.path)}
               extraAt={threadsAt(id, true)}
@@ -796,8 +829,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   );
 }
 
-/** Unified or side by side (S), and whether whitespace changes show (W). */
-function DiffToolbar({ mode, setMode, ignoreSpace, setIgnoreSpace }: { mode: DiffMode; setMode(m: DiffMode): void; ignoreSpace: boolean; setIgnoreSpace(on: boolean): void }) {
+/** Unified or side by side (S), whether whitespace changes show (W), and whether long lines wrap (Z). */
+function DiffToolbar({ mode, setMode, ignoreSpace, setIgnoreSpace, wrap, setWrap }: { mode: DiffMode; setMode(m: DiffMode): void; ignoreSpace: boolean; setIgnoreSpace(on: boolean): void; wrap: boolean; setWrap(on: boolean): void }) {
   return (
     <span className="flex items-center gap-3">
       <SegmentedControl<DiffMode>
@@ -813,6 +846,9 @@ function DiffToolbar({ mode, setMode, ignoreSpace, setIgnoreSpace }: { mode: Dif
       />
       <Checkbox checked={ignoreSpace} onChange={setIgnoreSpace} tooltip="Hide whitespace changes (W)">
         Hide whitespace
+      </Checkbox>
+      <Checkbox checked={wrap || mode === 'split'} onChange={setWrap} tooltip="Wrap long lines (Z)" disabledReason={mode === 'split' ? 'Side by side always wraps long lines' : null}>
+        Wrap lines
       </Checkbox>
     </span>
   );

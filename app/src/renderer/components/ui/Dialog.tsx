@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useEffect, useId, useRef, type HTMLAttributes, type ReactNode, type RefObject } from 'react';
+import { useTabActive } from '../../state/tabPane.ts';
 import { Button } from './Button.tsx';
 import { dialogKeyAction } from './dialogKeys.ts';
 import { isTopModal, useModalFocus } from './useModalFocus.ts';
@@ -76,7 +77,10 @@ export function Dialog({
   }, [initialFocus]);
   useModalFocus(ref);
 
+  // A notification can open another tab under a dialog: it waits there, and leaves the keys alone until you're back.
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (event: KeyboardEvent) => {
       const action = dialogKeyAction(event, {
         topmost: isTopModal(ref.current),
@@ -91,7 +95,7 @@ export function Dialog({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [onScreen]);
 
   // A confirmation reads as one card; larger dialogs separate the header and footer from what scrolls.
   const divided = width !== 'sm';

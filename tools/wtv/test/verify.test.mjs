@@ -129,8 +129,132 @@ test('walkthroughs without the new fields still load', () => {
     assert.deepEqual(ch.checks, []);
     assert.equal(ch.outsideTask, false);
     assert.deepEqual(ch.notes, []);
+    assert.equal(ch.behaviour, null);
+    assert.deepEqual(ch.dependents, []);
   }
   assert.ok(!r.findings.some((f) => f.code === 'stray-note'));
+  assert.equal(r.background, null);
+  assert.deepEqual(r.requested, []);
+  assert.deepEqual(r.tryIt, []);
+  assert.equal(r.diagram, null);
+});
+
+/** The fixture with its leftover script committed: the only change is that file, and everything else in the branch is unchanged. */
+function oneFileChange() {
+  const { dir, head } = buildFixture();
+  execFileSync('git', ['add', 'scratch.js'], { cwd: dir });
+  execFileSync('git', ['commit', '-qm', 'Add the script'], { cwd: dir });
+  const now = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+  const check = (wt) => verify({ cwd: dir, base: head, head: now, walkthrough: normalizeWalkthrough({ intent: 'x', ...wt, chapters: wt.chapters ?? [{ title: 'Script', why: 'y', hunks: ['scratch.js'] }] }) });
+  return { check };
+}
+
+test('a behaviour change needs a before and an after', () => {
+  const { check } = oneFileChange();
+  const behaviour = (b) => check({ chapters: [{ title: 'Script', why: 'y', hunks: ['scratch.js'], behaviour: b }] }).chapters[0].behaviour;
+  assert.deepEqual(behaviour({ before: 'Nothing.', after: 'It logs.', example: 'Prints 1.' }), { before: 'Nothing.', after: 'It logs.', example: 'Prints 1.' });
+  assert.deepEqual(behaviour({ before: 'Nothing.', after: 'It logs.' }), { before: 'Nothing.', after: 'It logs.', example: null });
+  assert.equal(behaviour({ after: 'It logs.' }), null);
+  assert.equal(behaviour('nonsense'), null);
+});
+
+test('only files outside the diff that are in the branch count as relying on a change', () => {
+  const { check } = oneFileChange();
+  const dependents = [
+    { path: 'src/sync.js', what: 'Uses it.' },
+    { path: 'scratch.js', what: 'In the diff.' },
+    { path: 'src/nowhere.js', what: 'Made up.' },
+    { path: '../outside.js', what: 'Out of the repo.' },
+    { path: '/etc/hosts', what: 'Absolute.' },
+    { path: 'test/sync.test.js' },
+    'nonsense',
+  ];
+  const r = check({ chapters: [{ title: 'Script', why: 'y', hunks: ['scratch.js'], dependents }] });
+  assert.deepEqual(r.chapters[0].dependents, [{ path: 'src/sync.js', what: 'Uses it.' }]);
+  const many = Array.from({ length: 8 }, () => ({ path: 'src/sync.js', what: 'Uses it.' }));
+  assert.equal(check({ chapters: [{ title: 'Script', why: 'y', hunks: ['scratch.js'], dependents: many }] }).chapters[0].dependents.length, 5);
+});
+
+test('files in the working tree count when there is no head commit', () => {
+  const { dir, head } = buildFixture();
+  const r = verify({ cwd: dir, base: head, walkthrough: normalizeWalkthrough({ chapters: [{ title: 'Script', hunks: ['scratch.js'], dependents: [{ path: 'src/sync.js', what: 'Uses it.' }, { path: 'src', what: 'A folder.' }, { path: 'scratch.js', what: 'Untracked, but in the diff.' }] }] }) });
+  assert.deepEqual(r.chapters[0].dependents.map((d) => d.path), ['src/sync.js']);
+});
+
+test('saying the change has what was asked needs a chapter that has it', () => {
+  const { check } = oneFileChange();
+  const requested = [
+    { item: 'A script', status: 'done', chapters: ['Script'] },
+    { item: 'Half a thing', status: 'partly', chapters: ['Script', 'Script'], note: 'No flags yet.' },
+    { item: 'No proof', status: 'done', chapters: ['Not a chapter'] },
+    { item: 'Also no proof', status: 'partly' },
+    { item: 'Docs', status: 'missing', chapters: ['Script'], note: 'Looked in README.' },
+    { item: 'A made-up status', status: 'finished', chapters: ['Script'] },
+    'nonsense',
+  ];
+  assert.deepEqual(check({ requested }).requested, [
+    { item: 'A script', status: 'done', chapters: [0], note: null },
+    { item: 'Half a thing', status: 'partly', chapters: [0], note: 'No flags yet.' },
+    { item: 'Docs', status: 'missing', chapters: [], note: 'Looked in README.' },
+  ]);
+});
+
+test('background and how to try it pass through, without malformed steps', () => {
+  const { check } = oneFileChange();
+  const r = check({ background: 'Sync pushes one item at a time.', tryIt: [{ do: 'Run `npm test`', expect: 'It passes.' }, { do: 'Open it' }, { expect: 'No action.' }, 'nonsense'] });
+  assert.equal(r.background, 'Sync pushes one item at a time.');
+  assert.deepEqual(r.tryIt, [{ do: 'Run `npm test`', expect: 'It passes.' }, { do: 'Open it', expect: null }]);
+  assert.equal(check({ background: '   ' }).background, null);
+});
+
+const DIAGRAM = {
+  summary: 'A script that drives sync.',
+  nodes: [
+    { id: 'script', label: 'Debug script', kind: 'Tool', files: ['scratch.js'] },
+    { id: 'sync', label: 'Sync', kind: 'Core', files: ['src/sync.js'], unchanged: true },
+    { id: 'retry', label: 'Retry helper', files: ['src/retry.js'], unchanged: true },
+  ],
+  edges: [
+    { from: 'script', to: 'sync', label: 'starts a sync' },
+    { from: 'sync', to: 'retry' },
+  ],
+};
+
+test('a diagram the diff backs up comes through whole', () => {
+  const { check } = oneFileChange();
+  const { diagram } = check({ diagram: DIAGRAM });
+  assert.equal(diagram.summary, 'A script that drives sync.');
+  assert.deepEqual(diagram.nodes.map((n) => [n.id, n.unchanged]), [['script', false], ['sync', true], ['retry', true]]);
+  assert.deepEqual(diagram.edges[1], { from: 'sync', to: 'retry', label: null });
+});
+
+test('a box goes when its files contradict the diff, and so do its arrows', () => {
+  const { check } = oneFileChange();
+  const extra = (node) => check({ diagram: { ...DIAGRAM, nodes: [...DIAGRAM.nodes, node], edges: [...DIAGRAM.edges, { from: 'script', to: node.id }] } }).diagram;
+  const ids = (d) => d.nodes.map((n) => n.id);
+  for (const bad of [
+    { id: 'x', label: 'Says changed, is not', files: ['src/sync.js'] },
+    { id: 'x', label: 'Half changed', files: ['scratch.js', 'src/sync.js'] },
+    { id: 'x', label: 'Says unchanged, is in the diff', files: ['scratch.js'], unchanged: true },
+    { id: 'x', label: 'Not in the branch', files: ['src/nowhere.js'], unchanged: true },
+    { id: 'x', label: 'No files', files: [] },
+  ]) {
+    const d = extra(bad);
+    assert.deepEqual(ids(d), ['script', 'sync', 'retry'], bad.label);
+    assert.ok(!d.edges.some((e) => e.to === 'x'), bad.label);
+  }
+});
+
+test('too little left, or too much, means no diagram', () => {
+  const { check } = oneFileChange();
+  const [script, sync, retry] = DIAGRAM.nodes;
+  assert.equal(check({ diagram: { ...DIAGRAM, nodes: [script, sync, { ...retry, files: ['src/nowhere.js'] }] } }).diagram, null, 'two boxes left');
+  assert.equal(check({ diagram: { ...DIAGRAM, edges: [] } }).diagram, null, 'no arrows, and an unchanged box means nothing without one');
+  assert.equal(check({ diagram: { ...DIAGRAM, edges: [{ from: 'script', to: 'nowhere' }, { from: 'sync', to: 'sync' }] } }).diagram, null, 'arrows that lead nowhere');
+  assert.equal(check({ diagram: { nodes: [{ ...sync, id: 'a' }, { ...sync, id: 'b' }, { ...sync, id: 'c' }], edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }] } }).diagram, null, 'nothing in it changed');
+  const crowd = Array.from({ length: 11 }, (_, i) => ({ ...sync, id: `n${i}` }));
+  assert.equal(check({ diagram: { nodes: [script, ...crowd], edges: crowd.map((n) => ({ from: 'script', to: n.id })) } }).diagram, null, 'too many boxes to read');
+  assert.equal(check({ diagram: 'nonsense' }).diagram, null);
 });
 
 test('normalizeWalkthrough accepts a parsed object and rejects bad input', () => {

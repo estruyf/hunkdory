@@ -1,6 +1,6 @@
 // The review plan, and the way into a review: decide, read closely, skim.
 // Opening a branch lands here. One button starts (or continues) the review where it makes sense.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
 import { Crumbs, LoadingPage, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
@@ -14,14 +14,16 @@ import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { matches } from '../lib/shortcuts.ts';
+import { useOnReturn, useTabActive } from '../state/tabPane.ts';
 import { PrLink, PushToPrNotice, StackBar, checksText, checksTone } from '../components/github.tsx';
 import { GitHubReviews } from '../components/githubThreads.tsx';
 import { placeThreads } from '../../shared/threads.ts';
 import { MessageSquare } from 'lucide-react';
 import { AgentTests, AskedFor, LinkedIssues, NO_TEST_HINT, ReviewError, hasLinkedIssues } from './Review.tsx';
-import { IssueRefsContext } from '../components/markdown.tsx';
+import { IssueRefsContext, Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import type { LineRef } from '../components/diff.tsx';
+import { ChangeOverview, RequestedList } from '../components/understand.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { OUTSIDE_HINT, RISK_LABEL, formatDuration, isReviewed, timeAgo, tooBig } from '../../shared/order.ts';
@@ -37,7 +39,13 @@ const ORDERS: { id: ReviewOrder; label: string }[] = [
 export function PlanScreen({ go, projectId, branch, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }) {
   // A new walkthrough changes the steps: `version` reads the branch again.
   const [version, setVersion] = useState(0);
-  const loaded = useAsync(() => (preloaded && version === 0 ? Promise.resolve(preloaded) : window.api.loadReview(projectId, branch)), [projectId, branch, version]);
+  // Back on this tab after a while: read the branch again, in place. Someone may have pushed or replied since.
+  const away = useRef(false);
+  const loaded = useAsync(() => (preloaded && version === 0 && !away.current ? Promise.resolve(preloaded) : window.api.loadReview(projectId, branch)), [projectId, branch, version]);
+  useOnReturn(() => {
+    away.current = true;
+    loaded.reload();
+  });
   const value = loaded.value ?? (version === 0 ? preloaded : undefined);
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
   if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
@@ -241,7 +249,9 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
   })();
 
   // ⌘↵ starts or continues, ⌘⇧↵ finishes: the registry's `plan.start` and `review.finish`.
+  const onScreen = useTabActive();
   useEffect(() => {
+    if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!isPlainKey(e)) return;
       if (matches(e, 'plan.start')) {
@@ -388,6 +398,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
 
           <HowItWorks />
           <RequestCard data={data} onOpen={open} />
+          <ChangeOverview data={data} onOpen={open} />
           {feedback && (
             <GitHubReviews
               data={data}
@@ -546,9 +557,11 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
   );
   return (
     <section aria-label="The change" className="grid grid-cols-[minmax(96px,max-content)_1fr] gap-x-4 gap-y-3 rounded-xl border border-border bg-card p-4">
+      {data.background && row('To know first', <div className="select-text"><Markdown text={data.background} /></div>)}
       {row(askedLabel(data), <AskedFor data={data} clamp={240} />)}
       {hasLinkedIssues(data) && row('Linked issues', <LinkedIssues data={data} clamp={240} />)}
       {row('It did', data.intent ? <span className="select-text">{data.intent}</span> : <span className="text-muted">{data.walkthrough === 'skeleton' ? 'No walkthrough yet, so there is no summary: the steps are one per file.' : 'The walkthrough has no summary.'}</span>)}
+      {data.requested.length > 0 && row('Asked vs found', <RequestedList data={data} onOpen={onOpen} />)}
       {row(
         'It also did',
         outside.length ? (

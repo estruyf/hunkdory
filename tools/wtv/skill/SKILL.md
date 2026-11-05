@@ -72,5 +72,18 @@ real diff. Your job is to make the walkthrough complete and honest.
   doesn't cover is reported.
 - **Don't reference things that aren't in the diff.** Refs that match nothing
   fail the check as phantom claims.
+- **Help the reviewer understand it, where you can.** All optional, and a missing
+  field is better than a wrong one:
+  - `background`: how this part of the code works today, in two or three sentences.
+  - `behaviour` on a chapter: `{ "before", "after", "example" }`, when it changes
+    what the app or a caller does.
+  - `dependents` on a chapter: up to 5 `{ "path", "what" }`, files outside the diff
+    that use what it changes.
+  - `requested`: each thing the prompt asked for, as
+    `{ "item", "status": "done" | "partly" | "missing", "chapters": ["Title"], "note" }`.
+  - `tryIt`: up to 5 `{ "do", "expect" }`, using commands that exist in the repo.
+  - `diagram`, when the change crosses at least three parts of the code: 3 to 8
+    `nodes` (`{ "id", "label", "kind", "files", "unchanged" }`) and `edges`
+    (`{ "from", "to", "label" }`). Boxes whose files contradict the diff are dropped.
 - Whitespace-only and lockfile hunks are skipped automatically. You don't need
   to narrate them.

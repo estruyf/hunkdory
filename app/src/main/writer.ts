@@ -72,6 +72,8 @@ export interface WriterInput {
   /** Ref with the changes, or null when the branch is checked out in the folder the run works in. */
   headRef: string | null;
   pr: { number: number; title: string; body: string } | null;
+  /** Issues the PR says it fixes: part of what was asked for. */
+  issues?: { number: number; title: string; body: string }[];
   prompt: string | null;
   /** What was asked and what the agent said while it worked. Null without a session this assistant ran, or with one that's only a guess. */
   agentSession: string | null;
@@ -93,6 +95,57 @@ export const WALKTHROUGH_SCHEMA = {
   properties: {
     title: { type: 'string' },
     intent: { type: 'string' },
+    background: { type: 'string' },
+    requested: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['item', 'status'],
+        properties: {
+          item: { type: 'string' },
+          status: { type: 'string', enum: ['done', 'partly', 'missing'] },
+          chapters: { type: 'array', items: { type: 'string' } },
+          note: { type: 'string' },
+        },
+      },
+    },
+    tryIt: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['do'],
+        properties: { do: { type: 'string' }, expect: { type: 'string' } },
+      },
+    },
+    diagram: {
+      type: 'object',
+      required: ['nodes', 'edges'],
+      properties: {
+        summary: { type: 'string' },
+        nodes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['id', 'label', 'files'],
+            properties: {
+              id: { type: 'string' },
+              label: { type: 'string' },
+              kind: { type: 'string' },
+              files: { type: 'array', items: { type: 'string' } },
+              unchanged: { type: 'boolean' },
+            },
+          },
+        },
+        edges: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['from', 'to'],
+            properties: { from: { type: 'string' }, to: { type: 'string' }, label: { type: 'string' } },
+          },
+        },
+      },
+    },
     chapters: {
       type: 'array',
       items: {
@@ -115,6 +168,19 @@ export const WALKTHROUGH_SCHEMA = {
                 why: { type: 'string' },
                 rejected: { type: 'array', minItems: 1, items: { type: 'string' } },
               },
+            },
+          },
+          behaviour: {
+            type: 'object',
+            required: ['before', 'after'],
+            properties: { before: { type: 'string' }, after: { type: 'string' }, example: { type: 'string' } },
+          },
+          dependents: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['path', 'what'],
+              properties: { path: { type: 'string' }, what: { type: 'string' } },
             },
           },
           hunks: { type: 'array', items: { type: 'string' } },
@@ -163,6 +229,7 @@ export function writerPrompt(input: WriterInput, feedback?: WriterFeedback): str
   ];
   if (input.prompt) lines.push('## What the author asked their agent for', clip(input.prompt.trim(), 4000), '');
   if (input.pr) lines.push(`## Pull request #${input.pr.number}: ${input.pr.title}`, clip(input.pr.body.trim() || '(no description)', 6000), '');
+  for (const issue of input.issues ?? []) lines.push(`## Issue #${issue.number}, which this fixes: ${issue.title}`, clip(issue.body.trim() || '(no description)', 3000), '');
   if (input.agentSession) lines.push('## What the agent said while it worked', 'Oldest first. Use it to say why, and for `choices`. It can be wrong or out of date: the diff decides what the change does.', input.agentSession, '');
   return writerTail(lines, input, feedback);
 }
@@ -186,6 +253,7 @@ export function whereSection(baseSha: string, headRef: string | null): string {
 function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedback): string {
   const listed = input.hunks.filter((h) => h.bucket !== 'noise' && h.bucket !== 'generated');
   const skipped = input.hunks.length - listed.length;
+  const hasRequest = !!(input.prompt || input.pr?.body.trim() || input.issues?.some((i) => i.body.trim()));
   if (input.commits.length) lines.push('## Commits, oldest first', ...input.commits.slice(-60).map((c) => `- ${c}`), '');
   lines.push(
     `## The ${listed.length} hunks to cover`,
@@ -207,7 +275,7 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
     "- `why` says what this part does and why it was needed, in one or two short sentences. You didn't write this code, so ground it in the code, commits and description. When you are inferring, say so (\"Likely to ...\"). Never invent a motive.",
     '- Fill `risk` for chapters with hunks tagged in brackets above: what could break and what to look at.',
     '- `checks` are short questions the reviewer should answer, especially about assumptions in the code.',
-    input.prompt || input.pr?.body.trim()
+    hasRequest
       ? '- Set `outsideTask: true` on a chapter whose changes the request above did not ask for (refactors, config, stray files). Routine upkeep the repo expects with every change, like a package version bump or a changelog entry, is not outside the task.'
       : '- There is no stated request, so leave `outsideTask` out.',
     input.agentSession
@@ -217,7 +285,18 @@ function writerTail(lines: string[], input: WriterInput, feedback?: WriterFeedba
     '- `title` names the change like a pull request title: under 70 characters, no full stop.',
     "- `intent` is what the reviewer reads first: one or two short sentences on what the branch does and why, that someone who hasn't seen the code understands. Not a list of everything in it.",
     '',
-    "Write from the diff above. Look further only where a hunk makes no sense without its surroundings, a few reads at most: you explain this change, you don't audit the code around it. Then return the walkthrough as structured output. Do not change any files."
+    '## What else helps the reviewer understand it',
+    'All of this is optional. Leave out anything you are not sure of: a missing field is better than a wrong one.',
+    '- `background`: two or three short sentences on how this part of the code works today, without this change, so someone new can follow the story. Only what you read in the code. Leave it out when the change needs no introduction.',
+    '- `behaviour` on a chapter that changes what the app or a caller does: what happened `before`, what happens `after`, and when you can give one, a concrete `example` of the difference. Only what the diff shows. Leave it out for tests, docs and refactors that change nothing for anyone.',
+    "- `dependents` on a chapter that changes something other code uses, like an exported function, a route or a config value: up to 5 files outside this diff that use it, each with its exact repo `path` and `what` it relies on. Search once per changed name to find them. Leave it out when nothing outside the diff uses it.",
+    hasRequest
+      ? "- `requested` lists each separate thing the request above asks for, in its own order: the `item` in a few words, its `status`, and for `done` or `partly` the exact titles of the `chapters` with its code. `done` means you found code for it, not that it works. Use `missing` when you found no code for it, with a `note` on what you looked for, and `partly` with a `note` on what's left. Only what the request really asks: not your own ideas of what it should have asked."
+      : '- There is no stated request, so leave `requested` out.',
+    "- `tryIt`: up to 5 steps that let someone see the change working: `do` is a command or what to click, `expect` is what they should see. Use only commands and screens you found in the repo, like its package scripts, README or tests. Nobody runs these for the reviewer, so never include anything that deletes or overwrites data, or changes anything outside the repo. Leave it out when you can't tell how to see it.",
+    "- `diagram`, only when the change crosses at least three separate parts of the code: 3 to 8 boxes showing how they connect, plus a one-sentence `summary` of what the change does to the system. Each of the `nodes` has a short `id`, a plain `label` for the part, a `kind` like \"Backend\" or \"Screen\", and the exact `files` it stands for. A box the change edits lists only files in the diff. Add `unchanged: true` for existing code the change relies on, which lists only files outside the diff. `edges` go `from` the caller `to` what it calls, with a `label` of a few words, and only for a call or data flow you saw in the code. Hunkdory removes boxes whose files don't match the diff, and can't check the arrows, so leave out any arrow you're guessing.",
+    '',
+    "Write from the diff above. Look further only where a hunk makes no sense without its surroundings or to fill in the fields above, a few reads and searches at most: you explain this change, you don't audit the code around it. Then return the walkthrough as structured output. Do not change any files."
   );
   if (feedback) {
     if (feedback.changed) {
@@ -310,8 +389,8 @@ export class Writer {
     const data = await this.projects.review(projectId, branch);
     const text = this.generated.read(projectId, branch);
     if (data.walkthrough !== 'reviewer' || !text || !Object.keys(data.hunks).length) return null;
-    const { title, intent, chapters } = JSON.parse(text);
-    const previous = { title, intent, chapters };
+    const { title, intent, background, requested, tryIt, diagram, chapters } = JSON.parse(text);
+    const previous = { title, intent, background, requested, tryIt, diagram, chapters };
     const r = await this.projects.check(projectId, branch, previous);
     const missing = r.buckets.unnarrated.map((h) => data.hunks[h]).filter(Boolean);
     if (!missing.length && !r.buckets.phantom.length) return null;
@@ -350,6 +429,7 @@ export class Writer {
       baseSha: ctx.baseSha,
       headRef: ctx.inTree ? null : ctx.headRef,
       pr: data.pr ? { number: data.pr.number, title: data.pr.title, body: data.pr.body } : null,
+      issues: data.references?.refs.filter((r) => r.kind === 'issue' && r.closes).map((r) => ({ number: r.number, title: r.title, body: r.body })) ?? [],
       prompt: data.prompt,
       // A session that's only a guess may be about other work, and its reasons would read as this branch's.
       agentSession: match && !match.probable && data.assistant ? await readSessionDigest(match.sessions, { assistantId: data.assistant.id, branch, baseName: data.baseRef }) : null,
@@ -427,9 +507,11 @@ export class Writer {
     const { shared: _s, ...wt } = JSON.parse(text);
     const { project, pr, repo } = await this.projects.pullRequest(projectId, branch);
     // Every step, in order: "Before approving" points at steps by number, and the unexplained ones are often why.
-    const chapters = data.steps.map((s) => ({ title: s.title, why: s.why, risk: s.riskNote ?? undefined, checks: s.checks, outsideTask: s.outsideTask, files: s.files, choices: s.choices }));
+    const chapters = data.steps.map((s) => ({ title: s.title, why: s.why, risk: s.riskNote ?? undefined, checks: s.checks, outsideTask: s.outsideTask, files: s.files, choices: s.choices, behaviour: s.behaviour, dependents: s.dependents }));
     const beforeApproving = decisionsForComment(buildPlan(data, { order: 'story' }).decisions);
-    const body = gh.walkthroughComment({ title: wt.title, intent: wt.intent, chapters, beforeApproving, fromSession: data.walkthroughFromSession }, wt);
+    const stepNumber = (key: string) => data.steps.find((s) => s.key === key)!.index + 1;
+    const requested = data.requested.map((r) => ({ item: r.item, status: r.status, note: r.note, steps: r.stepKeys.map(stepNumber) }));
+    const body = gh.walkthroughComment({ title: wt.title, intent: wt.intent, background: data.background, requested, tryIt: data.tryIt, diagram: data.diagram, chapters, beforeApproving, fromSession: data.walkthroughFromSession }, wt);
     // Update the comment you posted before rather than adding another one.
     const before = await gh.sharedWalkthrough(project.path, repo, pr.number);
     const me = await gh.login(project.path);

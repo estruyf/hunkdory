@@ -226,11 +226,12 @@ export interface ShortcutContext {
   focus: 'list' | 'field' | 'other';
 }
 
-export type ShortcutSection = 'general' | 'inbox' | 'plan' | 'review' | 'finish' | 'projects';
+export type ShortcutSection = 'general' | 'tabs' | 'inbox' | 'plan' | 'review' | 'finish' | 'projects';
 
 /** The sections' headings, in the sheet. */
 export const SECTION_TITLES: Record<ShortcutSection, string> = {
   general: 'General',
+  tabs: 'Tabs',
   inbox: 'Inbox',
   plan: 'Plan',
   review: 'In a review',
@@ -278,10 +279,17 @@ export const SHORTCUTS = [
   { id: 'nav.back', keys: ['mod+['], action: 'Back', section: 'general', note: 'Also the mouse’s back button and a swipe' },
   { id: 'nav.forward', keys: ['mod+]'], action: 'Forward', section: 'general' },
 
+  // Tabs
+  { id: 'tab.next', keys: ['ctrl+tab'], action: 'Next tab', section: 'tabs' },
+  { id: 'tab.previous', keys: ['ctrl+shift+tab'], action: 'Previous tab', section: 'tabs' },
+  { id: 'tab.goto', keys: ['mod+1..9'], action: 'Go to a tab', section: 'tabs', note: '⌘1 is the inbox, ⌘9 the last tab', when: (ctx) => ctx.view !== 'welcome' && ctx.view !== 'connect' },
+  { id: 'tab.close', keys: ['mod+w'], action: 'Close the tab', section: 'tabs', note: 'Your place in the review is kept', menu: true },
+  { id: 'tab.reopen', keys: ['mod+shift+t'], action: 'Reopen the tab you closed', section: 'tabs', note: 'Again for the one before it' },
+
   // Inbox
   { id: 'home.open', keys: ['mod+enter'], action: 'Open the first branch to review', section: 'inbox', when: (ctx) => ctx.view === 'home' },
-  { id: 'branch.next', keys: ['ctrl+tab'], action: 'Next branch', section: 'inbox' },
-  { id: 'branch.previous', keys: ['ctrl+shift+tab'], action: 'Previous branch', section: 'inbox' },
+  { id: 'branch.next', keys: ['mod+alt+arrowdown'], action: 'Next branch', section: 'inbox', context: 'From any view', note: 'In the inbox’s order, in its own tab' },
+  { id: 'branch.previous', keys: ['mod+alt+arrowup'], action: 'Previous branch', section: 'inbox', context: 'From any view' },
   { id: 'inbox.move', keys: ['arrowup', 'arrowdown'], action: 'Move through branches', section: 'inbox', where: 'list', when: (ctx) => ctx.view === 'home' },
   { id: 'inbox.open', keys: ['enter'], action: 'Open the branch', section: 'inbox', where: 'list', when: (ctx) => ctx.view === 'home' },
   { id: 'inbox.ignore', keys: ['e'], action: 'Ignore the branch, or bring it back', section: 'inbox', where: 'list', note: 'Ignored branches stay out of To review', when: (ctx) => ctx.view === 'home' },
@@ -300,6 +308,7 @@ export const SHORTCUTS = [
   { id: 'review.ask', keys: ['a'], action: 'Ask Claude about the step', section: 'review', when: inStep },
   { id: 'review.layout', keys: ['s'], action: 'Unified or side by side', section: 'review', when: inReview },
   { id: 'review.whitespace', keys: ['w'], action: 'Hide or show whitespace changes', section: 'review', when: inReview },
+  { id: 'review.wrap', keys: ['z'], action: 'Wrap long lines, or don’t', section: 'review', note: 'Side by side always wraps', when: inReview },
   { id: 'review.context', keys: ['mod+shift+d'], action: 'Show or hide Context', section: 'review', when: inStep },
   { id: 'review.plan', keys: ['escape'], action: 'Back to the plan', section: 'review', when: inReview },
 
