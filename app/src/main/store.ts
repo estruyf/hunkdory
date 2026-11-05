@@ -2,6 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import type { AcpAgentConfig, AppSettings, Project, ReviewState, Watch } from '../shared/types.ts';
+import type { WindowPlace } from './windowPlace.ts';
 
 interface Data {
   version: 1;
@@ -9,6 +10,8 @@ interface Data {
   reviews: Record<string, ReviewState>;
   /** Missing in stores from before there were settings. */
   settings?: Partial<AppSettings>;
+  /** Missing until the window has been moved or resized. */
+  windowPlace?: WindowPlace;
 }
 
 const DEFAULT_SETTINGS: AppSettings = { theme: 'system', editor: null, acpAgents: [] };
@@ -90,6 +93,15 @@ export class Store {
 
   removeAcpAgent(id: string): AppSettings {
     return this.updateSettings({ acpAgents: this.settings().acpAgents.filter((a) => a.id !== id) });
+  }
+
+  windowPlace(): WindowPlace | null {
+    return this.data.windowPlace ?? null;
+  }
+
+  setWindowPlace(place: WindowPlace) {
+    this.data.windowPlace = place;
+    this.save();
   }
 
   projects(): Project[] {

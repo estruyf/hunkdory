@@ -26,6 +26,7 @@ import { AskPanel, CheckFollowUp, Thread } from '../components/ask.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
 import { FindingAtLine, StepFindings } from '../components/aiReview.tsx';
+import { RunningWork } from '../components/RunningWork.tsx';
 import { StepEffects } from '../components/understand.tsx';
 import { EmptyStepNotice, WalkthroughBar } from '../components/walkthrough.tsx';
 import { StepTraceDialog } from '../components/runLog.tsx';
@@ -320,6 +321,8 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
         <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: toPlan, shrink: true }, { label: here }]} />
         {progressBar}
       </div>
+      {/* Without a walkthrough, WalkthroughBar right below says it's being written. */}
+      <RunningWork data={data} state={state} onOpen={toPlan} noWalkthrough={data.walkthrough === 'skeleton'} />
       <PrLink data={data} />
       {search.button}
       <Button variant="quiet" icon={<ArrowLeft size={13} aria-hidden />} shortcut="review.plan" onClick={toPlan}>

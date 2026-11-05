@@ -4,7 +4,6 @@ import type { ReviewerApi, ReviewState, RiskLevel } from '../../shared/types.ts'
 import type { Go } from '../App.tsx';
 import { RISK_LABEL } from '../../shared/order.ts';
 import { Pill } from './ui/Pill.tsx';
-import { ViewHeader } from './ViewHeader.tsx';
 
 /** The Hunkdory app icon: three diff lines and a check on a blue tile. */
 export function Logo({ size = 20 }: { size?: number }) {
@@ -85,29 +84,6 @@ export function Loading({ label, className = 'py-6' }: { label: string; classNam
   );
 }
 
-/**
- * Full-view loading state that keeps the header, so opening a branch doesn't flash a bare spinner.
- * It stays invisible for the first moments; most loads finish before it shows.
- */
-export function LoadingPage({ label, detail }: { onHome?: () => void; label: string; detail?: string }) {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setVisible(true), 200);
-    return () => clearTimeout(t);
-  }, []);
-  return (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
-      <ViewHeader>{detail && <span className="truncate font-mono text-ui text-faint">{detail}</span>}</ViewHeader>
-      <div role="status" aria-live="polite" className={`flex flex-1 items-center justify-center pb-[12vh] transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`}>
-        <span className="flex items-center gap-2 text-body text-muted">
-          <Loader2 size={16} className="animate-spin text-accent-ink" aria-hidden />
-          {label}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 /** Load something async; `reload` re-runs it. */
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [state, setState] = useState<{ value?: T; error?: string; loading: boolean }>({ loading: true });
@@ -132,6 +108,9 @@ type InboxOpts = NonNullable<Parameters<ReviewerApi['inbox']>[0]>;
 // The inbox as last seen, from the last run until the first scan is in. A scan takes seconds, so the inbox shows this while a new one runs.
 let lastInbox: Inbox | undefined;
 const inboxListeners = new Set<(v: Inbox) => void>();
+
+/** A branch as the inbox last listed it, for before it's been read. */
+export const knownInboxItem = (projectId: string, branch: string) => lastInbox?.waiting.find((w) => w.projectId === projectId && w.branch === branch) ?? null;
 
 function setLastInbox(v: Inbox) {
   lastInbox = v;

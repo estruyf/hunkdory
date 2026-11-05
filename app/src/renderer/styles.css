@@ -285,10 +285,28 @@ html[data-keyboard-nav] :is(button, a, summary, input, textarea, [contenteditabl
     transform: translateY(-2px);
   }
 }
+/* The outline of a page that's on its way. */
+.skeleton {
+  border-radius: 6px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--sb-border) 55%, transparent) 30%, var(--sb-border) 50%, color-mix(in srgb, var(--sb-border) 55%, transparent) 70%);
+  background-size: 300% 100%;
+  animation: skeleton-sweep 1.8s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .working-dots span {
     animation: none;
     opacity: 0.8;
+  }
+  .skeleton {
+    animation: none;
   }
   *:not(.animate-spin),
   *::before,

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { LoadingPage, useAsync } from '../components/ui.tsx';
+import { useAsync } from '../components/ui.tsx';
+import { LoadingPage } from '../components/LoadingPage.tsx';
+import { readReview } from '../state/reviewReads.ts';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
@@ -16,10 +18,10 @@ type At = { stepKey?: string; decision?: string; group?: string; focus?: LineRef
 
 export function Review({ go, projectId, branch, stepKey, decision, group, focus, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } } & At) {
   // Read once per branch. Moving between steps changes the route, not the review.
-  const loaded = useAsync(() => (preloaded ? Promise.resolve(preloaded) : window.api.loadReview(projectId, branch)), [projectId, branch]);
+  const loaded = useAsync(() => (preloaded ? Promise.resolve(preloaded) : readReview(projectId, branch)), [projectId, branch]);
   const value = loaded.value ?? preloaded;
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
-  if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
+  if (!value) return <LoadingPage shape="step" projectId={projectId} branch={branch} />;
   return (
     <IssueRefsContext.Provider value={value.data.references}>
       <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} focus={focus} />

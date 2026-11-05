@@ -2,7 +2,9 @@
 // Opening a branch lands here. One button starts (or continues) the review where it makes sense.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Crumbs, LoadingPage, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
+import { Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
+import { LoadingPage } from '../components/LoadingPage.tsx';
+import { lastRead, readReview } from '../state/reviewReads.ts';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { buttonClass } from '../components/ui/buttonStyles.ts';
@@ -26,6 +28,7 @@ import type { LineRef } from '../components/diff.tsx';
 import { AiReviewCard, FindingsPill, openFindingsIn } from '../components/aiReview.tsx';
 import { ChangeOverview, RequestedList } from '../components/understand.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
+import { RunningWork } from '../components/RunningWork.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { OUTSIDE_HINT, RISK_LABEL, formatDuration, isReviewed, timeAgo, tooBig } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, planProgress, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
@@ -40,16 +43,14 @@ const ORDERS: { id: ReviewOrder; label: string }[] = [
 export function PlanScreen({ go, projectId, branch, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }) {
   // A new walkthrough changes the steps: `version` reads the branch again.
   const [version, setVersion] = useState(0);
+  // Coming back to a branch shows what you saw last at once. The read replaces it when it's in.
+  const [shown] = useState(() => preloaded ?? lastRead(projectId, branch));
+  const loaded = useAsync(() => readReview(projectId, branch), [projectId, branch, version]);
   // Back on this tab after a while: read the branch again, in place. Someone may have pushed or replied since.
-  const away = useRef(false);
-  const loaded = useAsync(() => (preloaded && version === 0 && !away.current ? Promise.resolve(preloaded) : window.api.loadReview(projectId, branch)), [projectId, branch, version]);
-  useOnReturn(() => {
-    away.current = true;
-    loaded.reload();
-  });
-  const value = loaded.value ?? (version === 0 ? preloaded : undefined);
+  useOnReturn(loaded.reload);
+  const value = loaded.value ?? (version === 0 ? shown : undefined);
   if (loaded.error) return <ReviewError go={go} message={loaded.error} />;
-  if (!value) return <LoadingPage onHome={() => go({ name: 'home' })} label="Reading the branch…" detail={branch} />;
+  if (!value) return <LoadingPage shape="plan" projectId={projectId} branch={branch} />;
   return (
     <IssueRefsContext.Provider value={value.data.references}>
       <PlanView key={version} go={go} data={value.data} initialState={value.state} onReload={() => setVersion((v) => v + 1)} />
@@ -151,6 +152,8 @@ function headline(decisions: number, careful: number, skim: number) {
 
 function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewData; initialState: ReviewState; onReload: () => void }) {
   const [state, setState] = useState(initialState);
+  // A new read of the branch knows best, also over what was shown until it came in.
+  useEffect(() => setState(initialState), [initialState]);
   const [error, setError] = useState<string | null>(null);
   const [allCareful, setAllCareful] = useState(false);
   const [skipSeen, setSkipSeen] = useState(true);
@@ -175,6 +178,14 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
   const openThreadsIn = (steps: Step[]) => steps.flatMap((s) => s.hunkIds.flatMap((id) => placed.byHunk.get(id) ?? [])).filter((t) => !t.resolved).length;
   // Opening a branch without a walkthrough has Hunkdory write one; the steps update when it's ready.
   const w = useWalkthroughJob(data, { auto: true, onDone: onReload });
+  // The cards the running pills in the top bar scroll to. Only the page moves: scrollIntoView also shifts the panes around it, top bar included.
+  const scroller = useRef<HTMLDivElement>(null);
+  const walkthroughCard = useRef<HTMLDivElement>(null);
+  const aiReviewCard = useRef<HTMLDivElement>(null);
+  const scrollToCard = (card: HTMLElement | null) => {
+    const page = scroller.current;
+    if (page && card) page.scrollTo({ top: page.scrollTop + card.getBoundingClientRect().top - page.getBoundingClientRect().top - 16, behavior: 'smooth' });
+  };
 
   useEffect(
     () =>
@@ -281,6 +292,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
         <div className="min-w-0 flex-1">
           <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, shrink: true }]} />
         </div>
+        <RunningWork data={data} state={state} onOpen={(kind) => scrollToCard((kind === 'walkthrough' ? walkthroughCard : aiReviewCard).current)} />
         <PrLink data={data} />
         {search.button}
         <Button variant={allDone ? 'primary' : 'quiet'} shortcut="review.finish" onClick={toFinish}>
@@ -289,7 +301,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
       </ViewHeader>
       {search.panel}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-2">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint">
@@ -374,7 +386,9 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
           <UncommittedNotice data={data} onChanged={onReload} onError={setError} />
           <PushToPrNotice data={data} onPushed={onReload} />
           {data.stack && <StackBar data={data} go={go} />}
-          <WalkthroughNotice data={data} w={w} />
+          <div ref={walkthroughCard} className="empty:hidden">
+            <WalkthroughNotice data={data} w={w} />
+          </div>
 
           {tooBig({ minutes: data.minutes, steps: data.steps.length }) && (
             <Notice
@@ -400,16 +414,18 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
           <HowItWorks />
           <RequestCard data={data} onOpen={open} />
           <ChangeOverview data={data} onOpen={open} />
-          <AiReviewCard
-            data={data}
-            state={state}
-            act={async (p) => {
-              // A comment belongs to a review: it starts here, like settling a decision does.
-              if (p.action !== 'comment' || (await begin())) await patch(p);
-            }}
-            onOpen={({ finding: f, step }) => enter({ stepKey: step.key, focus: { path: f.path, line: f.line, side: f.side } })}
-            onSettings={() => go({ name: 'connect', projectId: data.projectId })}
-          />
+          <div ref={aiReviewCard} className="empty:hidden">
+            <AiReviewCard
+              data={data}
+              state={state}
+              act={async (p) => {
+                // A comment belongs to a review: it starts here, like settling a decision does.
+                if (p.action !== 'comment' || (await begin())) await patch(p);
+              }}
+              onOpen={({ finding: f, step }) => enter({ stepKey: step.key, focus: { path: f.path, line: f.line, side: f.side } })}
+              onSettings={() => go({ name: 'connect', projectId: data.projectId })}
+            />
+          </div>
           {feedback && (
             <GitHubReviews
               data={data}

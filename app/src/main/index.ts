@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, screen, shell, Tray } from 'electron';
 import { release } from 'node:os';
 import { join, resolve } from 'node:path';
 import { existsSync, renameSync } from 'node:fs';
@@ -13,6 +13,7 @@ import { AiReviews } from './aiReview.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
 import { trayIcon } from './trayIcon.ts';
+import { restoredBounds } from './windowPlace.ts';
 import { installedEditors, openInEditor, pickEditor } from './editors.ts';
 import { actOnFinding } from '../shared/aiReview.ts';
 import { addToStepComment, answerLine, removeFromStepComments, setAnswerLine } from '../shared/comments.ts';
@@ -322,9 +323,11 @@ function registerIpc() {
 }
 
 function createWindow() {
+  const place = store.windowPlace();
   win = new BrowserWindow({
     width: 1440,
     height: 940,
+    ...(place && restoredBounds(place, screen.getAllDisplays().map((d) => d.workArea), screen.getPrimaryDisplay().workArea)),
     minWidth: 960,
     minHeight: 640,
     show: false,
@@ -340,7 +343,22 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  win.once('ready-to-show', () => win?.show());
+  win.once('ready-to-show', () => {
+    if (place?.maximized) win?.maximize();
+    win?.show();
+  });
+  // Remember where the window is once it settles: a drag fires these many times over.
+  let settling: NodeJS.Timeout | undefined;
+  const rememberPlace = () => {
+    clearTimeout(settling);
+    if (win) store.setWindowPlace({ ...win.getNormalBounds(), maximized: win.isMaximized() });
+  };
+  const rememberSoon = () => {
+    clearTimeout(settling);
+    settling = setTimeout(rememberPlace, 500);
+  };
+  win.on('resize', rememberSoon);
+  win.on('move', rememberSoon);
   // Full screen hides the traffic lights, so the top bar can drop the room it keeps for them.
   win.on('enter-full-screen', () => win?.webContents.send('full-screen', true));
   win.on('leave-full-screen', () => win?.webContents.send('full-screen', false));
@@ -360,6 +378,7 @@ function createWindow() {
   });
   // Closing the window keeps Hunkdory in the menu bar. Quit from the tray or with Cmd+Q.
   win.on('close', (e) => {
+    rememberPlace();
     if (quitting) return;
     e.preventDefault();
     win?.hide();
