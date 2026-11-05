@@ -94,7 +94,7 @@ function FindingRow({ item, open, onToggle, onShow, act }: { item: PlacedFinding
   );
 }
 
-function Elapsed({ from }: { from: string }) {
+export function Elapsed({ from }: { from: string }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);

@@ -26,6 +26,7 @@ import type { LineRef } from '../components/diff.tsx';
 import { AiReviewCard, FindingsPill, openFindingsIn } from '../components/aiReview.tsx';
 import { ChangeOverview, RequestedList } from '../components/understand.tsx';
 import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
+import { RunningWork } from '../components/RunningWork.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { OUTSIDE_HINT, RISK_LABEL, formatDuration, isReviewed, timeAgo, tooBig } from '../../shared/order.ts';
 import { buildPlan, decisionLabels, planProgress, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
@@ -175,6 +176,14 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
   const openThreadsIn = (steps: Step[]) => steps.flatMap((s) => s.hunkIds.flatMap((id) => placed.byHunk.get(id) ?? [])).filter((t) => !t.resolved).length;
   // Opening a branch without a walkthrough has Hunkdory write one; the steps update when it's ready.
   const w = useWalkthroughJob(data, { auto: true, onDone: onReload });
+  // The cards the running pills in the top bar scroll to. Only the page moves: scrollIntoView also shifts the panes around it, top bar included.
+  const scroller = useRef<HTMLDivElement>(null);
+  const walkthroughCard = useRef<HTMLDivElement>(null);
+  const aiReviewCard = useRef<HTMLDivElement>(null);
+  const scrollToCard = (card: HTMLElement | null) => {
+    const page = scroller.current;
+    if (page && card) page.scrollTo({ top: page.scrollTop + card.getBoundingClientRect().top - page.getBoundingClientRect().top - 16, behavior: 'smooth' });
+  };
 
   useEffect(
     () =>
@@ -281,6 +290,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
         <div className="min-w-0 flex-1">
           <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, shrink: true }]} />
         </div>
+        <RunningWork data={data} state={state} onOpen={(kind) => scrollToCard((kind === 'walkthrough' ? walkthroughCard : aiReviewCard).current)} />
         <PrLink data={data} />
         {search.button}
         <Button variant={allDone ? 'primary' : 'quiet'} shortcut="review.finish" onClick={toFinish}>
@@ -289,7 +299,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
       </ViewHeader>
       {search.panel}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-2">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint">
@@ -374,7 +384,9 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
           <UncommittedNotice data={data} onChanged={onReload} onError={setError} />
           <PushToPrNotice data={data} onPushed={onReload} />
           {data.stack && <StackBar data={data} go={go} />}
-          <WalkthroughNotice data={data} w={w} />
+          <div ref={walkthroughCard} className="empty:hidden">
+            <WalkthroughNotice data={data} w={w} />
+          </div>
 
           {tooBig({ minutes: data.minutes, steps: data.steps.length }) && (
             <Notice
@@ -400,16 +412,18 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
           <HowItWorks />
           <RequestCard data={data} onOpen={open} />
           <ChangeOverview data={data} onOpen={open} />
-          <AiReviewCard
-            data={data}
-            state={state}
-            act={async (p) => {
-              // A comment belongs to a review: it starts here, like settling a decision does.
-              if (p.action !== 'comment' || (await begin())) await patch(p);
-            }}
-            onOpen={({ finding: f, step }) => enter({ stepKey: step.key, focus: { path: f.path, line: f.line, side: f.side } })}
-            onSettings={() => go({ name: 'connect', projectId: data.projectId })}
-          />
+          <div ref={aiReviewCard} className="empty:hidden">
+            <AiReviewCard
+              data={data}
+              state={state}
+              act={async (p) => {
+                // A comment belongs to a review: it starts here, like settling a decision does.
+                if (p.action !== 'comment' || (await begin())) await patch(p);
+              }}
+              onOpen={({ finding: f, step }) => enter({ stepKey: step.key, focus: { path: f.path, line: f.line, side: f.side } })}
+              onSettings={() => go({ name: 'connect', projectId: data.projectId })}
+            />
+          </div>
           {feedback && (
             <GitHubReviews
               data={data}

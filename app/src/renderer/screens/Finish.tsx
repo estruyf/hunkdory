@@ -14,6 +14,7 @@ import { useOnReturn, useTabActive } from '../state/tabPane.ts';
 import { ReviewError } from './Review.tsx';
 import { Markdown } from '../components/markdown.tsx';
 import { PrLink } from '../components/github.tsx';
+import { RunningWork } from '../components/RunningWork.tsx';
 import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, defaultDrops, openItems } from '../../shared/plan.ts';
 import { reviewedNote } from '../../shared/comments.ts';
@@ -36,6 +37,13 @@ export function Finish({ go, projectId, branch }: { go: Go; projectId: string; b
 function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewData; state: ReviewState }) {
   // Removing a comment here updates the review, and what you finish with.
   const [state, setState] = useState(initialState);
+  useEffect(
+    () =>
+      window.events.onReviewStateChanged((r) => {
+        if (r.projectId === data.projectId && r.branch === data.branch) setState(r);
+      }),
+    [data.projectId, data.branch]
+  );
   const outside = data.steps.filter((s) => s.outsideTask);
   const [drop, setDrop] = useState<Set<string>>(() => new Set(defaultDrops(data.steps, state.settled)));
   const comments = state.comments.filter((c) => c.body.trim());
@@ -287,6 +295,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
         <div className="min-w-0 flex-1">
           <Crumbs items={[...reviewCrumbs(go, data), { label: data.title, onClick: () => go({ name: 'plan', projectId: data.projectId, branch: data.branch }), shrink: true }, { label: 'Finish' }]} />
         </div>
+        <RunningWork data={data} state={state} onOpen={() => go({ name: 'plan', projectId: data.projectId, branch: data.branch })} />
         <PrLink data={data} />
       </ViewHeader>
 
