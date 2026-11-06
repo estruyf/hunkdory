@@ -50,13 +50,18 @@ npm run open:mac    # open the packaged app
 
 The build signs with the Developer ID certificate in your keychain if it finds one. Set `CSC_IDENTITY_AUTO_DISCOVERY=false` to skip signing. It notarizes when `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` are set.
 
+## Keep the changelog
+
+Every change people will notice gets a line under **Unreleased** in [`CHANGELOG.md`](../CHANGELOG.md), in the same pull request as the change. Group lines under **Added**, **Changed**, **Fixed** or **Removed**, and write them for someone using the app: what they can now do or what no longer goes wrong, not how the code changed. Refactors, tests and internal tooling don't need a line.
+
 ## Releasing
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) builds, signs and notarizes the app, then attaches the `.dmg`, the `.zip` and the update feed to a GitHub release, and updates the Homebrew tap.
 
-1. Draft a release on GitHub with a tag like `v0.1.0`. The tag sets the app's version, so `app/package.json` doesn't need a bump.
-2. Tick **Set as a pre-release** for early versions (`v0.1.0-beta.1`, or any version you don't want to call stable). A release that isn't a pre-release must be tagged on `main`. A pre-release gets no update feed and no cask, so nobody is updated to it.
-3. Publish it. The files are attached once the build and its checks pass. When the release has no notes, GitHub's generated notes are filled in. Every copy of the app offers it within a few hours.
+1. In [`CHANGELOG.md`](../CHANGELOG.md), rename **Unreleased** to the version and date, add a new empty **Unreleased** above it, and update the links at the bottom. Merge that to `main`.
+2. Draft a release on GitHub with a tag like `v0.1.0`. The tag sets the app's version, so `app/package.json` doesn't need a bump.
+3. Tick **Set as a pre-release** for early versions (`v0.1.0-beta.1`, or any version you don't want to call stable). A release that isn't a pre-release must be tagged on `main`. A pre-release gets no update feed and no cask, so nobody is updated to it.
+4. Publish it, leaving the notes empty. The files are attached once the build and its checks pass, and the notes are filled in from the changelog: this version's section, or **Unreleased** for a pre-release. The app shows them under **What's new**. With nothing in the changelog the release gets GitHub's generated notes and the run warns. Every copy of the app offers it within a few hours.
 
 To try it without publishing anything, run the workflow by hand (Actions → Release → Run workflow). The signed build is kept as a workflow artifact for a week.
 
