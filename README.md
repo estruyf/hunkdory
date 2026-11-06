@@ -15,9 +15,9 @@
   <a href="https://visitorbadge.io/status?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fhunkdory"><img src="https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fhunkdory&countColor=%23202736&style=flat" alt="Visitors"></a>
 </p>
 
-![A branch in Hunkdory: what it does and what was asked come first, with Read the story as the way in](docs/screenshots/plan.png)
-
-![Hunkdory in action: one inbox, a change told as a story, asking about a step, and merging it or sending it back](docs/hunkdory.gif)
+<p align="center">
+  <img src="docs/hunkdory.gif" width="800" alt="Hunkdory in action: one inbox, a change told as a story, asking about a step, and merging it or sending it back">
+</p>
 
 ## Why Hunkdory
 
