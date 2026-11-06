@@ -170,6 +170,9 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
     if (!body) r.comments = r.comments.filter((c) => c !== existing);
     else if (existing) existing.body = body;
     else r.comments.push({ id: crypto.randomUUID(), stepKey: patch.stepKey, hunkId: null, line: null, body, createdAt: new Date().toISOString() });
+  } else if (patch.type === 'leave-out') {
+    const c = r.comments.find((c) => c.id === patch.id);
+    if (c) c.leftOut = patch.on ? [...new Set([...(c.leftOut ?? []), patch.part])] : (c.leftOut ?? []).filter((p) => p !== patch.part);
   } else if (patch.type === 'settle') {
     r.settled ??= {};
     if (patch.value) r.settled[patch.id] = patch.value;

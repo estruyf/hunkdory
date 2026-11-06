@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDecisions, buildPlan, decisionsForComment, defaultDrops, defaultReviewEvent, fileNames, openItems, planProgress, resumePoint, settleComment, skimGroups, stepsLabel, unpushedWork, vouchesForCode } from '../src/shared/plan.ts';
 import { addToStepComment, removeFromStepComments } from '../src/shared/comments.ts';
-import { prDescription } from '../src/main/actions.ts';
+import { githubReview, prDescription, sendBackPrompt } from '../src/main/actions.ts';
 import type { AttentionFlag, CheckItem, ReviewState, Step } from '../src/shared/types.ts';
 
 const step = (i: number, over: Partial<Step> = {}): Step => ({
@@ -197,4 +197,19 @@ test('work that is only on this Mac holds a PR back, and says what it is', () =>
   assert.equal(unpushedWork({ pr, dirtyFiles: 0, ahead: 0 }), null);
   assert.equal(unpushedWork({ pr, dirtyFiles: 1, ahead: 0 }), "1 uncommitted file on this Mac isn't on PR #3, so GitHub wouldn't merge it. Push it from the plan, or undo it, first.");
   assert.equal(unpushedWork({ pr, dirtyFiles: 2, ahead: 1 }), "2 uncommitted files and 1 unpushed commit on this Mac aren't on PR #3, so GitHub wouldn't merge them. Push them from the plan, or undo them, first.");
+});
+
+test('what you left out stays out of everything a review sends', () => {
+  const steps = [step(0)];
+  const comments = [{ id: 'c', stepKey: 'k0', hunkId: null, line: null, createdAt: '', body: 'Not sure: Fine now?\nNeeds a change: Is it? — Fix it', leftOut: ['Not sure: Fine now?'] }];
+  const req = { note: '', dropStepKeys: [] };
+  const back = sendBackPrompt({ steps }, { comments }, req, null);
+  assert.match(back, /Fix it/);
+  assert.doesNotMatch(back, /Fine now/);
+  const review = githubReview({ steps }, { comments }, req, { inline: false, copilot: false });
+  assert.match(review.body, /Fix it/);
+  assert.doesNotMatch(review.body, /Fine now/);
+  const pr = prDescription({ steps, intent: null, prompt: null }, { comments }, '');
+  assert.match(pr, /Fix it/);
+  assert.doesNotMatch(pr, /Fine now/);
 });

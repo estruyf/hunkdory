@@ -7,7 +7,7 @@ import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
 import { shellEnv, wtvCommand } from './shellEnv.ts';
 import { assistantFor } from './assistants/index.ts';
-import { reviewedNote } from '../shared/comments.ts';
+import { reviewedNote, sendableComments } from '../shared/comments.ts';
 import { unpushedWork } from '../shared/plan.ts';
 import type { Comment, DecisionRecord, FinishRequest, FinishResult, HunkView, ReviewData, ReviewState, Step } from '../shared/types.ts';
 
@@ -23,9 +23,10 @@ export function sendBackPrompt(data: Pick<ReviewData, 'steps'>, state: Pick<Revi
   const stepOf = (key: string) => data.steps.find((s) => s.key === key);
   const label = (s: Step | undefined) => (s ? `Step ${s.index + 1} "${s.title}" (${s.files.join(', ') || 'no files'})` : 'A step that no longer exists');
   const lines = ['I reviewed your changes on this branch in Hunkdory. Please address the feedback below.', ''];
-  if (state.comments.length) {
+  const comments = sendableComments(state.comments);
+  if (comments.length) {
     lines.push('Comments:');
-    for (const c of state.comments) lines.push(`- ${label(stepOf(c.stepKey))}${where(c)}: ${c.body.trim()}`);
+    for (const c of comments) lines.push(`- ${label(stepOf(c.stepKey))}${where(c)}: ${c.body.trim()}`);
     lines.push('');
   }
   const drops = req.dropStepKeys.map(stepOf).filter((s): s is Step => !!s);
@@ -88,7 +89,7 @@ export function githubReview(
   if (req.note.trim()) parts.push(req.note.trim());
   const inline: gh.LineComment[] = [];
   const folded: string[] = [];
-  for (const c of state.comments.filter((c) => c.body.trim())) {
+  for (const c of sendableComments(state.comments)) {
     if (c.path && c.line && c.side) {
       if (opts.inline) inline.push({ path: c.path, line: c.line, side: c.side, body: c.body.trim() });
       else folded.push(`**\`${c.path}:${c.line}\`**${c.side === 'LEFT' ? ' (removed line)' : ''}\n${c.body.trim()}`);
@@ -120,7 +121,7 @@ export function prDescription(data: Pick<ReviewData, 'steps' | 'intent' | 'promp
   const goal = data.intent?.trim() || data.prompt?.trim().split('\n')[0];
   if (goal) parts.push(goal);
   if (note.trim()) parts.push(note.trim());
-  const comments = state.comments.filter((c) => c.body.trim());
+  const comments = sendableComments(state.comments);
   if (comments.length) {
     parts.push(
       ['### Review notes', ...comments.map((c) => {
@@ -188,7 +189,7 @@ export class Actions {
   private async postReview(req: FinishRequest, data: ReviewData, state: ReviewState, summary: ReviewState['summary'], toCopilot = false): Promise<FinishResult> {
     const { project, pr, repo } = await this.projects.pullRequest(req.projectId, req.branch);
     const event = req.event ?? 'COMMENT';
-    const comments = state.comments.filter((c) => c.body.trim());
+    const comments = sendableComments(state.comments);
     // A comment or an approval without anything to say still says you reviewed it; asking for changes has to say which.
     if (event === 'REQUEST_CHANGES' && !comments.length && !req.note.trim() && !req.dropStepKeys.length) throw new Error('Say what needs to change: add a comment or a review summary.');
     // Line numbers only fit GitHub's diff when you reviewed exactly the PR's head.
@@ -211,7 +212,7 @@ export class Actions {
     if (unpushed) throw new Error(unpushed);
     const { project, pr, repo } = await this.projects.pullRequest(req.projectId, req.branch);
     if (data.headSha !== pr.headRefOid) throw new Error(`PR #${pr.number} changed since you opened this review. Reload it and look at what's new first.`);
-    const comments = state.comments.filter((c) => c.body.trim());
+    const comments = sendableComments(state.comments);
     const review = githubReview(data, state, { ...req, dropStepKeys: [] }, { inline: true, copilot: false, reviewer: data.githubLogin });
     let url: string | null = null;
     let approved = true;
@@ -314,7 +315,7 @@ export class Actions {
     if (!existsSync(session.cwd)) throw new Error(`The session ran in ${session.cwd}, which no longer exists.`);
     const elsewhere = await g.notOnBranch(session.cwd, req.branch);
     if (elsewhere) throw new Error(elsewhere);
-    if (!state.comments.length && !req.dropStepKeys.length && !req.note.trim()) throw new Error('Add a comment, a note, or a step to drop first.');
+    if (!sendableComments(state.comments).length && !req.dropStepKeys.length && !req.note.trim()) throw new Error('Add a comment, a note, or a step to drop first.');
 
     // The session's own CLI handles it, whatever the project is set to today.
     const assistant = assistantFor({ assistant: session.agent });

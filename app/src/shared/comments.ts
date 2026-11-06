@@ -1,5 +1,37 @@
 // Lines a review plan decision adds to a step comment, and takes away again. Pure, so it can be tested.
-import type { Exchange, ReviewState } from './types.ts';
+import type { Comment, Exchange, ReviewState } from './types.ts';
+
+const NOT_SURE = 'Not sure: ';
+const NEEDS_CHANGE = 'Needs a change: ';
+const NEEDS_FIX = 'Needs a fix: ';
+
+/**
+ * What can go with your review or stay behind on its own: each line an answer or a decision added, and what you
+ * wrote yourself as one, however many lines it has.
+ */
+export function commentParts(body: string): string[] {
+  const parts: string[] = [];
+  let own: string[] = [];
+  const endOwn = () => {
+    if (own.join('\n').trim()) parts.push(own.join('\n').trim());
+    own = [];
+  };
+  for (const line of body.split('\n')) {
+    if ([NOT_SURE, NEEDS_CHANGE, NEEDS_FIX].some((p) => line.trim().startsWith(p))) {
+      endOwn();
+      parts.push(line.trim());
+    } else own.push(line);
+  }
+  endOwn();
+  return parts;
+}
+
+/** The comments as your review sends them: without what you left out, and without those that leaves empty. */
+export function sendableComments<T extends Pick<Comment, 'body' | 'leftOut'>>(comments: T[]): T[] {
+  return comments
+    .map((c) => (c.leftOut?.length ? { ...c, body: commentParts(c.body).filter((p) => !c.leftOut!.includes(p)).join('\n') } : c))
+    .filter((c) => c.body.trim());
+}
 
 /** Appends a line to a step's comment, once. */
 export function addToStepComment(r: Pick<ReviewState, 'comments'>, stepKey: string, line: string) {
@@ -8,6 +40,8 @@ export function addToStepComment(r: Pick<ReviewState, 'comments'>, stepKey: stri
   const existing = r.comments.find((c) => c.stepKey === stepKey && !c.line);
   if (existing) {
     if (!existing.body.includes(text)) existing.body = `${existing.body.trim()}\n${text}`;
+    // You just said it again: it goes with your review, even if you left it out before.
+    existing.leftOut = existing.leftOut?.filter((p) => p !== text);
   } else r.comments.push({ id: crypto.randomUUID(), stepKey, hunkId: null, line: null, body: text, createdAt: new Date().toISOString() });
 }
 
@@ -25,9 +59,6 @@ export function removeFromStepComments(r: Pick<ReviewState, 'comments'>, line: s
   }
   r.comments = r.comments.filter((c) => c.line || c.body);
 }
-
-const NOT_SURE = 'Not sure: ';
-const NEEDS_CHANGE = 'Needs a change: ';
 
 /** What a "Needs a change" asks the assistant for: the step's question, and what you said should change. */
 export const changeRequest = (question: string, note: string) => (note.trim() ? `${question}\n\n${note.trim()}` : question).trim();

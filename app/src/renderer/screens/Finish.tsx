@@ -19,8 +19,8 @@ import { PrLink } from '../components/github.tsx';
 import { RunningWork } from '../components/RunningWork.tsx';
 import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, defaultDrops, defaultReviewEvent, openItems, unpushedWork, vouchesForCode } from '../../shared/plan.ts';
-import { reviewedNote } from '../../shared/comments.ts';
-import type { Comment, Decision, GitHubEvent, ReviewData, ReviewPatch, ReviewState } from '../../shared/types.ts';
+import { commentParts, reviewedNote, sendableComments } from '../../shared/comments.ts';
+import type { Comment, Decision, GitHubEvent, ReviewData, ReviewState } from '../../shared/types.ts';
 
 const EVENTS: { id: GitHubEvent; title: string }[] = [
   { id: 'COMMENT', title: 'Comment' },
@@ -54,7 +54,12 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   );
   const outside = data.steps.filter((s) => s.outsideTask);
   const [drop, setDrop] = useState<Set<string>>(() => new Set(defaultDrops(data.steps, state.settled)));
-  const comments = state.comments.filter((c) => c.body.trim());
+  // What goes with your review. The list below shows what you left out too.
+  const comments = sendableComments(state.comments);
+  // Each question and decision counts, as they're listed: they can go or stay on their own.
+  const commentCount = comments.reduce((n, c) => n + commentParts(c.body).length, 0);
+  const written = state.comments.filter((c) => c.body.trim());
+  const leftOut = written.reduce((n, c) => n + commentParts(c.body).filter((p) => c.leftOut?.includes(p)).length, 0);
   // Resuming a local session needs the project's own CLI; sending a Copilot coding-agent PR back is a
   // GitHub comment, so it's offered whatever the project's assistant is set to.
   const prCopilot = data.agent === 'copilot' && !data.session;
@@ -72,7 +77,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   // The branch moved on while this page was open: what it says, with the way to go and look.
   const [changed, setChanged] = useState<string | null>(null);
   const [needsCommit, setNeedsCommit] = useState<number | null>(null);
-  const [showComments, setShowComments] = useState(comments.length <= 3);
+  const [showComments, setShowComments] = useState(written.length <= 3);
   // A local branch on a linked GitHub repo can become a pull request instead of a local merge.
   const canOpenPr = !data.pr && data.local && !!data.repo;
   const [openPr, setOpenPr] = useState(canOpenPr);
@@ -102,12 +107,9 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   };
   // Claude changed this step after you wrote the comment: that may have settled it.
   const changedAfter = (c: Comment) => state.exchanges?.some((e) => e.stepKey === c.stepKey && e.kind === 'change' && e.status === 'done' && e.at > c.createdAt);
-  const remove = async (c: Comment) => {
+  const leaveOut = async (c: Comment, part: string, on: boolean) => {
     try {
-      const patch: ReviewPatch = c.line && c.hunkId
-        ? { type: 'line-comment', id: c.id, stepKey: c.stepKey, hunkId: c.hunkId, path: c.path ?? '', line: c.line, side: c.side ?? 'RIGHT', body: '' }
-        : { type: 'comment', stepKey: c.stepKey, body: '' };
-      setState(await window.api.updateReview(data.projectId, data.branch, patch));
+      setState(await window.api.updateReview(data.projectId, data.branch, { type: 'leave-out', id: c.id, part, on }));
     } catch (e) {
       setError(cleanError(e));
     }
@@ -120,9 +122,9 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
       detail: data.uncommitted
         ? `Commits the changes to ${data.branch} as they are, as one commit. Nothing is pushed. Your comments stay in Hunkdory.`
         : data.prByYou
-          ? `Merges your pull request #${data.pr!.number} into ${data.pr!.baseRefName}${comments.length ? `, with your ${plural(comments.length, 'comment')} on it` : ''}. GitHub doesn’t let you approve your own PR.`
+          ? `Merges your pull request #${data.pr!.number} into ${data.pr!.baseRefName}${comments.length ? `, with your ${plural(commentCount, 'comment')} on it` : ''}. GitHub doesn’t let you approve your own PR.`
           : data.pr
-            ? `Approves pull request #${data.pr.number} on GitHub${comments.length ? ` with your ${plural(comments.length, 'comment')}` : ''} and merges it into ${data.pr.baseRefName}.`
+            ? `Approves pull request #${data.pr.number} on GitHub${comments.length ? ` with your ${plural(commentCount, 'comment')}` : ''} and merges it into ${data.pr.baseRefName}.`
             : canOpenPr && openPr
               ? `Pushes ${data.branch} and opens a pull request into ${base}, with your comments in the description. Nothing is merged yet.`
               : `Merge into ${base} as it is. Your comments stay in Hunkdory.`,
@@ -134,7 +136,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
         {
           id: 'github' as const,
           title: `Post your review on PR #${data.pr.number}`,
-          detail: `${comments.length ? `Your ${plural(comments.length, 'comment')} ${comments.length === 1 ? 'goes' : 'go'} on GitHub, on the code ${comments.length === 1 ? "it's" : "they're"} about.` : 'Your review goes on GitHub.'} The PR leaves your inbox until it changes.`,
+          detail: `${comments.length ? `Your ${plural(commentCount, 'comment')} ${commentCount === 1 ? 'goes' : 'go'} on GitHub, on the code ${commentCount === 1 ? "it's" : "they're"} about.` : 'Your review goes on GitHub.'} The PR leaves your inbox until it changes.`,
           submit: event === 'APPROVE' ? 'Approve on GitHub' : event === 'REQUEST_CHANGES' ? 'Request changes on GitHub' : 'Post review',
         },
       ]
@@ -149,7 +151,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
       : {
         id: 'send-back' as const,
         title: 'Send back to the agent',
-        detail: `Resumes the agent's session with ${comments.length ? `your ${plural(comments.length, 'comment')}` : 'your note'}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
+        detail: `Resumes the agent's session with ${comments.length ? `your ${plural(commentCount, 'comment')}` : 'your note'}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
         submit: 'Send back',
         disabled: agent ? undefined : !data.assistant ? "This project is set to Manual, so there's no assistant to send it back to." : 'No session on this Mac worked on this branch, so there is no agent to send it back to.',
       },
@@ -330,7 +332,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
           <div className="flex flex-col gap-1">
             <h1 className="text-hero font-semibold break-words">{data.title}</h1>
             <p className="text-meta text-faint">
-              {[`${reviewed} of ${plural(data.steps.length, 'step')} reviewed`, plural(comments.length, 'comment'), dropping.length ? `${plural(dropping.length, 'step')} to drop` : null, minutes ? plural(minutes, 'minute') : null].filter(Boolean).join(' · ')}
+              {[`${reviewed} of ${plural(data.steps.length, 'step')} reviewed`, plural(commentCount, 'comment'), dropping.length ? `${plural(dropping.length, 'step')} to drop` : null, minutes ? plural(minutes, 'minute') : null].filter(Boolean).join(' · ')}
             </p>
           </div>
 
@@ -367,29 +369,37 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
 
           <section className="flex flex-col gap-2.5 rounded-xl border border-border p-3.5">
             <div className="flex items-center justify-between">
-              <span className="text-body font-semibold">{comments.length ? `Your ${plural(comments.length, 'comment')}` : 'No comments'}</span>
-              {comments.length > 0 && (
+              <span className="text-body font-semibold">
+                {comments.length ? `Your ${plural(commentCount, 'comment')}` : written.length ? 'No comments go with your review' : 'No comments'}
+                {leftOut > 0 && <span className="font-normal text-muted"> · {leftOut} left out</span>}
+              </span>
+              {written.length > 0 && (
                 <Button variant="quiet" size="sm" aria-expanded={showComments} onClick={() => setShowComments(!showComments)}>
                   {showComments ? 'Hide' : 'Show'}
                 </Button>
               )}
             </div>
             {showComments &&
-              comments.map((c) => (
-                <div key={c.id} className="flex flex-col gap-1 rounded-lg bg-code px-3 py-2.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="min-w-0 pt-0.5 text-meta break-words text-faint">
-                      {stepLabel(c.stepKey)}
-                      {c.path && c.line ? <span className="font-mono"> · {c.path}:{c.line}</span> : null}
-                    </span>
-                    <Button variant="quiet" size="sm" disabled={busy} onClick={() => remove(c)}>
-                      Remove
-                    </Button>
-                  </div>
-                  <div className="text-body break-words select-text">
-                    <Markdown text={c.body} />
-                  </div>
-                  {changedAfter(c) && <span className="text-meta text-muted">You had the assistant change this step after writing this. If that settled it, remove it so it doesn’t go with your review.</span>}
+              written.map((c) => (
+                <div key={c.id} className="flex flex-col gap-1.5 rounded-lg bg-code px-3 py-2.5">
+                  <span className="min-w-0 text-meta break-words text-faint">
+                    {stepLabel(c.stepKey)}
+                    {c.path && c.line ? <span className="font-mono"> · {c.path}:{c.line}</span> : null}
+                  </span>
+                  {commentParts(c.body).map((part) => {
+                    const out = !!c.leftOut?.includes(part);
+                    return (
+                      <div key={part} className="flex items-start justify-between gap-3">
+                        <div className={`min-w-0 flex-1 text-body break-words select-text ${out ? 'text-faint' : ''}`}>
+                          <Markdown text={part} />
+                        </div>
+                        <Button variant="quiet" size="sm" disabled={busy} className="shrink-0" data-tooltip={out ? undefined : 'It stays here and doesn’t go with your review.'} onClick={() => leaveOut(c, part, !out)}>
+                          {out ? 'Put back' : 'Leave out'}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                  {changedAfter(c) && <span className="text-meta text-muted">You had the assistant change this step after writing this. If that settled it, leave it out so it doesn’t go with your review.</span>}
                 </div>
               ))}
           </section>

@@ -605,6 +605,8 @@ export interface Comment {
   side?: 'LEFT' | 'RIGHT' | null;
   body: string;
   createdAt: string;
+  /** The parts of the body (`commentParts`) that stay here and don't go with your review, like a question that turned out fine. */
+  leftOut?: string[];
 }
 
 /** `github` posts your review on the pull request. */
@@ -979,6 +981,8 @@ export type ReviewPatch =
   /** Ticks one hunk of a step off, or back on. `hunkIds` are the step's hunks now. Ticking the last one makes the step reviewed. */
   | { type: 'reviewed-hunk'; stepKey: string; hunkIds: string[]; hunkId: string; on: boolean }
   | { type: 'comment'; stepKey: string; body: string }
+  /** Keeps a part of a comment out of what your review sends, or puts it back. */
+  | { type: 'leave-out'; id: string; part: string; on: boolean }
   /**
    * Settles a review plan decision. `comment` is the line a "needs a fix" adds to the step's comment;
    * any other value takes it out again, so a decision you changed doesn't leave its old comment behind.
