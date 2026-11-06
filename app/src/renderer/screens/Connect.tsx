@@ -18,7 +18,8 @@ import { useTabActive } from '../state/tabPane.ts';
 import { FoundOnThisMac } from '../components/found.tsx';
 import { InstallLink } from '../components/setup.tsx';
 import { CircleCheck, RefreshCw } from 'lucide-react';
-import type { AiReviewSettings, AssistantChoice, InboxPreview, Project, RepoCheck, Watch } from '../../shared/types.ts';
+import { IconPicker } from '../components/IconPicker.tsx';
+import type { AiReviewSettings, AssistantChoice, InboxPreview, Project, ProjectIconChoice, ProjectIconInfo, RepoCheck, Watch } from '../../shared/types.ts';
 
 /** Past this many open pull requests, say what watching them all means. */
 const BUSY_REPO = 30;
@@ -50,6 +51,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const [reviewOpen, setReviewOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [preview, setPreview] = useState<InboxPreview | null>(null);
+  // Your icon choice, and what it shows, until you save. Null: nothing changed here.
+  const [iconChoice, setIconChoice] = useState<{ choice: ProjectIconChoice; shown: ProjectIconInfo } | null>(null);
+  const [savedIcon, setSavedIcon] = useState<ProjectIconInfo | null>(null);
 
   const loadAssistants = (recheck = false) =>
     (recheck ? window.api.setupStatus({ recheck }).then((s) => s.assistants) : window.api.listAssistants()).then((as) => {
@@ -68,6 +72,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       const p = ps.find((x) => x.id === projectId);
       if (!p) return;
       setExisting(p);
+      window.api.projectIcons().then((icons) => setSavedIcon(icons[p.id] ?? null), () => {});
       setName(p.name);
       setPath(p.path);
       setGithub(p.github ?? null);
@@ -159,9 +164,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
     const assistantInput = assistant ?? 'claude-code';
     try {
       if (existing) {
-        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview });
+        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview, ...(iconChoice && { icon: iconChoice.choice }) });
         rememberProjectName(saved.id, saved.name);
-      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview });
+      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview, ...(iconChoice && { icon: iconChoice.choice }) });
       go({ name: 'home' });
     } catch (e) {
       setError(cleanError(e));
@@ -177,6 +182,8 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
 
   const ok = !!check?.isRepo;
   const chosen = assistants.find((a) => a.id === assistant);
+  const noIcon: ProjectIconInfo = { icon: null, source: null, path: null };
+  const detectedIcon = check?.icon ?? noIcon;
   // What an empty Name falls back to, like the main process does.
   const folderName = (check?.root ?? existing?.path ?? path).replace(/\/+$/, '').split('/').pop() ?? '';
   const baseOptions = check ? [...new Set([base, check.baseBranch, ...check.branches].filter(Boolean) as string[])] : [];
@@ -256,6 +263,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
               <input className={`${FIELD_LG} max-w-md font-normal`} value={name ?? folderName} onChange={(e) => setName(e.target.value)} placeholder={folderName || 'my-project'} />
               <span className="text-meta font-normal text-muted">How the inbox and reviews show this project. Leave it empty to use the folder's name.</span>
             </label>
+            {ok && <IconPicker name={name || folderName} shown={iconChoice?.shown ?? savedIcon ?? detectedIcon} detected={detectedIcon} onChange={(choice, shown) => setIconChoice({ choice, shown })} />}
             {ok && !check!.sessionCount && <p className="text-meta text-muted">No Claude Code or Copilot sessions for this repo yet. Reviews still work, with less context: no prompt and no agent reasons.</p>}
           </Section>
 
@@ -340,10 +348,11 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
           <Section title="Who does the work?">
             <RadioGroup label="Assistant" className="flex flex-col gap-2">
               {assistants.map((a) => (
-                <div key={a.id} className={`rounded-xl border p-3.5 ${assistant === a.id ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'} ${a.available ? '' : 'opacity-60'}`}>
+                <div key={a.id} className={`flex flex-col gap-1 rounded-xl border p-3.5 ${assistant === a.id ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'}`}>
                   <Radio
                     checked={assistant === a.id}
                     disabled={!a.available}
+                    describedBy={a.available ? undefined : `assistant-why-${a.id}`}
                     tabbable={assistant === a.id}
                     onSelect={() => {
                       setAssistant(a.id);
@@ -353,19 +362,19 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                   >
                     <span className="flex flex-col gap-0.5">
                       <span className="text-body font-semibold">{a.name}</span>
-                      <span className="text-ui text-muted">
-                        {!a.available ? (
-                          <>
-                            {a.reason} {INSTALL_URL[a.id] && <InstallLink id={a.id}>Get it</InstallLink>}
-                          </>
-                        ) : a.id === 'manual' ? (
-                          "No AI: the plain changes, one step per file, with no story, questions or changes. Hunkdory never sends this project's code anywhere."
-                        ) : (
-                          'Tells each change as a story, answers your questions and makes the changes you ask for.'
-                        )}
-                      </span>
+                      {a.available && (
+                        <span className="text-ui text-muted">
+                          {a.id === 'manual' ? "No AI: the plain changes, one step per file, with no story, questions or changes. Hunkdory never sends this project's code anywhere." : 'Tells each change as a story, answers your questions and makes the changes you ask for.'}
+                        </span>
+                      )}
                     </span>
                   </Radio>
+                  {/* Outside the radio: a disabled one is dimmed, and a link can't sit inside a button. */}
+                  {!a.available && (
+                    <p id={`assistant-why-${a.id}`} className="pl-[22px] text-ui text-muted">
+                      {a.reason} {INSTALL_URL[a.id] && <InstallLink id={a.id}>Get it</InstallLink>}
+                    </p>
+                  )}
                 </div>
               ))}
             </RadioGroup>

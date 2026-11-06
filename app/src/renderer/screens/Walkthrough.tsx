@@ -299,7 +299,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
           <span key={p.label} data-tooltip={`${p.label} · ${done} of ${n} done`} className="flex min-w-0 gap-0.5" style={{ flex: `${Math.max(2, Math.min(n, 12))} 1 60px` }}>
             {n <= 40 ? (
               p.segments.map((x) => (
-                <button key={x.key} type="button" data-tooltip={x.title} aria-label={x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} className="min-w-0 flex-1 py-1">
+                <button key={x.key} type="button" data-tooltip={x.title} aria-label={x.done ? `${x.title}, done` : x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} className="min-w-0 flex-1 py-1">
                   <span className={`block h-1 rounded-full ${x.done ? 'bg-text' : x.current ? 'bg-text/45 outline-2 outline-offset-1 outline-text' : 'bg-selected'}`} />
                 </button>
               ))

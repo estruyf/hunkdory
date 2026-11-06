@@ -192,7 +192,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
           {data.error && <Notice tone="error">{data.error}</Notice>}
 
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex h-7 w-72 min-w-0 items-center gap-2 rounded-md border border-edge bg-bg px-2.5 text-ui text-faint focus-within:border-accent-ink">
+            <label className="flex h-7 w-72 min-w-0 items-center gap-2 rounded-md border border-field bg-bg px-2.5 text-ui text-faint focus-within:border-accent-ink">
               <Search size={13} aria-hidden />
               <input
                 id={SEARCH_ID}
@@ -335,7 +335,7 @@ function Row({ row, canIgnore, onIgnore, go }: { row: BranchRow; canIgnore: bool
         data-tooltip={row.tooltip ?? undefined}
         className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left outline-none hover:bg-border/45 focus-visible:bg-selected disabled:opacity-60"
       >
-        <ProjectIcon name={row.projectName} size={22} />
+        <ProjectIcon name={row.projectName} projectId={row.projectId} size={22} />
         <span className="grid min-w-0 flex-1">
           <span className={`truncate text-body text-text ${row.unseen ? 'font-semibold' : ''}`}>{row.title}</span>
           <span className="truncate text-meta text-faint">
@@ -437,7 +437,7 @@ function ProjectRow({
         onClick={onSelect}
         className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left"
       >
-        <ProjectIcon name={project.name} size={22} />
+        <ProjectIcon name={project.name} projectId={project.id} size={22} />
         <span className="grid min-w-0 flex-1">
           <span className="truncate text-body font-semibold">{project.name}</span>
           {(waiting || !scan?.error) && <span className="text-meta text-faint">{waiting ? `${plural(waiting, 'branch', 'branches')} to review` : why || (scanning || refreshing ? 'Checking…' : 'Nothing waiting.')}</span>}

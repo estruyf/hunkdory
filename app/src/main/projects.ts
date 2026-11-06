@@ -8,6 +8,7 @@ import createWtvWorker from './wtv-worker.ts?nodeWorker';
 import type { WtvJob, WtvOutput } from './wtv-worker.ts';
 import * as g from './git.ts';
 import { pathKey } from './paths.ts';
+import { detectedIcon, forgetIconFile, projectIconInfo, storeIconChoice } from './projectIcons.ts';
 import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './sessions/claude.ts';
 import { belongsTo as copilotBelongsTo, readCopilotSessions } from './sessions/copilot.ts';
 import * as gh from './github.ts';
@@ -19,7 +20,7 @@ import type { GeneratedWalkthroughs } from './writer.ts';
 import { asOfNow, type Summaries, type Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
 import { assistantFor } from './assistants/index.ts';
-import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, InboxPreview, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, InboxPreview, ProjectIconInfo, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -83,7 +84,7 @@ export class Projects {
 
   async checkFolder(path: string): Promise<RepoCheck> {
     const full = path.replace(/^~(?=\/|$)/, homedir());
-    const empty: RepoCheck = { path: full, isRepo: false, root: null, baseBranch: null, branches: [], remote: null, sessionSources: [], sessionCount: 0 };
+    const empty: RepoCheck = { path: full, isRepo: false, root: null, baseBranch: null, branches: [], remote: null, sessionSources: [], sessionCount: 0, icon: { icon: null, source: null, path: null } };
     if (!existsSync(full)) return { ...empty, error: 'Folder not found' };
     const root = await g.repoRoot(full);
     if (!root) return { ...empty, error: 'Not a git repository' };
@@ -104,6 +105,7 @@ export class Projects {
       remote,
       sessionSources: sources.sort((a, b) => b.sessions - a.sessions),
       sessionCount: claudeSessions.length + copilotSessions.length,
+      icon: detectedIcon(root),
     };
   }
 
@@ -124,9 +126,10 @@ export class Projects {
         sessions: (prev?.sessions ?? 0) + f.sessions,
         at: Math.max(prev?.at ?? 0, f.lastActive),
         lastActive: new Date(Math.max(prev?.at ?? 0, f.lastActive)).toISOString(),
+        icon: null,
       });
     }
-    return [...byPath.values()].sort((a, b) => b.at - a.at).slice(0, 8).map(({ at: _at, ...f }) => ({ ...f, path: tilde(f.path) }));
+    return [...byPath.values()].sort((a, b) => b.at - a.at).slice(0, 8).map(({ at: _at, ...f }) => ({ ...f, path: tilde(f.path), icon: detectedIcon(f.path).icon }));
   }
 
   private async validate(root: string, input: Omit<ProjectInput, 'path'>) {
@@ -163,8 +166,10 @@ export class Projects {
     const check = await this.checkFolder(input.path);
     if (!check.root) throw new Error(check.error ?? 'Not a git repository');
     await this.validate(check.root, input);
+    const id = randomUUID();
+    const icon = input.icon && storeIconChoice(id, input.icon);
     const project: Project = {
-      id: randomUUID(),
+      id,
       name: projectName(input.name, check.root),
       path: check.root,
       baseBranch: input.baseBranch,
@@ -174,6 +179,7 @@ export class Projects {
       writeWalkthroughs: input.writeWalkthroughs,
       assistant: input.assistant,
       ...(input.aiReview && { aiReview: aiReviewSettings(input.aiReview) }),
+      ...(icon && { icon }),
       addedAt: new Date().toISOString(),
     };
     this.store.addProject(project);
@@ -183,15 +189,35 @@ export class Projects {
   }
 
   removeProject(id: string) {
+    forgetIconFile(this.store.projects().find((p) => p.id === id)?.icon);
+    this.icons.delete(id);
     this.store.removeProject(id);
     this.scanning = null;
+  }
+
+  // Reading a repo for its icon touches a lot of files, and every screen with a project on it asks.
+  private icons = new Map<string, { at: number; info: ProjectIconInfo }>();
+
+  /** What each project shows as its icon. A repo's own icon is looked for again after a minute. */
+  projectIcons(): Record<string, ProjectIconInfo> {
+    const now = Date.now();
+    const out: Record<string, ProjectIconInfo> = {};
+    for (const p of this.store.projects()) {
+      let hit = this.icons.get(p.id);
+      if (!hit || now - hit.at > 60_000) this.icons.set(p.id, (hit = { at: now, info: projectIconInfo(p) }));
+      out[p.id] = hit.info;
+    }
+    return out;
   }
 
   async updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project> {
     const project = this.store.project(id);
     await this.validate(project.path, input);
+    // Before anything is saved: an image that can't be an icon leaves the settings as they were.
+    const icon = input.icon ? storeIconChoice(id, input.icon) : project.icon;
     const updated: Project = {
       ...withProjectName(project, input.name),
+      icon,
       baseBranch: input.baseBranch,
       watch: toWatch(input.watch),
       github: input.github,
@@ -201,6 +227,8 @@ export class Projects {
       remote: await g.remoteUrl(project.path),
     };
     this.store.addProject(updated);
+    forgetIconFile(project.icon, icon);
+    this.icons.delete(id);
     // Bases and watch rules change what every review looks like, and the name is on every one.
     for (const k of [...this.cache.keys()]) if (k.startsWith(`${id}::`)) this.cache.delete(k);
     // A scan that started before this would hand back the old name.

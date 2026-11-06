@@ -6,6 +6,8 @@ const methods: (keyof ReviewerApi)[] = [
   'checkFolder',
   'chooseFolder',
   'foundOnThisMac',
+  'projectIcons',
+  'chooseIconFile',
   'setupStatus',
   'previewInbox',
   'listAssistants',

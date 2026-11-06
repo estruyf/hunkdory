@@ -241,7 +241,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
             <ul className="m-0 flex list-none flex-col gap-px p-0">
               {projects.value?.map((p) => (
                 <li key={p.id} className="flex items-center gap-3 rounded-lg px-1 py-1.5">
-                  <ProjectIcon name={p.name} size={22} />
+                  <ProjectIcon name={p.name} projectId={p.id} size={22} />
                   <span className="grid min-w-0 flex-1">
                     <span className="truncate text-body font-semibold">{p.name}</span>
                     <span className="truncate font-mono text-meta text-faint">{p.path}</span>

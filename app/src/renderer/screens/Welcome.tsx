@@ -19,7 +19,7 @@ export function Welcome({ go }: { go: Go }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-10 pb-14">
           <div className="flex flex-col gap-2">
-            <h1 className="text-hero font-semibold">Understand what your agents wrote, one step at a time.</h1>
+            <h1 className="text-hero font-semibold">Understand every change before you approve it.</h1>
             <p className="text-body text-muted">
               Hunkdory tells a change as a story: what was asked, what it does, and each part explained in plain words. Ask your assistant about anything that isn't clear, have it make a change, then merge it or send it back.
             </p>

@@ -38,7 +38,7 @@ export function FoundOnThisMac({ onPick, title = 'Found on this Mac', primary = 
         {found.value?.map((f, i) => (
           <li key={f.path}>
             <button type="button" onClick={() => onPick(f.path)} aria-label={`Connect ${f.name}`} className="flex h-13 w-full items-center gap-3 rounded-lg px-3 text-left hover:bg-border/45">
-              <ProjectIcon name={f.name} size={24} />
+              <ProjectIcon name={f.name} icon={f.icon} size={24} />
               <span className="grid min-w-0 flex-1">
                 <span className="truncate text-body font-semibold">{f.name}</span>
                 <span className="truncate font-mono text-meta text-faint">

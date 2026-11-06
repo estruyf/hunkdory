@@ -4,15 +4,15 @@ import { nativeImage, type NativeImage } from 'electron';
 
 type Seg = [number, number, number, number];
 
-// Same geometry as the app icon, in a 24x24 viewBox: three diff lines, then the check.
+// Same geometry as the app icon, in a 24x24 viewBox: its three diff lines, then the check.
 const BARS: Seg[] = [
-  [4.5, 6, 10.5, 6],
-  [4.5, 10.5, 15, 10.5],
-  [4.5, 15, 9.5, 15],
+  [5.2, 5.8, 15.5, 5.8],
+  [5.2, 9.8, 18.8, 9.8],
+  [5.2, 13.7, 10.4, 13.7],
 ];
 const CHECK: Seg[] = [
-  [13.5, 16.5, 16, 19],
-  [16, 19, 21, 13],
+  [12.8, 17.2, 15.6, 20],
+  [15.6, 20, 20.7, 13.6],
 ];
 const SEGMENTS = [...BARS, ...CHECK];
 

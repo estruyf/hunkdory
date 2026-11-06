@@ -4,10 +4,25 @@
 export type RiskLevel = 'high' | 'medium' | 'low';
 export type ReviewOrder = 'story' | 'risk' | 'file';
 
+/** What a project shows as its icon. */
+export type ProjectIconValue = { kind: 'image'; dataUrl: string } | { kind: 'emoji'; value: string };
+/** What you can pick for a project. `auto` goes back to what its repo has; `none` is the letter, even when the repo has an icon. */
+export type ProjectIconChoice = { kind: 'auto' } | { kind: 'none' } | { kind: 'emoji'; value: string } | { kind: 'file'; path: string };
+/** What's kept for a project you picked an icon for: an image is a copy in Hunkdory's own folder. */
+export type StoredProjectIcon = { kind: 'none' } | { kind: 'emoji'; value: string } | { kind: 'file'; path: string };
+/** The icon a project shows, and where it came from. Null `icon`: its letter. `path` is where in the repo it was found. */
+export interface ProjectIconInfo {
+  icon: ProjectIconValue | null;
+  source: 'detected' | 'custom' | null;
+  path: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;
   path: string;
+  /** Unset: whatever icon its repo has. */
+  icon?: StoredProjectIcon;
   /** Branch or ref to compare against when a session doesn't say where it branched from. */
   baseBranch: string;
   remote: string | null;
@@ -711,6 +726,7 @@ export interface InboxItem {
 export interface FoundFolder {
   name: string;
   path: string;
+  icon: ProjectIconValue | null;
   sessions: number;
   lastActive: string;
 }
@@ -741,6 +757,8 @@ export interface RepoCheck {
   /** Where sessions for this repo were found, one entry per Claude Code config dir. */
   sessionSources: { dir: string; sessions: number }[];
   sessionCount: number;
+  /** The icon the repo has. */
+  icon: ProjectIconInfo;
   error?: string;
 }
 
@@ -840,6 +858,10 @@ export interface ReviewerApi {
   checkFolder(path: string): Promise<RepoCheck>;
   chooseFolder(): Promise<string | null>;
   foundOnThisMac(): Promise<FoundFolder[]>;
+  /** What each project shows as its icon, by project id. */
+  projectIcons(): Promise<Record<string, ProjectIconInfo>>;
+  /** Asks for an image to use as an icon. Null when you cancel; throws when it can't be one. */
+  chooseIconFile(): Promise<{ path: string; icon: ProjectIconValue } | null>;
   /** What's installed and signed in. `recheck` reads your shell's environment again, for after installing something. */
   setupStatus(opts?: { recheck?: boolean }): Promise<SetupStatus>;
   previewInbox(root: string, baseBranch: string, repo: string | null): Promise<InboxPreview>;
@@ -942,6 +964,8 @@ export interface ProjectInput {
   assistant?: string;
   /** Left out: keep what the project had. */
   aiReview?: AiReviewSettings;
+  /** Left out: keep what the project had. */
+  icon?: ProjectIconChoice;
 }
 
 export type ReviewPatch =

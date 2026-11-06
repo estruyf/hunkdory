@@ -10,7 +10,7 @@ export function Switch({ checked, onChange, disabled, label, dataAttrs }: { chec
       onClick={() => onChange(!checked)}
       // Off, the track is a visible grey on every surface (bg-border vanished on popovers and dialogs,
       // leaving a lone white dot); on, it is the yellow fill with a dark knob, like a primary button.
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${checked ? 'bg-accent' : 'bg-faint/40 hover:bg-faint/55'}`}
+      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${checked ? 'bg-accent' : 'bg-faint/75 hover:bg-faint'}`}
       {...dataAttrs}
     >
       <span

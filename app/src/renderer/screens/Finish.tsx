@@ -342,16 +342,22 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
                 const on = pick === o.id;
                 const body = on && !o.disabled ? optionBody(o.id) : null;
                 return (
-                  <div key={o.id} className={`flex flex-col gap-2.5 rounded-xl border p-3.5 ${on ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'} ${o.disabled ? 'opacity-60' : ''}`}>
+                  <div key={o.id} className={`flex flex-col gap-2.5 rounded-xl border p-3.5 ${on ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'}`}>
                     <div className="flex items-start gap-3">
-                      <Radio checked={on} tabbable={on} disabled={!!o.disabled} onSelect={() => choose(o.id)} className="flex-1">
+                      <Radio checked={on} tabbable={on} disabled={!!o.disabled} describedBy={o.disabled ? `finish-why-${o.id}` : undefined} onSelect={() => choose(o.id)} className="flex-1">
                         <span className="flex flex-col gap-0.5">
                           <span className="text-body font-semibold">{o.title}</span>
-                          <span className="text-ui text-muted">{o.disabled ?? o.detail}</span>
+                          {!o.disabled && <span className="text-ui text-muted">{o.detail}</span>}
                         </span>
                       </Radio>
-                      <Kbd keys={String(i + 1)} />
+                      <Kbd keys={String(i + 1)} className={o.disabled ? 'opacity-50' : ''} />
                     </div>
+                    {/* Why it's off stays at full strength, outside the dimmed radio: it's what tells you what to do. */}
+                    {o.disabled && (
+                      <p id={`finish-why-${o.id}`} className="-mt-2 pl-[22px] text-ui text-muted">
+                        {o.disabled}
+                      </p>
+                    )}
                     {body && <div className="flex flex-col gap-2.5 pl-6">{body}</div>}
                   </div>
                 );

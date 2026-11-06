@@ -2,7 +2,7 @@
 
 [![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fhunkdory&countColor=%233451d1&style=flat)](https://visitorbadge.io/status?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fhunkdory)
 
-Understand what a branch or pull request is about, one step at a time.
+Understand every change before you approve it.
 
 Reviewing code you didn't write is hard, and harder when an agent wrote it.
 Hunkdory is a local macOS app that tells the change as a story: what was asked,

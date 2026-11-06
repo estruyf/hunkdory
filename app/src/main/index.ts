@@ -15,6 +15,7 @@ import { Conversations } from './conversations.ts';
 import * as gh from './github.ts';
 import { forgetShellEnv, shellEnv, which } from './shellEnv.ts';
 import { useGuardFolder } from './gitGuard.ts';
+import { ICON_EXTENSIONS, previewIconFile, useIconFolder } from './projectIcons.ts';
 import { trayIcon } from './trayIcon.ts';
 import { restoredBounds } from './windowPlace.ts';
 import { installedEditors, openInEditor, pickEditor } from './editors.ts';
@@ -76,6 +77,7 @@ const writer = new Writer({
 });
 const wtvBin = resolve(app.getAppPath(), '../tools/wtv/bin/wtv.mjs');
 useGuardFolder(join(app.getPath('userData'), 'bin'));
+useIconFolder(join(app.getPath('userData'), 'project-icons'));
 const conversations = new Conversations({
   store,
   projects,
@@ -220,6 +222,12 @@ const api: ReviewerApi = {
     return res.canceled ? null : res.filePaths[0];
   },
   foundOnThisMac: async () => projects.foundOnThisMac(),
+  projectIcons: async () => projects.projectIcons(),
+  chooseIconFile: async () => {
+    const res = await dialog.showOpenDialog(win!, { properties: ['openFile'], message: 'Pick an image for this project', filters: [{ name: 'Images', extensions: ICON_EXTENSIONS }] });
+    const path = res.canceled ? null : res.filePaths[0];
+    return path ? { path, icon: previewIconFile(path) } : null;
+  },
   setupStatus: async (opts) => {
     if (opts?.recheck) forgetShellEnv();
     const env = await shellEnv();

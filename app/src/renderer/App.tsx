@@ -6,6 +6,7 @@ import { TooltipLayer } from './components/ui/Tooltip.tsx';
 import { matches, type ShortcutContext } from './lib/shortcuts.ts';
 import { stepBranch, useBranches } from './state/branches.ts';
 import { openSettings, useNav } from './state/nav.ts';
+import { loadProjectIcons } from './state/projectIcons.ts';
 import { TabPane } from './state/tabPane.ts';
 import { activate, activeRoute, closeTab, INBOX, move, navigate, reopenTab, restoreTabs, routeOf, savedTabs, startTabs, stepTab, tabAt, withoutProjectsGone, type Tabs } from './state/tabs.ts';
 import { jobKey, useWalkthroughs, watchWalkthroughs } from './state/walkthroughs.ts';
@@ -92,6 +93,7 @@ export function App() {
 
   useEffect(() => {
     if (inbox.projects.length) setNav((n) => withoutProjectsGone(n, new Set(inbox.projects.map((p) => p.id))));
+    void loadProjectIcons();
   }, [inbox.projects]);
 
   const goFrom =

@@ -7,10 +7,10 @@ const TONE: Record<KbdTone, string> = {
   // A small keycap; the overlay border stays visible on dialogs and popovers.
   default: 'rounded border border-edge px-1 text-faint',
   // Inside a yellow button: the button's own ink, softened, without a keycap.
-  'on-accent': 'text-on-accent/60',
+  'on-accent': 'text-on-accent/70',
   plain: 'text-faint',
   // One key on its own cap (the shortcuts sheet): 20px tall, a deeper bottom edge, a step above the surface.
-  cap: 'inline-flex h-5 min-w-5 items-center justify-center rounded border border-b-2 border-edge bg-text/8 px-1 text-muted',
+  cap: 'inline-flex h-5 min-w-5 items-center justify-center rounded border border-b-2 border-edge bg-text/8 px-1 text-text',
 };
 
 interface KbdProps extends Omit<HTMLAttributes<HTMLElement>, 'children'> {
