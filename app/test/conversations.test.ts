@@ -39,7 +39,7 @@ const input = (extra: Partial<AskInput> = {}): AskInput => ({
   headRef: 'refs/reviewer/pr/7',
   pr: { number: 7, title: 'Retry sync', body: 'Adds retries.' },
   prompt: null,
-  wtvCommand: null,
+  keepWalkthrough: null,
   ...extra,
 });
 
@@ -68,7 +68,7 @@ test('the agent that wrote the branch is told which step, not given the whole co
 });
 
 test('a change to a branch with its own walkthrough asks to keep it verified', () => {
-  const p = askPrompt(input({ kind: 'change', by: 'session', text: 'Keep it at one hour.', wtvCommand: 'wtv verify' }));
+  const p = askPrompt(input({ kind: 'change', by: 'session', text: 'Keep it at one hour.', keepWalkthrough: { verify: 'wtv verify' } }));
   assert.match(p, /please make this change/);
   assert.match(p, /## The change\nKeep it at one hour\./);
   assert.match(p, /update \.review\/walkthrough\.json .* run `wtv verify` until it passes/);

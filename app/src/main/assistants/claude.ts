@@ -4,7 +4,9 @@ import { spawn } from 'node:child_process';
 import { closeSync, createWriteStream, mkdirSync, openSync, realpathSync } from 'node:fs';
 import { dirname, relative } from 'node:path';
 import { createInterface } from 'node:readline';
+import { explainRunFailure } from '../../shared/assistantText.ts';
 import { DEFAULT_CONFIG_DIR } from '../sessions/claude.ts';
+import { agentEnv } from '../gitGuard.ts';
 import { shellEnv, which } from '../shellEnv.ts';
 import type { Assistant, AssistantResult, AssistantRun, AssistantSession, RunOptions, SendBackHandle, SendBackOptions } from './types.ts';
 
@@ -68,7 +70,7 @@ export function claudeArgs(opts: Pick<RunOptions, 'prompt' | 'access' | 'session
 
 /** Claude Code's environment, pointed at the config dir a session lives in. */
 async function claudeEnv(session: AssistantSession | SendBackOptions['session'] | null): Promise<{ env: NodeJS.ProcessEnv; claude: string }> {
-  const env = { ...(await shellEnv()) };
+  const env = await agentEnv();
   // Sessions from another config dir (~/.claude-work, ...) only resume with that dir set.
   if (session?.configDir && session.configDir !== DEFAULT_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = session.configDir;
   else if (session) delete env.CLAUDE_CONFIG_DIR;
@@ -121,7 +123,7 @@ function runClaude(opts: { claude: string; cwd: string; env: NodeJS.ProcessEnv; 
       const r = got.result;
       if (r && !r.is_error) return { text: r.result ?? '', structured: r.structured_output ?? null, ...(typeof r.total_cost_usd === 'number' && { costUsd: r.total_cost_usd }) };
       const why = r?.is_error ? r.result || r.subtype : stderr.trim().split('\n').at(-1) || (code === null ? `it took longer than ${Math.round(opts.timeoutMs / 60_000)} minutes` : `exit code ${code}`);
-      throw new Error(`Claude Code stopped without an answer (${why}).`);
+      throw new Error(explainRunFailure({ id: 'claude-code', name: 'Claude Code' }, why ?? 'no reason given'));
     });
 
   return {

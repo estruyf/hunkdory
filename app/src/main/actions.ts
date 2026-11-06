@@ -5,15 +5,21 @@ import * as g from './git.ts';
 import * as gh from './github.ts';
 import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
-import { which, shellEnv } from './shellEnv.ts';
+import { shellEnv, wtvCommand } from './shellEnv.ts';
 import { assistantFor } from './assistants/index.ts';
 import { reviewedNote } from '../shared/comments.ts';
+import { unpushedWork } from '../shared/plan.ts';
 import type { Comment, DecisionRecord, FinishRequest, FinishResult, HunkView, ReviewData, ReviewState, Step } from '../shared/types.ts';
 
 const where = (c: Comment) => (c.path && c.line ? ` at ${c.path}:${c.line}${c.side === 'LEFT' ? ' (removed line)' : ''}` : '');
 
+/** An agent that keeps its own walkthrough, and how it can check it here (null: Hunkdory's own check is all there is). */
+export interface WalkthroughUpkeep {
+  verify: string | null;
+}
+
 /** The message a resumed agent session gets. Plain text, one item per comment. */
-export function sendBackPrompt(data: Pick<ReviewData, 'steps'>, state: Pick<ReviewState, 'comments'>, req: Pick<FinishRequest, 'note' | 'dropStepKeys'>, wtvCommand: string): string {
+export function sendBackPrompt(data: Pick<ReviewData, 'steps'>, state: Pick<ReviewState, 'comments'>, req: Pick<FinishRequest, 'note' | 'dropStepKeys'>, keep: WalkthroughUpkeep | null): string {
   const stepOf = (key: string) => data.steps.find((s) => s.key === key);
   const label = (s: Step | undefined) => (s ? `Step ${s.index + 1} "${s.title}" (${s.files.join(', ') || 'no files'})` : 'A step that no longer exists');
   const lines = ['I reviewed your changes on this branch in Hunkdory. Please address the feedback below.', ''];
@@ -29,10 +35,18 @@ export function sendBackPrompt(data: Pick<ReviewData, 'steps'>, state: Pick<Revi
     lines.push('');
   }
   if (req.note.trim()) lines.push(`Note: ${req.note.trim()}`, '');
-  lines.push(
-    `When you're done, update .review/walkthrough.json so it describes the branch as it is now, and run \`${wtvCommand}\` until it passes.`
-  );
-  return lines.join('\n');
+  if (keep) lines.push(`When you're done, update .review/walkthrough.json so it describes the branch as it is now${keep.verify ? `, and run \`${keep.verify}\` until it passes` : ''}.`);
+  return lines.join('\n').trimEnd();
+}
+
+/** Approving, merging or deleting a branch acts on its code as it is right now. Commenting doesn't: it can still say what it's about. */
+export const actsOnCode = (req: Pick<FinishRequest, 'kind' | 'event' | 'deleteBranch'>) => req.kind === 'merge' || (req.kind === 'github' && req.event === 'APPROVE') || (req.kind === 'discard' && !!req.deleteBranch);
+
+/** Whether the branch has new commits or new uncommitted edits since you saw it. Pure. */
+export function changedSinceSeen(seen: FinishRequest['seen'], now: Pick<ReviewData, 'headSha' | 'hunks'>): boolean {
+  const ids = Object.keys(now.hunks);
+  const known = new Set(seen.hunkIds);
+  return seen.headSha !== now.headSha || ids.length !== known.size || ids.some((id) => !known.has(id));
 }
 
 /** Longest range a step comment covers on GitHub: enough to show where it is without quoting a whole new file. */
@@ -125,9 +139,9 @@ export class Actions {
   private projects: Projects;
   private logDir: string;
   private wtvBin: string;
-  private onChange: () => void;
+  private onChange: (review?: ReviewState) => void;
 
-  constructor(opts: { store: Store; projects: Projects; logDir: string; wtvBin: string; onChange: () => void }) {
+  constructor(opts: { store: Store; projects: Projects; logDir: string; wtvBin: string; onChange: (review?: ReviewState) => void }) {
     this.store = opts.store;
     this.projects = opts.projects;
     this.logDir = opts.logDir;
@@ -136,7 +150,12 @@ export class Actions {
   }
 
   async finish(req: FinishRequest): Promise<FinishResult> {
+    const guarded = actsOnCode(req);
+    // The PR as it is now, not as the last minute's list had it: an approval goes on GitHub before the merge can fail.
+    const repo = guarded ? this.store.project(req.projectId).github : null;
+    if (repo) gh.forget(repo);
     const data = await this.projects.review(req.projectId, req.branch);
+    if (guarded && changedSinceSeen(req.seen, data)) return { ok: false, changed: true, message: `${req.branch} changed since you last looked at it, so nothing happened. Look at what's new first.` };
     const state = this.store.ensureReview(req.projectId, req.branch, { title: data.title, sessionId: data.session?.id ?? null });
     const summary = { files: data.files, added: data.added, removed: data.removed, steps: data.steps.length };
     this.seen = { headSha: data.headSha, hunkIds: Object.keys(data.hunks) };
@@ -188,10 +207,12 @@ export class Actions {
 
   /** Approves the pull request on GitHub, with your comments, then merges it there. */
   private async mergePr(req: FinishRequest, data: ReviewData, state: ReviewState, summary: ReviewState['summary']): Promise<FinishResult> {
+    const unpushed = unpushedWork(data);
+    if (unpushed) throw new Error(unpushed);
     const { project, pr, repo } = await this.projects.pullRequest(req.projectId, req.branch);
     if (data.headSha !== pr.headRefOid) throw new Error(`PR #${pr.number} changed since you opened this review. Reload it and look at what's new first.`);
     const comments = state.comments.filter((c) => c.body.trim());
-    const review = githubReview(data, state, { ...req, dropStepKeys: [] }, { inline: !data.dirty, copilot: false, reviewer: data.githubLogin });
+    const review = githubReview(data, state, { ...req, dropStepKeys: [] }, { inline: true, copilot: false, reviewer: data.githubLogin });
     let url: string | null = null;
     let approved = true;
     try {
@@ -264,19 +285,23 @@ export class Actions {
     if (current !== base) throw new Error(`Your main folder is on "${current ?? 'a detached HEAD'}". Switch it to ${base} first, then merge.`);
     if ((await g.dirtyFiles(root)).length) throw new Error(`Your main folder has uncommitted changes. Commit or stash them first.`);
 
+    // The commit you reviewed, by its id: a commit landing on the branch from here on isn't part of this merge.
+    let reviewed = data.headSha;
     if (d.branch.checkout.kind === 'worktree' && d.branch.dirtyFiles) {
       if (!req.commitFirst) return { ok: false, needsCommit: d.branch.dirtyFiles, message: `${d.branch.dirtyFiles} file(s) on this branch aren't committed yet. They are not part of a merge.` };
       const wt = d.branch.checkout.path;
       await g.git(['add', '-A', '--', '.', ':(exclude).review'], wt);
       await g.git(['commit', '-m', data.title, '-m', 'Committed by Hunkdory before merging.'], wt);
+      reviewed = (await g.git(['rev-parse', 'HEAD'], wt)).trim();
     }
 
     try {
-      await g.git(['merge', '--no-ff', '-m', `Merge branch '${req.branch}': ${data.title}`, req.branch], root);
+      await g.git(['merge', '--no-ff', '-m', `Merge branch '${req.branch}': ${data.title}`, reviewed], root);
     } catch (e) {
       await g.tryGit(['merge', '--abort'], root);
       const detail = String((e as { stdout?: string }).stdout ?? (e as Error).message).trim().split('\n').slice(-3).join(' ');
-      throw new Error(`The merge stopped with conflicts, so nothing changed. ${detail}`);
+      const committed = reviewed !== data.headSha ? ` Your uncommitted files were committed to ${req.branch} first, and stay there.` : '';
+      throw new Error(`The merge stopped with conflicts, so ${base} didn't change.${committed} ${detail}`);
     }
     const review = this.record(req, 'merged', 'ok', `Merged ${req.branch} into ${base}.`, summary);
     return { ok: true, message: review.decision!.message, review };
@@ -287,13 +312,16 @@ export class Actions {
     const session = data.session;
     if (!session) throw new Error('No session is linked to this branch, so there is nothing to resume.');
     if (!existsSync(session.cwd)) throw new Error(`The session ran in ${session.cwd}, which no longer exists.`);
+    const elsewhere = await g.notOnBranch(session.cwd, req.branch);
+    if (elsewhere) throw new Error(elsewhere);
     if (!state.comments.length && !req.dropStepKeys.length && !req.note.trim()) throw new Error('Add a comment, a note, or a step to drop first.');
 
     // The session's own CLI handles it, whatever the project is set to today.
     const assistant = assistantFor({ assistant: session.agent });
-    const env = { ...(await shellEnv()) };
-    const wtv = (await which('wtv', env)) ? 'wtv' : `node ${this.wtvBin}`;
-    const prompt = sendBackPrompt(data, state, req, `${wtv} verify`);
+    // Only a walkthrough the agent keeps itself is the agent's to update: a file it wrote would replace Hunkdory's own.
+    const keepsWalkthrough = data.walkthrough === 'agent';
+    const wtv = keepsWalkthrough ? await wtvCommand(this.wtvBin, await shellEnv()) : null;
+    const prompt = sendBackPrompt(data, state, req, keepsWalkthrough ? { verify: wtv && `${wtv} verify` } : null);
 
     mkdirSync(this.logDir, { recursive: true });
     const logFile = join(this.logDir, `${session.id}-${Date.now()}.jsonl`);
@@ -301,19 +329,38 @@ export class Actions {
       session: { id: session.id, cwd: session.cwd, configDir: session.configDir },
       prompt,
       logFile,
-      allowBash: [assistant.id === 'copilot' ? `shell(${wtv} *)` : `Bash(${wtv} *)`],
+      allowBash: wtv ? [assistant.id === 'copilot' ? `shell(${wtv} *)` : `Bash(${wtv} *)`] : [],
       onExit: (ok, message) => {
-        this.store.updateReview(req.projectId, req.branch, (r) => {
-          if (!r.decision || r.decision.logFile !== logFile) return;
+        const review = this.store.updateReview(req.projectId, req.branch, (r) => {
+          // Still this run, and not one you stopped: that already says so.
+          if (!r.decision || r.decision.logFile !== logFile || r.decision.result !== 'running') return;
           r.decision.result = ok ? 'ok' : 'failed';
           r.decision.message = message;
         });
-        this.onChange();
+        this.onChange(review);
       },
     });
 
     const review = this.record(req, 'sent-back', 'running', `Resumed the ${assistant.name} session with your feedback.`, summary, { logFile, pid });
     return { ok: true, message: review.decision!.message, review };
+  }
+
+  /** Stops a send-back that's still going. It runs detached, as its own process group: the agent's tools stop with it. */
+  cancelSendBack(projectId: string, branch: string) {
+    const pid = this.store.review(projectId, branch)?.decision;
+    if (pid?.kind !== 'send-back' || pid.result !== 'running') return;
+    const review = this.store.updateReview(projectId, branch, (r) => {
+      r.decision!.result = 'failed';
+      r.decision!.message = 'You stopped the agent. What it already changed is still on the branch.';
+    });
+    if (pid.pid) {
+      try {
+        process.kill(-pid.pid);
+      } catch {
+        // It had already ended.
+      }
+    }
+    this.onChange(review);
   }
 
   private async discard(req: FinishRequest, summary: ReviewState['summary']): Promise<FinishResult> {

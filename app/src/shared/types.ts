@@ -715,6 +715,22 @@ export interface FoundFolder {
   lastActive: string;
 }
 
+/** What Hunkdory can use on this Mac, for onboarding. */
+export interface SetupStatus {
+  git: boolean;
+  gh: { installed: boolean; signedIn: boolean; login: string | null };
+  assistants: AssistantChoice[];
+}
+
+/** What a repo's inbox would hold, before you connect it. */
+export interface InboxPreview {
+  /** Local branches with commits on top of the base. */
+  branches: number;
+  /** Open pull requests, up to the 100 Hunkdory reads. Null without a linked repo, or when they couldn't be read. */
+  pullRequests: number | null;
+  error?: string;
+}
+
 export interface RepoCheck {
   path: string;
   isRepo: boolean;
@@ -748,6 +764,8 @@ export interface FinishRequest {
   kind: Decision;
   note: string;
   dropStepKeys: string[];
+  /** The branch as you last saw it: approving, merging or deleting stops when it has changed since. */
+  seen: { headSha: string; hunkIds: string[] };
   /** Merge only: commit uncommitted changes in the branch's worktree first. */
   commitFirst?: boolean;
   /** Merge of uncommitted work on a base branch only: the message of the commit it becomes. */
@@ -765,6 +783,8 @@ export interface FinishResult {
   message: string;
   /** Merge can't go ahead because the branch has uncommitted changes. */
   needsCommit?: number;
+  /** Nothing happened: the branch changed since you last saw it. */
+  changed?: boolean;
   review?: ReviewState;
 }
 
@@ -820,6 +840,9 @@ export interface ReviewerApi {
   checkFolder(path: string): Promise<RepoCheck>;
   chooseFolder(): Promise<string | null>;
   foundOnThisMac(): Promise<FoundFolder[]>;
+  /** What's installed and signed in. `recheck` reads your shell's environment again, for after installing something. */
+  setupStatus(opts?: { recheck?: boolean }): Promise<SetupStatus>;
+  previewInbox(root: string, baseBranch: string, repo: string | null): Promise<InboxPreview>;
   /** Every assistant Hunkdory can be connected to, with whether it's installed. */
   listAssistants(): Promise<AssistantChoice[]>;
   addProject(input: ProjectInput): Promise<Project>;
@@ -856,6 +879,8 @@ export interface ReviewerApi {
   loadReview(projectId: string, branch: string, opts?: { refresh?: boolean }): Promise<{ data: ReviewData; state: ReviewState }>;
   updateReview(projectId: string, branch: string, patch: ReviewPatch): Promise<ReviewState>;
   finish(req: FinishRequest): Promise<FinishResult>;
+  /** Stops an agent you sent this branch back to. */
+  cancelSendBack(projectId: string, branch: string): Promise<void>;
   openSessionFile(file: string): Promise<void>;
   /** The log of the agent run this branch was sent back to, in words; null when it has none. */
   runLog(projectId: string, branch: string): Promise<RunLog | null>;

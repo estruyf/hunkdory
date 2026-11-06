@@ -107,3 +107,9 @@ export async function dirtyFiles(cwd: string): Promise<string[]> {
 export async function currentBranch(cwd: string): Promise<string | null> {
   return (await tryGit(['symbolic-ref', '--short', 'HEAD'], cwd))?.trim() || null;
 }
+
+/** Why an agent can't edit `branch` from `cwd`: a session's folder may have moved on since, and its edits would land there. Null when it's on it. */
+export async function notOnBranch(cwd: string, branch: string): Promise<string | null> {
+  const current = await currentBranch(cwd);
+  return current === branch ? null : `${cwd} is on "${current ?? 'a detached HEAD'}" now, so an agent working there wouldn't change ${branch}. Switch that folder back to ${branch} first (if git says it's checked out elsewhere, work from that folder instead).`;
+}

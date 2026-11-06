@@ -18,7 +18,7 @@ import { Markdown } from '../components/markdown.tsx';
 import { PrLink } from '../components/github.tsx';
 import { RunningWork } from '../components/RunningWork.tsx';
 import { isReviewed } from '../../shared/order.ts';
-import { buildPlan, defaultDrops, openItems } from '../../shared/plan.ts';
+import { buildPlan, defaultDrops, defaultReviewEvent, openItems, unpushedWork, vouchesForCode } from '../../shared/plan.ts';
 import { reviewedNote } from '../../shared/comments.ts';
 import type { Comment, Decision, GitHubEvent, ReviewData, ReviewPatch, ReviewState } from '../../shared/types.ts';
 
@@ -40,6 +40,8 @@ export function Finish({ go, projectId, branch }: { go: Go; projectId: string; b
 }
 
 function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewData; state: ReviewState }) {
+  // The branch as this page first showed it: your last read of it. Reading it again here, or on coming back to the tab, mustn't count as having seen what's new.
+  const [seen] = useState(() => ({ headSha: data.headSha, hunkIds: Object.keys(data.hunks) }));
   // Removing a comment here updates the review, and what you finish with.
   const [state, setState] = useState(initialState);
   useEffect(() => setState(initialState), [initialState]);
@@ -60,13 +62,15 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
   const agent = prCopilot ? 'copilot' : localAgent;
   const open = openItems(buildPlan(data, state), state);
   const [pick, setPick] = useState<Decision>(() => (agent && (comments.length || drop.size) ? 'send-back' : data.pr ? 'github' : agent ? 'send-back' : 'merge'));
-  const [event, setEvent] = useState<GitHubEvent>(() => (open.fixes.length ? 'REQUEST_CHANGES' : comments.length || data.prByYou ? 'COMMENT' : 'APPROVE'));
-  // Merging with something still open takes a second click.
+  const [event, setEvent] = useState<GitHubEvent>(() => defaultReviewEvent(open, { comments: comments.length, prByYou: !!data.prByYou }));
+  // Merging or approving with something still open takes a second click.
   const [confirming, setConfirming] = useState(false);
   const [note, setNote] = useState('');
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The branch moved on while this page was open: what it says, with the way to go and look.
+  const [changed, setChanged] = useState<string | null>(null);
   const [needsCommit, setNeedsCommit] = useState<number | null>(null);
   const [showComments, setShowComments] = useState(comments.length <= 3);
   // A local branch on a linked GitHub repo can become a pull request instead of a local merge.
@@ -87,7 +91,8 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
     open.careful.length && `${plural(open.careful.length, 'step')} to read closely ${open.careful.length === 1 ? 'is' : 'are'} not reviewed.`,
     open.skim.length && `${plural(open.skim.length, 'step')} to skim ${open.skim.length === 1 ? 'is' : 'are'} not reviewed.`,
   ].filter((x): x is string => !!x);
-  const guarded = pick === 'merge' && unfinished.length > 0;
+  const guarded = vouchesForCode(pick, event) && unfinished.length > 0;
+  const vouch = pick === 'merge' ? 'Merge' : 'Approve';
   const stepLabel = (key: string) => {
     const s = data.steps.find((x) => x.key === key);
     if (s) return `Step ${s.index + 1} · ${s.files.length === 1 ? s.files[0] : s.title}`;
@@ -122,6 +127,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
               ? `Pushes ${data.branch} and opens a pull request into ${base}, with your comments in the description. Nothing is merged yet.`
               : `Merge into ${base} as it is. Your comments stay in Hunkdory.`,
       submit: data.uncommitted ? 'Approve & commit' : data.prByYou ? 'Merge' : data.pr ? 'Approve & merge' : canOpenPr && openPr ? 'Approve & open PR' : 'Approve & merge',
+      disabled: unpushedWork(data) ?? undefined,
     },
     ...(data.pr
       ? [
@@ -149,13 +155,13 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
       },
     {
       id: 'discard',
-      title: data.local ? 'Discard the branch' : 'Close this review',
+      title: 'Close this review',
       detail: data.local
-        ? 'Closes the change. The session stays in your history.'
+        ? 'Closes this review. The branch stays unless you delete it below, and the session stays in your history.'
         : data.uncommitted
           ? 'Removes it from your inbox until the changes do. Your edits stay as they are.'
           : 'Removes it from your inbox. Nothing changes in git or on GitHub.',
-      submit: data.local ? 'Discard' : 'Close review',
+      submit: data.local && deleteBranch ? 'Delete the branch' : 'Close review',
     },
   ];
   const current = options.find((o) => o.id === pick)!;
@@ -169,10 +175,14 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
     }
     setBusy(true);
     setError(null);
+    setChanged(null);
     try {
-      const res = await window.api.finish({ projectId: data.projectId, branch: data.branch, kind: pick, note, dropStepKeys: pick === 'send-back' ? [...drop] : [], commitFirst, deleteBranch, event, openPr: opening ? { title: prTitle.trim() || data.title, draft } : undefined, commitMessage: data.uncommitted ? commitMessage : undefined });
+      const res = await window.api.finish({ projectId: data.projectId, branch: data.branch, kind: pick, note, dropStepKeys: pick === 'send-back' ? [...drop] : [], seen, commitFirst, deleteBranch, event, openPr: opening ? { title: prTitle.trim() || data.title, draft } : undefined, commitMessage: data.uncommitted ? commitMessage : undefined });
       if (res.ok) go({ name: 'done', projectId: data.projectId, branch: data.branch, result: res, stack: data.stack });
-      else if (res.needsCommit) setNeedsCommit(res.needsCommit);
+      else if (res.changed) {
+        setChanged(res.message);
+        setConfirming(false);
+      } else if (res.needsCommit) setNeedsCommit(res.needsCommit);
       else setError(res.message);
     } catch (e) {
       setError(cleanError(e));
@@ -209,6 +219,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
     setPick(id);
     setNeedsCommit(null);
     setError(null);
+    setChanged(null);
     setConfirming(false);
   };
 
@@ -246,7 +257,16 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
         <>
           <RadioGroup label="Review type" className="flex flex-wrap gap-4 text-ui">
             {EVENTS.map((e) => (
-              <Radio key={e.id} checked={event === e.id} tabbable={event === e.id} disabled={e.id === 'APPROVE' && data.prByYou} onSelect={() => setEvent(e.id)}>
+              <Radio
+                key={e.id}
+                checked={event === e.id}
+                tabbable={event === e.id}
+                disabled={e.id === 'APPROVE' && data.prByYou}
+                onSelect={() => {
+                  setEvent(e.id);
+                  setConfirming(false);
+                }}
+              >
                 {e.title}
               </Radio>
             ))}
@@ -289,7 +309,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
             setConfirming(false);
           }}
         >
-          Also delete the branch and its worktree
+          Also delete the branch, and its separate folder if it has one
         </Checkbox>
       );
     return null;
@@ -363,7 +383,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
                   <div className="text-body break-words select-text">
                     <Markdown text={c.body} />
                   </div>
-                  {changedAfter(c) && <span className="text-meta text-muted">You had Claude change this step after writing this. If that settled it, remove it so it doesn’t go with your review.</span>}
+                  {changedAfter(c) && <span className="text-meta text-muted">You had the assistant change this step after writing this. If that settled it, remove it so it doesn’t go with your review.</span>}
                 </div>
               ))}
           </section>
@@ -381,17 +401,30 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
               <strong className="font-semibold">
                 {plural(needsCommit, 'file')} on this branch {needsCommit === 1 ? "isn't" : "aren't"} committed yet.
               </strong>{' '}
-              {opening ? 'A pull request' : 'A merge'} only takes commits. Hunkdory can commit them for you first, with "{data.title}" as the message. The <span className="font-mono">.review</span> folder stays out of the commit.
+              {opening ? 'A pull request' : 'A merge'} only takes commits. Hunkdory can commit them for you first, with "{data.title}" as the message. Hunkdory's own review files stay out of the commit.
             </Notice>
           )}
           {error && <Notice tone="error">{error}</Notice>}
+          {changed && (
+            <Notice
+              tone="caution"
+              role="alert"
+              actions={
+                <Button variant="primary" onClick={() => go({ name: 'plan', projectId: data.projectId, branch: data.branch })}>
+                  See what's new
+                </Button>
+              }
+            >
+              {changed}
+            </Notice>
+          )}
 
           {/* What's still open sits next to the button it holds back. */}
           {(guarded || (confirming && risky)) && (
             <Notice tone={confirming ? 'warn' : 'caution'} role={confirming ? 'alert' : 'note'}>
               {guarded ? (
                 <>
-                  <strong className="font-semibold">{confirming ? 'Merge with these still open?' : 'Not done yet'}</strong>
+                  <strong className="font-semibold">{confirming ? `${vouch} with these still open?` : 'Not done yet'}</strong>
                   <ul className="m-0 mt-1 flex list-disc flex-col gap-0.5 pl-4">
                     {unfinished.map((u) => (
                       <li key={u}>{u}</li>
@@ -400,7 +433,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
                 </>
               ) : (
                 <>
-                  <strong className="font-semibold">Delete {data.branch} and its worktree?</strong> Uncommitted changes in it are lost.
+                  <strong className="font-semibold">Delete {data.branch}{data.dirtyFiles ? ` and its ${plural(data.dirtyFiles, 'uncommitted file')}` : ''}?</strong> Commits on it that aren't merged into {base} are lost too, and so is its separate folder if it has one. This can't be undone.
                 </>
               )}
             </Notice>
@@ -418,7 +451,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
               aria-busy={busy}
               onClick={() => submit(false)}
             >
-              {busy ? 'Working…' : confirming && guarded ? 'Merge anyway' : confirming && risky ? 'Delete and discard' : current.submit}
+              {busy ? 'Working…' : confirming && guarded ? `${vouch} anyway` : confirming && risky ? 'Yes, delete it' : current.submit}
             </Button>
           </div>
         </div>

@@ -19,7 +19,7 @@ import type { GeneratedWalkthroughs } from './writer.ts';
 import { asOfNow, type Summaries, type Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
 import { assistantFor } from './assistants/index.ts';
-import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, InboxPreview, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -111,7 +111,8 @@ export class Projects {
     // Saved paths come from git, session folders from wherever the agent ran: compare them as folders, not strings.
     const known = new Set(this.store.projects().map((p) => pathKey(p.path)));
     const byPath = new Map<string, FoundFolder & { at: number }>();
-    for (const f of scanSessionFolders()) {
+    const copilot = readCopilotSessions().map((s) => ({ cwd: s.cwd, sessions: 1, lastActive: Date.parse(s.endedAt ?? '') || 0 }));
+    for (const f of [...scanSessionFolders(), ...copilot]) {
       // Worktree sessions count towards their repo.
       const path = f.cwd.replace(/\/\.claude\/worktrees\/[^/]+.*$/, '');
       const key = pathKey(path);
@@ -134,6 +135,21 @@ export class Projects {
     if (w.pattern !== null && !w.pattern.trim()) throw new Error('Enter a branch pattern, like claude/*');
     if (w.pullRequests && !input.github) throw new Error('Link the GitHub remote to review open pull requests.');
     if (!w.anyBranch && w.pattern === null && !w.pullRequests) throw new Error('Pick at least one kind of branch to review.');
+  }
+
+  /** What the inbox would show for a repo you're about to connect, so you can see what you're choosing. */
+  async previewInbox(root: string, baseBranch: string, repo: string | null): Promise<InboxPreview> {
+    const refs = (await g.tryGit(['for-each-ref', `--format=%(refname:short)%00%(ahead-behind:${baseBranch})`, 'refs/heads'], root)) ?? '';
+    const branches = refs.split('\n').filter((l) => {
+      const [name, counts] = l.split('\0');
+      return name && name !== baseBranch && Number(counts?.split(' ')[0] ?? 0) > 0;
+    }).length;
+    if (!repo) return { branches, pullRequests: null };
+    try {
+      return { branches, pullRequests: (await gh.openPullRequests(root, repo)).length };
+    } catch (e) {
+      return { branches, pullRequests: null, error: (e as Error).message };
+    }
   }
 
   async checkGitHub(path: string): Promise<string> {
@@ -161,7 +177,14 @@ export class Projects {
       addedAt: new Date().toISOString(),
     };
     this.store.addProject(project);
+    // A scan already going read the project list before this one was on it.
+    this.scanning = null;
     return project;
+  }
+
+  removeProject(id: string) {
+    this.store.removeProject(id);
+    this.scanning = null;
   }
 
   async updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project> {
@@ -600,7 +623,10 @@ export class Projects {
 
   async find(projectId: string, branch: string): Promise<{ project: Project; d: Discovered }> {
     const project = this.store.project(projectId);
-    const d = (await this.discover(project, branch)).items.find((x) => x.branch.name === branch);
+    const { items, scan } = await this.discover(project, branch);
+    const d = items.find((x) => x.branch.name === branch);
+    // GitHub couldn't be read, such as gh being signed out: that says more than guessing the branch is gone.
+    if (!d && scan.error) throw new Error(`Couldn't read ${branch}: ${scan.error}`);
     if (!d) throw new Error(`Branch ${branch} has nothing left to review. It may have been merged or deleted.`);
     return { project, d };
   }
@@ -716,7 +742,14 @@ export class Projects {
       });
     }
     await gh.pushBranch(project.path, project.github, pr.headRefName);
-    gh.forget(project.github);
+    // GitHub's list can lag behind a push for a moment: wait for it, or the plan goes on saying the commits aren't on the PR.
+    const pushed = (await g.git(['rev-parse', 'HEAD'], wt)).trim();
+    for (let i = 0; i < 6; i++) {
+      gh.forget(project.github);
+      const now = await gh.openPullRequests(project.path, project.github).catch(() => []);
+      if (now.find((p) => p.number === pr.number)?.headRefOid === pushed) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
     this.cache.delete(`${project.id}::${pr.headRefName}`);
     return files ? `Committed ${files} file${files === 1 ? '' : 's'} and pushed to PR #${pr.number}.` : `Pushed the commits on this Mac to PR #${pr.number}.`;
   }

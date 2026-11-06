@@ -10,6 +10,8 @@ import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
+import { explainRunFailure } from '../../shared/assistantText.ts';
+import { agentEnv } from '../gitGuard.ts';
 import { shellEnv, which } from '../shellEnv.ts';
 import type { Assistant, AssistantResult, AssistantRun, RunOptions, SendBackHandle, SendBackOptions } from './types.ts';
 
@@ -183,7 +185,7 @@ function runCopilot(opts: { copilot: string; cwd: string; env: NodeJS.ProcessEnv
       if (killed) throw new Error('Stopped.');
       if (exitCode === 0) return { text, structured: null };
       const why = stderr.trim().split('\n').at(-1) || (exitCode === null ? `it took longer than ${Math.round(opts.timeoutMs / 60_000)} minutes` : `exit code ${exitCode}`);
-      throw new Error(`Copilot stopped without an answer (${why}).`);
+      throw new Error(explainRunFailure({ id: 'copilot', name: 'Copilot' }, why));
     });
 
   return {
@@ -210,7 +212,7 @@ export class CopilotAssistant implements Assistant {
   }
 
   async run(opts: RunOptions): Promise<AssistantRun> {
-    const env = await shellEnv();
+    const env = await agentEnv();
     const copilot = await which('copilot', env);
     if (!copilot) throw new Error('Could not find the "copilot" command. Is the Copilot CLI installed?');
 
@@ -263,7 +265,7 @@ export class CopilotAssistant implements Assistant {
   }
 
   async sendBack(opts: SendBackOptions): Promise<SendBackHandle> {
-    const env = await shellEnv();
+    const env = await agentEnv();
     const copilot = await which('copilot', env);
     if (!copilot) throw new Error('Could not find the "copilot" command. Is the Copilot CLI installed?');
 

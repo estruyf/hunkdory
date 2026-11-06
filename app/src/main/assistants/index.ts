@@ -26,12 +26,30 @@ export function allAssistants(): Assistant[] {
 /** Kept for existing callers that don't need the dynamic ACP agents reflected (tests, mostly). */
 export const ASSISTANTS: Assistant[] = [claudeCode, copilot, manual];
 
+class MissingAssistant implements Assistant {
+  id: string;
+  name = 'The removed agent';
+  private reason = "The agent this project uses isn't in Settings any more. Add it again, or pick another one in the project's settings.";
+  constructor(id: string) {
+    this.id = id;
+  }
+  async available() {
+    return { ok: false as const, reason: this.reason };
+  }
+  async run(): Promise<never> {
+    throw new Error(this.reason);
+  }
+  async sendBack(): Promise<never> {
+    throw new Error(this.reason);
+  }
+}
+
 export function assistantFor(project?: { assistant?: string } | null): Assistant {
   if (project?.assistant === 'manual') return manual;
   if (project?.assistant === 'copilot') return copilot;
   if (project?.assistant?.startsWith('acp:')) {
-    const found = acpAgents.find((a) => a.id === project.assistant);
-    if (found) return found;
+    // Gone from Settings: says so, rather than sending this project's code to another provider without asking.
+    return acpAgents.find((a) => a.id === project.assistant) ?? new MissingAssistant(project.assistant);
   }
   return claudeCode;
 }

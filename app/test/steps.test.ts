@@ -171,7 +171,7 @@ test('estimates review time and builds the send-back message', () => {
     { steps },
     { comments: [{ id: '1', stepKey: steps[0].key, hunkId: null, line: null, body: 'Use the existing helper.', createdAt: '' }] },
     { note: 'Thanks', dropStepKeys: [steps[3].key] },
-    'wtv verify'
+    { verify: 'wtv verify' }
   );
   assert.match(msg, /Step 1 "Retry helper" \(src\/retry\.js\): Use the existing helper\./);
   assert.match(msg, /Drop these steps[\s\S]*Step 4 "Not in the walkthrough: scratch\.js"/);

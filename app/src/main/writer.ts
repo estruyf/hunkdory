@@ -9,7 +9,7 @@ import * as g from './git.ts';
 import * as gh from './github.ts';
 import type { Projects } from './projects.ts';
 import { readSessionDigest } from './sessions/trace.ts';
-import { olderThan } from '../shared/order.ts';
+import { olderThan, tooBig } from '../shared/order.ts';
 import { buildPlan, decisionsForComment } from '../shared/plan.ts';
 import type { HunkView, ReviewData, SavedWalkthrough, WalkthroughJob } from '../shared/types.ts';
 
@@ -373,7 +373,8 @@ export class Writer {
     if (existing?.status === 'running') return this.job(projectId, branch);
     const data = await this.projects.review(projectId, branch);
     if (data.walkthrough === 'agent' || !data.assistant) return null;
-    if (opts.auto && (!data.writeWalkthroughs || data.walkthrough !== 'skeleton' || existing?.diffKey === diffKey(data))) return this.job(projectId, branch);
+    // A big branch costs a lot more: that's your call, even with auto-writing on.
+    if (opts.auto && (!data.writeWalkthroughs || data.walkthrough !== 'skeleton' || existing?.diffKey === diffKey(data) || tooBig({ minutes: data.minutes, steps: data.steps.length }))) return this.job(projectId, branch);
     if (!Object.keys(data.hunks).length) return null;
     return this.launch(key, projectId, branch, data);
   }

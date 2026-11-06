@@ -1,5 +1,5 @@
 // The review plan: what only you can decide, what to look at carefully, and what to skim. Pure.
-import type { AttentionFlag, CheckItem, ReviewData, ReviewState, Step } from './types.ts';
+import type { AttentionFlag, CheckItem, Decision, GitHubEvent, ReviewData, ReviewState, Step } from './types.ts';
 import { isReviewed, orderSteps } from './order.ts';
 
 export type Phase = 'careful' | 'skim';
@@ -223,4 +223,31 @@ export function openItems(plan: Plan, state: Pick<ReviewState, 'reviewed' | 'set
     skim: plan.skim.filter((s) => !isReviewed(s, state.reviewed)),
     fixes: plan.decisions.filter((d) => d.kind !== 'outside' && state.settled?.[d.id] === 'fix'),
   };
+}
+
+/** The steps as the walkthrough tells them, whatever the review's order: reading them top to bottom is reading the story. */
+export const storySteps = (data: Pick<ReviewData, 'steps'>) => orderSteps(data.steps, 'story');
+
+/** Where the story picks up: the first step not reviewed yet, and how far in that is. Null when you've read it all. */
+export function storyResume(data: Pick<ReviewData, 'steps'>, state: Pick<ReviewState, 'reviewed'>): { step: Step; at: number; of: number; started: boolean } | null {
+  const steps = storySteps(data);
+  const at = steps.findIndex((s) => !isReviewed(s, state.reviewed));
+  return at < 0 ? null : { step: steps[at]!, at: at + 1, of: steps.length, started: steps.some((s) => isReviewed(s, state.reviewed)) };
+}
+
+/** Where a review on GitHub starts: asking for the fixes you named, and approving only once nothing is left open. */
+export function defaultReviewEvent(open: OpenItems, opts: { comments: number; prByYou: boolean }): GitHubEvent {
+  if (open.fixes.length) return 'REQUEST_CHANGES';
+  return opts.comments || opts.prByYou || open.decisions.length || open.careful.length || open.skim.length ? 'COMMENT' : 'APPROVE';
+}
+
+/** The choices that say the code is good: with something still open, they take a second click. */
+export const vouchesForCode = (pick: Decision, event: GitHubEvent) => pick === 'merge' || (pick === 'github' && event === 'APPROVE');
+
+/** Why a pull request can't be merged yet: GitHub only merges what's on the PR, so work on this Mac would be left behind. */
+export function unpushedWork(data: Pick<ReviewData, 'pr' | 'dirtyFiles' | 'ahead'>): string | null {
+  if (!data.pr || (!data.dirtyFiles && !data.ahead)) return null;
+  const parts = [data.dirtyFiles && `${data.dirtyFiles} uncommitted file${data.dirtyFiles === 1 ? '' : 's'}`, data.ahead && `${data.ahead} unpushed commit${data.ahead === 1 ? '' : 's'}`].filter(Boolean);
+  const one = data.dirtyFiles + data.ahead === 1;
+  return `${parts.join(' and ')} on this Mac ${one ? "isn't" : "aren't"} on PR #${data.pr.number}, so GitHub wouldn't merge ${one ? 'it' : 'them'}. Push ${one ? 'it' : 'them'} from the plan, or undo ${one ? 'it' : 'them'}, first.`;
 }

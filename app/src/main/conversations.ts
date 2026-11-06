@@ -5,7 +5,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { assistantFor } from './assistants/index.ts';
 import type { AssistantRun } from './assistants/types.ts';
-import { which, shellEnv } from './shellEnv.ts';
+import { notOnBranch } from './git.ts';
+import { shellEnv, wtvCommand } from './shellEnv.ts';
 import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
 import { clip, whereSection } from './writer.ts';
@@ -38,8 +39,8 @@ export interface AskInput {
   headRef: string | null;
   pr: { number: number; title: string; body: string } | null;
   prompt: string | null;
-  /** Set when the branch has the agent's own walkthrough, which a change should keep up to date. */
-  wtvCommand: string | null;
+  /** Set when the branch has the agent's own walkthrough, which a change should keep up to date, with how to check it here. */
+  keepWalkthrough: { verify: string | null } | null;
 }
 
 const FORMAT =
@@ -72,7 +73,7 @@ export function askPrompt(a: AskInput): string {
     if (a.kind === 'question') lines.push(FORMAT, "Don't change any files: this is only a question.");
     else {
       lines.push('Keep to what I asked, nothing around it.');
-      if (a.wtvCommand) lines.push(`Then update .review/walkthrough.json so it describes the branch as it is now, and run \`${a.wtvCommand}\` until it passes.`);
+      if (a.keepWalkthrough) lines.push(`Then update .review/walkthrough.json so it describes the branch as it is now${a.keepWalkthrough.verify ? `, and run \`${a.keepWalkthrough.verify}\` until it passes` : ''}.`);
       lines.push(SUMMARY);
     }
     return lines.join('\n');
@@ -114,8 +115,8 @@ export function askAbility(session: SessionInfo | null, branch: Pick<BranchInfo,
   return {
     question: { by: 'fresh' },
     change: branch.pr && !branch.pr.fork
-      ? { by: null, reason: "The pull request's branch isn't checked out on this Mac, so there is nowhere for Claude to change it yet. Hunkdory can check it out in a worktree.", checkout: true }
-      : { by: null, reason: `${branch.pr ? "The pull request's branch comes from a fork and" : 'This branch'} isn't checked out on this Mac, so there is nowhere for Claude to change it. Check it out in a folder or worktree first.` },
+      ? { by: null, reason: "The pull request's branch isn't checked out on this Mac, so there is nowhere to change it yet. Hunkdory can check it out in a separate folder.", checkout: true }
+      : { by: null, reason: `${branch.pr ? "The pull request's branch comes from a fork and" : 'This branch'} isn't checked out on this Mac, so there is nowhere to change it. Check it out in a folder first.` },
   };
 }
 
@@ -164,9 +165,9 @@ export class Conversations {
 
     const state = this.store.ensureReview(projectId, branch, { title: data.title, sessionId: data.session?.id ?? null });
     if (kind === 'change' && state.exchanges?.some((e) => e.kind === 'change' && e.status === 'running')) {
-      throw new Error('Claude is still working on the last change. Wait for it, or stop it first.');
+      throw new Error('The assistant is still working on the last change. Wait for it, or stop it first.');
     }
-    const x: Exchange = { id: randomUUID(), stepKey, stepTitle: step.title, kind, text: text.trim(), by: ability.by, status: 'running', activity: 'Starting Claude Code…', reply: null, at: new Date().toISOString(), finishedAt: null, ...(check !== undefined && { check }) };
+    const x: Exchange = { id: randomUUID(), stepKey, stepTitle: step.title, kind, text: text.trim(), by: ability.by, status: 'running', activity: `Starting ${data.session && ability.by !== 'fresh' ? (data.session.agent === 'copilot' ? 'Copilot' : 'Claude Code') : (data.assistant?.name ?? 'the assistant')}…`, reply: null, at: new Date().toISOString(), finishedAt: null, ...(check !== undefined && { check }) };
     const history = (state.exchanges ?? []).filter((e) => e.stepKey === stepKey && e.status === 'done');
     const r = this.store.updateReview(projectId, branch, (r) => {
       r.exchanges = [...(r.exchanges ?? []), x];
@@ -222,7 +223,8 @@ export class Conversations {
     // A session's own CLI handles it, whatever the project is set to today: resuming a Copilot session
     // with Claude Code (or back) would just fail to find it.
     const assistant = assistantFor({ assistant: session?.agent ?? data.assistant?.id });
-    const wtv = (await which('wtv', await shellEnv())) ? 'wtv' : `node ${this.wtvBin}`;
+    const keeps = data.walkthrough === 'agent';
+    const wtv = keeps ? await wtvCommand(this.wtvBin, await shellEnv()) : null;
     // A change only happens where the branch is checked out (or in the session's folder), so it never reads through git refs.
     const headRef = x.kind === 'question' && !ctx.inTree ? ctx.headRef : null;
     const prompt = askPrompt({
@@ -238,17 +240,19 @@ export class Conversations {
       headRef,
       pr: data.pr ? { number: data.pr.number, title: data.pr.title, body: data.pr.body } : null,
       prompt: data.prompt,
-      wtvCommand: data.walkthrough === 'agent' ? `${wtv} verify` : null,
+      keepWalkthrough: keeps ? { verify: wtv && `${wtv} verify` } : null,
     });
 
     const cwd = session ? session.cwd : ctx.cwd;
     const access = x.by === 'session' || x.kind === 'change' ? 'edit' : headRef ? 'git-only' : 'read';
+    const elsewhere = access === 'edit' ? await notOnBranch(cwd, data.branch) : null;
+    if (elsewhere) throw new Error(elsewhere);
     const run = await assistant.run({
       cwd,
       prompt,
       access,
       session: session ? { id: session.id, mode: x.by === 'session-copy' ? 'copy' : 'continue', configDir: session.configDir } : null,
-      allowBash: x.by === 'session' ? [assistant.id === 'copilot' ? `shell(${wtv} *)` : `Bash(${wtv} *)`] : undefined,
+      allowBash: x.by === 'session' && wtv ? [assistant.id === 'copilot' ? `shell(${wtv} *)` : `Bash(${wtv} *)`] : undefined,
       headRef,
       logFile: join(this.logDir, `${x.kind}-${Date.now()}.jsonl`),
       timeoutMs: TIMEOUT_MS,

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDecisions, buildPlan, decisionsForComment, defaultDrops, openItems, planProgress, resumePoint, settleComment, skimGroups } from '../src/shared/plan.ts';
+import { buildDecisions, buildPlan, decisionsForComment, defaultDrops, defaultReviewEvent, openItems, planProgress, resumePoint, settleComment, skimGroups, unpushedWork, vouchesForCode } from '../src/shared/plan.ts';
 import { addToStepComment, removeFromStepComments } from '../src/shared/comments.ts';
 import { prDescription } from '../src/main/actions.ts';
 import type { AttentionFlag, CheckItem, ReviewState, Step } from '../src/shared/types.ts';
@@ -141,4 +141,33 @@ test('decisions read as lines for a PR comment, without the app\'s words or fail
   const checks: CheckItem[] = [{ name: 'ci', state: 'fail', url: null } as CheckItem];
   const lines = decisionsForComment(buildDecisions(steps, flags, checks, true));
   assert.deepEqual(lines, ['**Touches auth.** token.js in step 2.', '**Outside the request.** Step 1: Bump lint.']);
+});
+
+test('a review on GitHub only starts as an approval once nothing is left open', () => {
+  const none = { decisions: [], careful: [], skim: [], fixes: [] };
+  const opts = { comments: 0, prByYou: false };
+  assert.equal(defaultReviewEvent(none, opts), 'APPROVE');
+  assert.equal(defaultReviewEvent({ ...none, skim: [step(0)] }, opts), 'COMMENT', 'nothing reviewed yet');
+  assert.equal(defaultReviewEvent({ ...none, careful: [step(0)] }, opts), 'COMMENT');
+  assert.equal(defaultReviewEvent({ ...none, decisions: [{ id: 'd' } as never] }, opts), 'COMMENT');
+  assert.equal(defaultReviewEvent(none, { comments: 1, prByYou: false }), 'COMMENT');
+  assert.equal(defaultReviewEvent(none, { comments: 0, prByYou: true }), 'COMMENT', "GitHub won't take your approval of your own");
+  assert.equal(defaultReviewEvent({ ...none, skim: [step(0)], fixes: [{ id: 'd' } as never] }, opts), 'REQUEST_CHANGES');
+});
+
+test('merging and approving vouch for the code; other reviews and finishes do not', () => {
+  assert.equal(vouchesForCode('merge', 'COMMENT'), true);
+  assert.equal(vouchesForCode('github', 'APPROVE'), true);
+  assert.equal(vouchesForCode('github', 'COMMENT'), false);
+  assert.equal(vouchesForCode('github', 'REQUEST_CHANGES'), false);
+  assert.equal(vouchesForCode('send-back', 'APPROVE'), false);
+  assert.equal(vouchesForCode('discard', 'APPROVE'), false);
+});
+
+test('work that is only on this Mac holds a PR back, and says what it is', () => {
+  const pr = { number: 3 } as never;
+  assert.equal(unpushedWork({ pr: null, dirtyFiles: 2, ahead: 1 }), null, 'a local branch merges what it has');
+  assert.equal(unpushedWork({ pr, dirtyFiles: 0, ahead: 0 }), null);
+  assert.equal(unpushedWork({ pr, dirtyFiles: 1, ahead: 0 }), "1 uncommitted file on this Mac isn't on PR #3, so GitHub wouldn't merge it. Push it from the plan, or undo it, first.");
+  assert.equal(unpushedWork({ pr, dirtyFiles: 2, ahead: 1 }), "2 uncommitted files and 1 unpushed commit on this Mac aren't on PR #3, so GitHub wouldn't merge them. Push them from the plan, or undo them, first.");
 });
