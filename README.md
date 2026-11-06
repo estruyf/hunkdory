@@ -17,7 +17,7 @@
 
 ![A branch in Hunkdory: what it does and what was asked come first, with Read the story as the way in](docs/screenshots/plan.png)
 
-<!-- The demo goes here: ![Hunkdory in action](docs/hunkdory.gif) -->
+![Hunkdory in action: one inbox, a change told as a story, asking about a step, and merging it or sending it back](docs/hunkdory.gif)
 
 ## Why Hunkdory
 
