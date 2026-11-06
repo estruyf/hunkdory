@@ -14,8 +14,10 @@ import { Select } from '../components/ui/Select.tsx';
 import { FIELD } from '../components/ui/field.ts';
 import type { DiffMode } from '../components/diff.tsx';
 import { resyncWalkthroughs } from '../state/walkthroughs.ts';
+import { watchSummary } from '../../shared/assistantText.ts';
+import { feedbackUrl, versionText } from '../../shared/feedback.ts';
 import { olderThan } from '../../shared/order.ts';
-import type { AcpAgentConfig, AppInfo, SavedWalkthrough, Theme } from '../../shared/types.ts';
+import type { AcpAgentConfig, SavedWalkthrough, Theme } from '../../shared/types.ts';
 
 const THEMES: { value: Theme; label: string; hint: string }[] = [
   { value: 'light', label: 'Light', hint: 'Always light' },
@@ -180,7 +182,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
 
           <Card title="AI assistants">
             <p className="text-ui text-muted">
-              Claude Code and GitHub Copilot work out of the box. Add any other agent that speaks the Agent Client Protocol (ACP), like Gemini CLI or Codex, so a project can pick it instead.
+              Claude Code and GitHub Copilot work out of the box. Experimental: add any other agent that speaks the Agent Client Protocol (ACP), like Gemini CLI or Codex, so a project can pick it instead. Hunkdory can't keep these from loading a repo's own config.
             </p>
             {acpAgents.length > 0 && (
               <ul className="m-0 flex list-none flex-col gap-px p-0">
@@ -243,6 +245,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
                   <span className="grid min-w-0 flex-1">
                     <span className="truncate text-body font-semibold">{p.name}</span>
                     <span className="truncate font-mono text-meta text-faint">{p.path}</span>
+                    <span className="truncate text-meta text-faint">{watchSummary(p)}</span>
                   </span>
                   <Button onClick={() => go({ name: 'connect', projectId: p.id })}>Settings</Button>
                 </li>
@@ -268,8 +271,11 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
                   </span>
                 </p>
                 <p className="text-meta text-muted">{info.value.os}</p>
-                <div>
+                <div className="flex flex-wrap gap-2">
                   <Button onClick={copy}>{copied ? 'Copied' : 'Copy for a bug report'}</Button>
+                  <Button variant="quiet" data-tooltip="Opens a new issue on GitHub with your version filled in. Nothing is sent until you submit it." onClick={() => window.api.openExternal(feedbackUrl(info.value!))}>
+                    Send feedback ↗
+                  </Button>
                 </div>
               </>
             )}
@@ -394,5 +400,3 @@ function Row({ label, detail, children }: { label: string; detail: string; child
     </div>
   );
 }
-
-const versionText = (i: AppInfo) => `Hunkdory ${i.version}\nElectron ${i.electron} · Chromium ${i.chrome} · Node ${i.node}\n${i.os}`;

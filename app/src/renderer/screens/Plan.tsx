@@ -24,6 +24,7 @@ import { MessageSquare } from 'lucide-react';
 import { AgentTests, AskedFor, LinkedIssues, NO_TEST_HINT, ReviewError, hasLinkedIssues } from './Review.tsx';
 import { IssueRefsContext, Markdown } from '../components/markdown.tsx';
 import { useCodeSearch } from '../components/search.tsx';
+import { RunLogDialog } from '../components/runLog.tsx';
 import type { LineRef } from '../components/diff.tsx';
 import { AiReviewCard, FindingsPill, openFindingsIn } from '../components/aiReview.tsx';
 import { ChangeOverview, RequestedList } from '../components/understand.tsx';
@@ -31,7 +32,7 @@ import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.
 import { RunningWork } from '../components/RunningWork.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { OUTSIDE_HINT, RISK_LABEL, formatDuration, isReviewed, timeAgo, tooBig } from '../../shared/order.ts';
-import { buildPlan, decisionLabels, planProgress, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
+import { buildPlan, decisionLabels, planProgress, resumePoint, settleComment, storyResume, type PlanDecision } from '../../shared/plan.ts';
 import type { ReviewData, ReviewOrder, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 
 const ORDERS: { id: ReviewOrder; label: string }[] = [
@@ -260,6 +261,17 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
     return `${verb}: step ${plan.sequence.findIndex((s) => s.key === resume.stepKey) + 1} of ${plan.sequence.length}`;
   })();
 
+  // With a walkthrough there's a story to read, top to bottom. Without one, the plan's order is all there is.
+  const nothing = data.steps.length === 0;
+  const story = data.walkthrough !== 'skeleton' && !nothing ? storyResume(data, state) : null;
+  const readStory = async () => {
+    const s = await begin();
+    const at = s && storyResume(data, s);
+    if (at) go({ name: 'review', projectId: data.projectId, branch: data.branch, story: true, stepKey: at.step.key, preloaded: { data, state: s } });
+  };
+  const primary = story ? readStory : go1;
+  const primaryLabel = story ? (story.started && !needsStart ? `Continue the story: step ${story.at} of ${story.of}` : 'Read the story') : ctaLabel;
+
   // ⌘↵ starts or continues, ⌘⇧↵ finishes: the registry's `plan.start` and `review.finish`.
   const onScreen = useTabActive();
   useEffect(() => {
@@ -268,7 +280,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
       if (!isPlainKey(e)) return;
       if (matches(e, 'plan.start')) {
         e.preventDefault();
-        go1();
+        void (nothing ? toFinish() : primary());
       } else if (matches(e, 'review.finish')) {
         e.preventDefault();
         toFinish();
@@ -347,21 +359,38 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
               )}
               {data.pr && data.pr.checks.length > 0 && <Pill tone={checksTone(data.pr.checks)}>CI: {checksText(data.pr.checks)}</Pill>}
             </span>
-            <h1 className="text-hero font-semibold">{allDone ? 'All done. Time to wrap up.' : headline(plan.decisions.length, plan.careful.length, plan.skim.length)}</h1>
-            <p className="text-body text-muted">
+            {/* The story first: what this change is, in words, before how much of it there is. */}
+            <h1 className="text-hero font-semibold break-words">{data.title}</h1>
+            {data.intent ? <p className="text-body select-text">{data.intent}</p> : !nothing && <p className="text-body text-muted">{data.walkthrough === 'skeleton' ? 'No walkthrough yet, so there is no story to tell: the steps are one per file.' : 'The walkthrough has no summary.'}</p>}
+          </div>
+          {nothing ? (
+            <Notice tone="neutral" actions={<Button size="sm" onClick={toFinish}>Close this review</Button>}>
+              <strong className="font-semibold text-text">There's nothing to review here.</strong> This branch has no changes compared with <span className="font-mono">{data.baseRef}</span>: it may be merged already, or its commits cancel each other out.
+            </Notice>
+          ) : (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="primary" size="lg" shortcut={allDone ? 'review.finish' : 'plan.start'} onClick={primary}>
+                {primaryLabel}
+              </Button>
+              {story && resume && (plan.decisions.length > 0 || data.steps.length > 1) && (
+                <Button size="lg" onClick={go1}>
+                  Start with what needs me
+                </Button>
+              )}
+              <span className="flex items-center gap-1.5 text-meta text-faint">
+                <Kbd shortcut="shortcuts" /> every shortcut
+              </span>
+            </div>
+            <p className="text-ui text-muted">
               {allDone
                 ? 'You made every decision and looked at every step. Finish to merge, send it back, or post your review.'
-                : `Hunkdory sorted the ${plural(data.steps.length, 'step')} for you. Start with what only you can decide.${plan.skim.length ? ' The low-risk rest is grouped by folder so you can skim it.' : ''}`}
+                : `${headline(plan.decisions.length, plan.careful.length, plan.skim.length)}. ${story ? (data.steps.length > 1 ? `The story goes through all ${data.steps.length} steps in order; what needs you first starts with what only you can decide.` : '') : plan.skim.length ? 'The low-risk rest is grouped by folder so you can skim it.' : ''}`}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="primary" size="lg" shortcut={allDone ? 'review.finish' : 'plan.start'} onClick={go1}>
-              {ctaLabel}
-            </Button>
-            <span className="flex items-center gap-1.5 text-meta text-faint">
-              <Kbd shortcut="shortcuts" /> every shortcut
-            </span>
-          </div>
+          )}
+
+          <SendBackStatus data={data} state={state} onFinish={toFinish} />
 
           {since && counts && (
             <Notice
@@ -383,12 +412,24 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
             </Notice>
           )}
 
+          {!nothing && data.walkthrough === 'skeleton' && (
+            <div ref={walkthroughCard} className="empty:hidden">
+              <WalkthroughNotice data={data} w={w} />
+            </div>
+          )}
           <UncommittedNotice data={data} onChanged={onReload} onError={setError} />
           <PushToPrNotice data={data} onPushed={onReload} />
           {data.stack && <StackBar data={data} go={go} />}
-          <div ref={walkthroughCard} className="empty:hidden">
-            <WalkthroughNotice data={data} w={w} />
-          </div>
+
+          {!nothing && (
+          <>
+          <RequestCard data={data} onOpen={open} />
+          <ChangeOverview data={data} onOpen={open} />
+          {data.walkthrough !== 'skeleton' && (
+            <div ref={walkthroughCard} className="empty:hidden">
+              <WalkthroughNotice data={data} w={w} />
+            </div>
+          )}
 
           {tooBig({ minutes: data.minutes, steps: data.steps.length }) && (
             <Notice
@@ -411,9 +452,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
             </Notice>
           )}
 
-          <HowItWorks />
-          <RequestCard data={data} onOpen={open} />
-          <ChangeOverview data={data} onOpen={open} />
+          <HowItWorks data={data} />
           <div ref={aiReviewCard} className="empty:hidden">
             <AiReviewCard
               data={data}
@@ -533,6 +572,8 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
               </div>
             </Phase>
           )}
+          </>
+          )}
           {error && <Notice tone="error">{error}</Notice>}
         </div>
       </div>
@@ -551,26 +592,74 @@ function splitRequest(branch: string, steps: number, time: string) {
 }
 
 /** A first-run explainer of the review flow. Dismissed once, for good (Settings brings it back). */
-function HowItWorks() {
+function HowItWorks({ data }: { data: ReviewData }) {
   const [show, setShow] = usePref<boolean>('plan-how-it-works', true);
   if (!show) return null;
+  const name = data.assistant?.name;
   const items = [
-    ['Understand', 'Start with what the change is about, below. Each step explains one part in plain words, and you can ask about anything that isn’t clear.'],
-    ['Decide', 'Make the calls only you can make, like keeping or dropping work you didn’t ask for.'],
-    ['Read closely', 'Go through the steps that need attention, with the agent’s reason next to each change.'],
-    ['Skim', 'Glance over the low-risk rest, a folder at a time. Every changed line is in some step, so nothing is hidden.'],
-    ['Finish', 'Merge, post your review, or send your comments back to the agent.'],
+    ['Read the story', `Each step explains one part in plain words, in order.${name ? ` Ask ${name} about anything that isn’t clear, or have it make a change, right there on the step.` : ''}`],
+    ['Or start with what needs you', 'Calls only you can make come first, like work you didn’t ask for, then the steps that need attention, then a skim of the low-risk rest.'],
+    ['Nothing is hidden', 'Every changed line is in some step.'],
+    ['Finish', name ? 'Merge, post your review on GitHub, or send your comments back to the agent.' : 'Merge, or post your review on GitHub.'],
   ];
   return (
     <Notice tone="info" onDismiss={() => setShow(false)} aria-label="How a review works">
       <strong className="font-semibold">How a review works</strong>
-      <ol className="m-0 mt-1 flex list-decimal flex-col gap-0.5 pl-5">
+      <ul className="m-0 mt-1 flex list-disc flex-col gap-0.5 pl-5">
         {items.map(([t, d]) => (
           <li key={t}>
             <strong className="font-semibold">{t}.</strong> {d}
           </li>
         ))}
-      </ol>
+      </ul>
+    </Notice>
+  );
+}
+
+/** An agent you sent this branch back to: still working, or stopped without finishing, with its log either way. */
+function SendBackStatus({ data, state, onFinish }: { data: ReviewData; state: ReviewState; onFinish(): void }) {
+  const [log, setLog] = useState(false);
+  const d = state.decision;
+  if (d?.kind !== 'send-back' || d.github || d.result === 'ok') return null;
+  const showLog = d.logFile && (
+    <Button size="sm" onClick={() => setLog(true)}>
+      Show the run log
+    </Button>
+  );
+  const dialog = log && <RunLogDialog projectId={data.projectId} branch={data.branch} onClose={() => setLog(false)} />;
+  if (d.result === 'running') {
+    return (
+      <Notice
+        tone="info"
+        role="status"
+        actions={
+          <>
+            {showLog}
+            <Button size="sm" onClick={() => window.api.cancelSendBack(data.projectId, data.branch)}>
+              Stop
+            </Button>
+          </>
+        }
+      >
+        {dialog}
+        <strong className="font-semibold">The agent is working on your feedback.</strong> You can keep reading. This page shows what it already changed once you open it again.
+      </Notice>
+    );
+  }
+  return (
+    <Notice
+      tone="error"
+      actions={
+        <>
+          {showLog}
+          <Button size="sm" onClick={onFinish}>
+            Send it back again
+          </Button>
+        </>
+      }
+    >
+      {dialog}
+      <strong className="font-semibold">The agent didn't finish.</strong> {d.message}
     </Notice>
   );
 }
@@ -590,7 +679,6 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
       {data.background && row('To know first', <div className="select-text"><Markdown text={data.background} /></div>)}
       {row(askedLabel(data), <AskedFor data={data} clamp={240} />)}
       {hasLinkedIssues(data) && row('Linked issues', <LinkedIssues data={data} clamp={240} />)}
-      {row('It did', data.intent ? <span className="select-text">{data.intent}</span> : <span className="text-muted">{data.walkthrough === 'skeleton' ? 'No walkthrough yet, so there is no summary: the steps are one per file.' : 'The walkthrough has no summary.'}</span>)}
       {data.requested.length > 0 && row('Asked vs found', <RequestedList data={data} onOpen={onOpen} />)}
       {row(
         'It also did',
@@ -612,7 +700,7 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
 }
 
 /** "You asked" for a prompt, "The PR says" for a PR description: the same words on every screen. */
-export const askedLabel = (data: Pick<ReviewData, 'prompt' | 'pr'>) => (data.prompt || !data.pr ? 'You asked' : 'The PR says');
+export const askedLabel = (data: Pick<ReviewData, 'prompt' | 'pr'>) => (data.prompt ? 'You asked' : data.pr ? 'The PR says' : 'The request');
 
 function Phase({ title, count, hint, meta, action, children }: { title: string; count: number; hint: string; meta: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (

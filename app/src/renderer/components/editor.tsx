@@ -21,7 +21,7 @@ export function OpenInEditor({ data, size = 'sm' }: { data: ReviewData; size?: B
   };
   return (
     <>
-      <Button size={size} variant="quiet" icon={<SquareArrowOutUpRight size={13} aria-hidden />} onClick={open} data-tooltip={name ? 'Opens the folder Claude works in. Pick the editor in Settings.' : 'No editor found in Applications: opens the folder in Finder.'}>
+      <Button size={size} variant="quiet" icon={<SquareArrowOutUpRight size={13} aria-hidden />} onClick={open} data-tooltip={name ? 'Opens the folder the assistant works in. Pick the editor in Settings.' : 'No editor found in Applications: opens the folder in Finder.'}>
         {name ? `Open in ${name}` : 'Show in Finder'}
       </Button>
       {/* Said next to the button: a click that does nothing reads as broken. */}

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import type { Go } from '../App.tsx';
 import { Crumbs, plural } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
+import { VersionLine } from '../components/feedback.tsx';
 import { ProjectIcon } from '../components/ProjectIcon.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Kbd } from '../components/ui/Kbd.tsx';
@@ -15,6 +16,7 @@ import type { BranchGroup, BranchRow } from '../components/inbox/branchRows.ts';
 import type { InboxData } from '../components/inbox/useInboxData.ts';
 import { formatDuration } from '../../shared/order.ts';
 import type { PeopleFilter } from '../../shared/people.ts';
+import { pullRequestsOff, watchSummary, whyNothingWaits } from '../../shared/assistantText.ts';
 import { matches } from '../lib/shortcuts.ts';
 import { useBranches } from '../state/branches.ts';
 import { openSettings, useNav } from '../state/nav.ts';
@@ -91,8 +93,9 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
   const total = data.groups.reduce((n, g) => n + g.rows.length, 0);
   const filtered = !!data.query.trim() || data.people !== 'anyone' || data.project !== 'all';
   const shownProjects = data.projects.filter((p) => data.project === 'all' || p.id === data.project);
-  // The first scan: placeholders where the branches will be, so the page doesn't jump when they arrive.
-  const scanning = !data.loaded && data.loading;
+  // The first scan, of everything or of a project you just connected: placeholders where the branches will be, so
+  // the page doesn't jump when they arrive, and doesn't say nothing is waiting before it has looked.
+  const scanning = data.loading && (!data.loaded || data.projects.some((p) => !data.scans.some((x) => x.projectId === p.id)));
 
   const peopleOptions = [
     { value: 'anyone' as PeopleFilter, label: 'Anyone' },
@@ -234,7 +237,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
                   )
                 }
               >
-                {filtered ? 'Nothing matches.' : 'Nothing waiting for you.'}
+                {filtered ? 'Nothing matches.' : 'Nothing waiting for you. Branches, pull requests and uncommitted changes show up here on their own. Each project below says what it looks for, and Review another branch opens anything else.'}
               </Notice>
             )}
             {data.groups.map((g) =>
@@ -283,6 +286,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
           <p className="flex flex-wrap items-center gap-1.5 text-meta text-faint">
             <Kbd shortcut="branch.goto" /> search · <Kbd keys="↑↓" /> move · <Kbd shortcut="inbox.ignore" /> ignore · <Kbd shortcut="shortcuts" /> every shortcut
           </p>
+          <VersionLine />
         </div>
       </div>
     </div>
@@ -423,15 +427,7 @@ function ProjectRow({
   onRefresh(): void;
   go: Go;
 }) {
-  const why: string[] = [];
-  if (scan && !scan.error && !waiting) {
-    if (scan.pullRequests !== null) why.push(scan.pullRequests ? `${plural(scan.pullRequests, 'open pull request')}, none could be read.` : 'No open pull requests.');
-    else {
-      why.push(`${plural(scan.sessions, 'Claude Code session')} found, working on ${plural(scan.branchesSeen, 'branch', 'branches')}.`);
-      if (scan.gone) why.push(`${scan.gone} of those no longer exist locally.`);
-      if (scan.upToDate) why.push(`${scan.upToDate} have nothing left to review against their base.`);
-    }
-  }
+  const why = scan && !scan.error && !waiting ? whyNothingWaits(project, scan) : '';
   return (
     <li className={`flex items-center gap-3 rounded-lg px-2.5 py-2 ${selected ? 'bg-selected' : 'hover:bg-border/45'}`}>
       <button
@@ -444,7 +440,8 @@ function ProjectRow({
         <ProjectIcon name={project.name} size={22} />
         <span className="grid min-w-0 flex-1">
           <span className="truncate text-body font-semibold">{project.name}</span>
-          {(waiting || !scan?.error) && <span className="text-meta text-faint">{waiting ? `${plural(waiting, 'branch', 'branches')} to review` : why.join(' ') || (scanning || refreshing ? 'Checking…' : 'Nothing waiting.')}</span>}
+          {(waiting || !scan?.error) && <span className="text-meta text-faint">{waiting ? `${plural(waiting, 'branch', 'branches')} to review` : why || (scanning || refreshing ? 'Checking…' : 'Nothing waiting.')}</span>}
+          <span className="truncate text-meta text-faint">{watchSummary(project)}</span>
           {/* What went wrong reading it, such as a fetch GitHub turned down: what it still found stays listed above. */}
           {scan?.error && (
             <span className="line-clamp-2 text-meta text-error" data-tooltip={scan.error}>
@@ -463,6 +460,11 @@ function ProjectRow({
         icon={<RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} aria-hidden />}
         onClick={onRefresh}
       />
+      {pullRequestsOff(project) && (
+        <Button variant="quiet" size="sm" data-tooltip="This repo is on GitHub, but its pull requests aren't in your inbox. Turn them on in its settings." onClick={() => go({ name: 'connect', projectId: project.id })}>
+          Show pull requests
+        </Button>
+      )}
       <Button variant="quiet" size="sm" onClick={() => go({ name: 'pick', projectId: project.id })}>
         Review another branch
       </Button>

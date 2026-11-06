@@ -305,7 +305,7 @@ export const SHORTCUTS = [
   { id: 'review.good', keys: ['r'], action: 'Looks good, next', section: 'review', context: 'On a decision: its main answer', when: inReview },
   { id: 'review.fix', keys: ['n'], action: 'Needs a fix', section: 'review', when: (ctx) => inReview(ctx) && ctx.decision },
   { id: 'review.comment', keys: ['c'], action: 'Comment on the step', section: 'review', when: inStep },
-  { id: 'review.ask', keys: ['a'], action: 'Ask Claude about the step', section: 'review', when: inStep },
+  { id: 'review.ask', keys: ['a'], action: 'Ask the assistant about the step, or have it change it', section: 'review', when: inStep },
   { id: 'review.layout', keys: ['s'], action: 'Unified or side by side', section: 'review', when: inReview },
   { id: 'review.whitespace', keys: ['w'], action: 'Hide or show whitespace changes', section: 'review', when: inReview },
   { id: 'review.wrap', keys: ['z'], action: 'Wrap long lines, or don’t', section: 'review', note: 'Side by side always wraps', when: inReview },

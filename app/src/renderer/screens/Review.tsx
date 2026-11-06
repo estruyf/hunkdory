@@ -16,7 +16,7 @@ import type { LineRef } from '../components/diff.tsx';
 
 type At = { stepKey?: string; decision?: string; group?: string; focus?: LineRef };
 
-export function Review({ go, projectId, branch, stepKey, decision, group, focus, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } } & At) {
+export function Review({ go, projectId, branch, stepKey, decision, group, story, focus, preloaded }: { story?: boolean; go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } } & At) {
   // Read once per branch. Moving between steps changes the route, not the review.
   const loaded = useAsync(() => (preloaded ? Promise.resolve(preloaded) : readReview(projectId, branch)), [projectId, branch]);
   const value = loaded.value ?? preloaded;
@@ -24,7 +24,7 @@ export function Review({ go, projectId, branch, stepKey, decision, group, focus,
   if (!value) return <LoadingPage shape="step" projectId={projectId} branch={branch} />;
   return (
     <IssueRefsContext.Provider value={value.data.references}>
-      <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} focus={focus} />
+      <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} story={story} focus={focus} />
     </IssueRefsContext.Provider>
   );
 }
@@ -51,7 +51,7 @@ export function AskedFor({ data, clamp }: { data: ReviewData; clamp?: number }) 
   if (data.pr?.body.trim()) return <Prompt text={data.pr.body.trim()} clamp={clamp} />;
   return (
     <p className="text-body text-muted">
-      {data.pr ? 'The pull request has no description, and no Claude Code session on this Mac worked on its branch.' : 'No Claude Code session ran on this branch, so there is no prompt to show.'}
+      {data.pr ? 'The pull request has no description, and no agent session on this Mac worked on its branch.' : 'No agent session ran on this branch, so there is no prompt to show.'}
     </p>
   );
 }

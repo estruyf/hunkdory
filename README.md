@@ -7,43 +7,53 @@ Understand what a branch or pull request is about, one step at a time.
 Reviewing code you didn't write is hard, and harder when an agent wrote it.
 Hunkdory is a local macOS app that tells the change as a story: what was asked,
 what the change does in a sentence or two, then chapters in reading order that
-each explain one part in plain words. Ask Claude about any step, or have it make
-a change. The changes nobody explained are pulled to the top. When you're done
-you merge, send it back to the agent, or discard it.
+each explain one part in plain words. Ask your assistant about any step, or have
+it make a change. The changes nobody explained are flagged. When you're done you
+merge, send it back to the agent, or close the review.
 
 ![Hunkdory: a 23-file agent branch told as a story, a question answered by Claude, and a merge](docs/hunkdory.gif)
 
 ## How it works
 
-1. **Inbox.** Hunkdory finds the branches your coding agents make in the repos
-   you use with Claude Code, open pull requests (Copilot's too), and
-   uncommitted changes. New ones show up as they come in.
-2. **The plan.** Opening one shows what was asked, what the change does, and
-   its steps sorted into three groups: *Decide* (calls only you can make, like
-   work you didn't ask for), *Read closely*, and *Skim* (the low-risk rest,
-   grouped by folder). A branch without a walkthrough gets one from Claude
-   Code, written from the diff, the commits and the agent's session.
+1. **Inbox.** Each project shows three kinds of work: local branches, open pull
+   requests (Copilot's too) and uncommitted changes. New ones show up as they
+   come in, and you choose what each project shows in its settings.
+2. **The plan.** Opening one leads with what the change does, then what was
+   asked. *Read the story* goes through every step in order. Or start with what
+   needs you: *Decide* (calls only you can make, like work you didn't ask for),
+   *Read closely*, and *Skim* (the low-risk rest, grouped by folder). A branch
+   without a walkthrough can get one from the project's assistant, written from
+   the diff, the commits and the agent's session.
 3. **The steps.** One step at a time, with the reason next to each change, the
    choices the agent says it made, and how it got there in its session.
-   Comment on a line, ask Claude about the step, or ask it to change the code.
-   If you want a second opinion first, run an AI review from the plan: the
-   project's assistant looks for bugs, accessibility issues and more, and puts
-   what it finds next to the lines. Each project sets what it checks.
+   Comment on a line, ask the assistant about the step, or ask it to change the
+   code. If you want a second opinion first, run an AI review from the plan: the
+   assistant looks for bugs, accessibility issues and more, and puts what it
+   finds next to the lines. Each project sets what it checks.
 4. **Finish.** Merge, open a pull request, post your review on GitHub, send it
-   back to the agent with your comments, or discard it.
+   back to the agent with your comments, or close the review. If the branch
+   changed since you last looked at it, nothing happens until you've seen what's new.
 
-Hunkdory runs on your Mac. It only sends code to Claude when you let it write a
-walkthrough, ask a question, run an AI review, or send work back. When the same assistant ran the
-agent's session, a walkthrough also gets what the agent said and thought on that
-branch, so sharing one on a pull request can carry that reasoning to GitHub.
+Hunkdory runs on your Mac. Your code only goes to the project's assistant when
+you let it write a walkthrough, answer a question, make a change, run an AI
+review, or take work back. When the same assistant ran the agent's session, a
+walkthrough also gets what the agent said and thought on that branch, so sharing
+one on a pull request can carry that reasoning to GitHub. Agents get read-only
+git without asking, but a small wrapper stops the git options that can write
+files or run programs.
 
 ## What you need
 
-- macOS and git.
-- [Claude Code](https://claude.com/claude-code) for walkthroughs, questions and
-  sending work back. Reviews still work without it, with less context.
+- A Mac with Apple Silicon, and git.
+- An assistant for the story, questions and changes:
+  [Claude Code](https://claude.com/claude-code), the
+  [Copilot CLI](https://github.com/github/copilot-cli), or any agent that speaks
+  the [Agent Client Protocol](https://agentclientprotocol.com) (experimental).
+  Without one, a project runs as Manual: the plain changes, one step per file.
 - The [GitHub CLI](https://cli.github.com), signed in with `gh auth login`, for
-  pull requests.
+  pull requests. Branches work without it.
+
+Hunkdory shows what's found and what's missing the first time you open it.
 
 ## Why "Hunkdory"
 

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReviewData, WalkthroughJob } from '../../shared/types.ts';
 import { CircleCheck, Loader2 } from 'lucide-react';
 import { cleanError, plural } from './ui.tsx';
+import { usageNote, whereCodeGoes } from '../../shared/assistantText.ts';
+import { tooBig } from '../../shared/order.ts';
 import { Button } from './ui/Button.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { jobKey, useWalkthroughJobFor, useWalkthroughs } from '../state/walkthroughs.ts';
@@ -197,6 +199,8 @@ function useTick(on: boolean) {
 export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType<typeof useWalkthroughJob> }) {
   const { job } = w;
   const [sharing, setSharing] = useState<'idle' | 'busy' | string>('idle');
+  // Posting on the PR is for everyone who can see it: said before it happens.
+  const [confirmShare, setConfirmShare] = useState(false);
   // Your answer to "may Claude write walkthroughs here?", before the review data catches up.
   const [allowed, setAllowed] = useState(data.writeWalkthroughs);
   const running = job?.status === 'running';
@@ -232,6 +236,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
     const from = [data.pr ? 'the pull request' : data.prompt ? 'your prompt' : null, 'the commits', 'the code', data.walkthroughFromSession ? 'the agent’s session' : null].filter(Boolean).join(', ');
     const shared = data.sharedWalkthrough;
     const share = async () => {
+      setConfirmShare(false);
       setSharing('busy');
       try {
         const { url } = await window.api.shareWalkthrough(data.projectId, data.branch);
@@ -253,12 +258,12 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
               </Button>
             )}
             {data.pr && (
-              <Button size="sm" disabled={sharing === 'busy'} aria-busy={sharing === 'busy'} onClick={share}>
+              <Button size="sm" disabled={sharing === 'busy'} aria-busy={sharing === 'busy'} onClick={() => setConfirmShare(true)}>
                 {sharing === 'busy' ? 'Sharing…' : shared || sharing.startsWith('https://') ? 'Share again' : `Share on PR #${data.pr.number}`}
               </Button>
             )}
             {!manual && (
-              <Button size="sm" onClick={w.write}>
+              <Button size="sm" data-tooltip={usageNote(data.assistant!)} onClick={w.write}>
                 Rewrite
               </Button>
             )}
@@ -275,7 +280,20 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
             </button>
           </>
         )}
-        {!manual && uncovered.length > 0 && <> {plural(uncovered.length, 'file')} changed since it was written, such as by a change Claude made. Updating fits them into its steps.</>}
+        {!manual && uncovered.length > 0 && <> {plural(uncovered.length, 'file')} changed since it was written. Updating fits them into its steps.</>}
+        {confirmShare && (
+          <span role="alert" className="mt-1.5 flex flex-wrap items-center gap-2 text-text">
+            <span className="min-w-0 flex-[1_1_320px]">
+              <strong className="font-semibold">Post this on PR #{data.pr!.number}?</strong> Everyone who can see the PR can read it{data.walkthroughFromSession ? ', including what it took from the agent’s session' : ''}. It replaces your earlier one, if you shared before.
+            </span>
+            <Button size="sm" variant="primary" onClick={share}>
+              Post it
+            </Button>
+            <Button size="sm" onClick={() => setConfirmShare(false)}>
+              Cancel
+            </Button>
+          </span>
+        )}
         {sharing.startsWith('error:') && <span className="text-error"> Sharing failed: {sharing.slice(6)}</span>}
         {failed && <span className="text-error"> Rewriting failed: {failed}</span>}
       </Notice>
@@ -302,8 +320,7 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
           </>
         }
       >
-        <strong className="font-semibold">No walkthrough on this branch.</strong> The steps are one per file, without reasons. Claude Code can write one: it reads the diff, the commits and the agent session, and like any Claude Code
-        run that goes to Anthropic. Should Hunkdory do that for every branch in {data.projectName} that opens without one? You can change this in the project's settings.
+        <strong className="font-semibold">No walkthrough on this branch.</strong> The steps are one per file, without reasons. {data.assistant!.name} can write one: it reads the diff, the commits and the agent session. {whereCodeGoes(data.assistant!)} {usageNote(data.assistant!)} Should Hunkdory do that for every branch in {data.projectName} that opens without one? You can change this in the project's settings.
       </Notice>
     );
   }
@@ -324,7 +341,11 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
         ? "This project is set to Manual, so Hunkdory won't write one."
         : failed
           ? <>Hunkdory couldn't write one: {failed}</>
-          : job?.status === 'cancelled' ? 'You stopped Hunkdory writing one.' : ''}
+          : job?.status === 'cancelled'
+            ? 'You stopped Hunkdory writing one.'
+            : data.writeWalkthroughs && tooBig({ minutes: data.minutes, steps: data.steps.length })
+              ? `This branch is big, so Hunkdory didn't start one on its own. ${usageNote(data.assistant!)}`
+              : usageNote(data.assistant!)}
     </Notice>
   );
 }

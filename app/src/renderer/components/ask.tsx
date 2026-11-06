@@ -42,7 +42,7 @@ export interface PendingAsk {
   text: string;
 }
 
-/** Asking Claude from one step, or from one of its questions. */
+/** Asking the assistant from one step, or from one of its questions. */
 function useSend(data: ReviewData, step: Step, check?: number) {
   const [pending, setPending] = useState<PendingAsk | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +62,7 @@ function useSend(data: ReviewData, step: Step, check?: number) {
   return { send, busy: !!pending, pending, error };
 }
 
-const CHECKOUT_TIP = "Makes a worktree for the PR's branch next to the project's folder, so the change has somewhere to happen.";
+const CHECKOUT_TIP = "Checks the PR's branch out in a separate folder next to the project's (a git worktree), so the change has somewhere to happen.";
 
 /** Checking the pull request out in a worktree, when a change has nowhere to happen yet. `checkout` says whether it worked. */
 function useCheckout(data: ReviewData, onCheckout?: () => Promise<void>) {
@@ -96,6 +96,34 @@ function Asked({ kind, text }: PendingAsk) {
   );
 }
 
+/** A question or change that failed: send it again as it was. */
+function Retry({ data, exchange }: { data: ReviewData; exchange: Exchange }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const again = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await window.api.ask(data.projectId, data.branch, exchange.stepKey, exchange.kind, exchange.text, exchange.check);
+    } catch (e) {
+      setError(cleanError(e));
+    }
+    setBusy(false);
+  };
+  return (
+    <Notice
+      tone="error"
+      actions={
+        <Button size="sm" disabled={busy} aria-busy={busy} onClick={again}>
+          Try again
+        </Button>
+      }
+    >
+      {error ?? exchange.error}
+    </Notice>
+  );
+}
+
 function Working({ children }: { children: ReactNode }) {
   return (
     <div role="status" aria-live="polite" className="flex items-center gap-2 text-ui text-muted">
@@ -105,7 +133,7 @@ function Working({ children }: { children: ReactNode }) {
   );
 }
 
-/** What you asked and what came back, and the way to the new diff once Claude changed the branch. */
+/** What you asked and what came back, and the way to the new diff once the assistant changed the branch. */
 export function Thread({ data, exchanges, pending, onShowChanges, loadedAt }: { data: ReviewData; exchanges: Exchange[]; pending?: PendingAsk | null; onShowChanges: () => void; loadedAt: string }) {
   const running = exchanges.some((e) => e.status === 'running');
   // The diff on screen is out of date once a change finished after the review loaded. Hunkdory then updates its
@@ -136,7 +164,7 @@ export function Thread({ data, exchanges, pending, onShowChanges, loadedAt }: { 
               <Markdown text={e.reply ?? ''} />
             </div>
           )}
-          {e.status === 'failed' && <Notice tone="error">{e.error}</Notice>}
+          {e.status === 'failed' && <Retry data={data} exchange={e} />}
           {e.status === 'cancelled' && <p className="text-ui text-muted">You stopped this.</p>}
         </div>
       ))}
@@ -146,7 +174,7 @@ export function Thread({ data, exchanges, pending, onShowChanges, loadedAt }: { 
         <div className="flex flex-col gap-2 border-b border-border pb-3">
           <Asked {...pending} />
           <Working>
-            <span className="min-w-0 flex-1 break-words">Reading the branch before Claude starts…</span>
+            <span className="min-w-0 flex-1 break-words">Reading the branch before {data.assistant?.name ?? 'the assistant'} starts…</span>
           </Working>
         </div>
       )}
@@ -162,7 +190,7 @@ export function Thread({ data, exchanges, pending, onShowChanges, loadedAt }: { 
             </Button>
           }
         >
-          <strong className="font-semibold">Claude changed the branch.</strong>{' '}
+          <strong className="font-semibold">{data.assistant?.name ?? 'The assistant'} changed the branch.</strong>{' '}
           {updating ? (
             <>
               Hunkdory is updating the walkthrough so the new code shows up in this step. Shown now, it sits under “Not in the walkthrough”.
@@ -192,7 +220,7 @@ export function AskPanel({
   data: ReviewData;
   step: Step;
   exchanges: Exchange[];
-  /** Reloads the review after Claude changed the branch. */
+  /** Reloads the review after the assistant changed the branch. */
   onShowChanges: () => void;
   /** When the review on screen read the branch. */
   loadedAt: string;
@@ -242,7 +270,7 @@ export function AskPanel({
         </Button>
         {canCheckout && (
           <Button variant="quiet" disabled={checkingOut} aria-busy={checkingOut} onClick={checkout} data-tooltip={`${CHECKOUT_TIP} Your text stays.`}>
-            {checkingOut ? 'Checking out…' : 'Check out in a worktree'}
+            {checkingOut ? 'Checking out…' : 'Check out in a separate folder'}
           </Button>
         )}
       </div>
@@ -260,7 +288,7 @@ export function AskPanel({
 
 /**
  * Under one of a step's questions, once you answered it "Needs a change" or "Not sure": say what should change
- * (and have Claude do it), or ask about it. What comes back shows here too, not at the bottom of the step.
+ * (and have the assistant do it), or ask about it. What comes back shows here too, not at the bottom of the step.
  */
 export function CheckFollowUp({
   data,
@@ -329,6 +357,8 @@ export function CheckFollowUp({
   const disabled = busy || checkingOut || (change ? !(canChange || canCheckout) || changeRunning : !text.trim() || !canAsk);
 
   const name = data.assistant?.name ?? 'the assistant';
+  // Manual: nobody to ask. "Not sure" has nothing to offer, and "Needs a change" is a note for your review.
+  if (!data.assistant && !change) return null;
 
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-3">
@@ -351,6 +381,7 @@ export function CheckFollowUp({
         }}
       />
       <div className="flex flex-wrap items-center gap-2">
+        {data.assistant && (
         <Button
           variant="primary"
           kbd="mod+enter"
@@ -361,8 +392,9 @@ export function CheckFollowUp({
         >
           {checkingOut ? 'Checking out…' : busy ? (change ? 'Starting…' : 'Asking…') : change ? (canChange || !canCheckout ? `Ask ${name} to change it` : `Check out and ask ${name} to change it`) : 'Ask'}
         </Button>
+        )}
         <span className="min-w-0 flex-1 text-meta text-muted">
-          {change ? <>Goes with your review as “Needs a change”, whether or not {name} changes it now. {canChange ? who(data, 'change') : ''}</> : who(data, 'question')}
+          {change ? (data.assistant ? <>Goes with your review as “Needs a change”, whether or not {name} changes it now. {canChange ? who(data, 'change') : ''}</> : 'Goes with your review as “Needs a change”.') : who(data, 'question')}
         </span>
       </div>
       {error && <Notice tone="error">{error}</Notice>}

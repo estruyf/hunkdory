@@ -8,6 +8,7 @@ import type { PillTone } from './ui/buttonStyles.ts';
 import { Notice } from './ui/Notice.tsx';
 import { Pill } from './ui/Pill.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
+import { usageNote } from '../../shared/assistantText.ts';
 import { areaLabel, findingAsk, findingsView, notChecked, type PlacedFinding } from '../../shared/aiReview.ts';
 import { timeAgo } from '../../shared/order.ts';
 import type { AiFinding, ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
@@ -158,7 +159,7 @@ export function AiReviewCard({ data, state, act, onOpen, onSettings }: { data: R
               {settings.areas.length ? `A second opinion before you read: ${assistant!.name} looks for ${settings.areas.map((a) => areaLabel(a).toLowerCase()).join(', ')} issues in this change.` : 'Choose what it should check in the project’s settings first.'}
             </span>
             <span className="text-meta text-faint">
-              {assistant!.name} · {settings.depth === 'quick' ? 'Quick' : 'Thorough'} ·{' '}
+              {usageNote(assistant!)} {settings.depth === 'quick' ? 'Quick' : 'Thorough'} ·{' '}
               <button type="button" className="text-link hover:underline" onClick={onSettings}>
                 Change what it checks
               </button>
@@ -283,7 +284,7 @@ export function StepFindings({ data, state, step, act, onAsk }: { data: ReviewDa
             <Button onClick={() => act(commented ? { type: 'ai-finding', id: f.id, action: 'uncomment' } : { type: 'ai-finding', id: f.id, action: 'comment', stepKey: step.key })}>{commented ? 'Remove from comments' : 'Add as comment'}</Button>
             {onAsk && (
               <Button disabled={!canAsk} onClick={() => onAsk(findingAsk(f, 'question'))}>
-                Ask {data.assistant?.name ?? 'Claude'}
+                Ask {data.assistant?.name ?? 'the assistant'}
               </Button>
             )}
             {onAsk && (

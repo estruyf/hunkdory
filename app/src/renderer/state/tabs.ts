@@ -128,7 +128,7 @@ export function withoutProjectsGone(s: Tabs, projects: ReadonlySet<string>): Tab
 }
 
 const place = (r: Route): Route[] => {
-  if (r.name === 'review') return [{ name: 'review', projectId: r.projectId, branch: r.branch, stepKey: r.stepKey, decision: r.decision, group: r.group }];
+  if (r.name === 'review') return [{ name: 'review', projectId: r.projectId, branch: r.branch, stepKey: r.stepKey, decision: r.decision, group: r.group, story: r.story }];
   // Finish starts from its form again, and a finished review has no tab to come back to.
   if (r.name === 'plan' || r.name === 'finish') return [{ name: 'plan', projectId: r.projectId, branch: r.branch }];
   return [];
