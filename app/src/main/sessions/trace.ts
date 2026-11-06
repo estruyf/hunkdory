@@ -148,8 +148,8 @@ export interface BranchScope {
   baseName: string;
 }
 
-/** Whether a stretch on this branch can be the start of work on `scope.branch`: the base, where the session started, or a fresh worktree. */
-const leadsUpIn = (s: SessionInfo, scope: BranchScope) => (name: string | null) => !name || name === scope.baseName || name === s.originalBranch || name.startsWith('worktree-');
+/** Whether a stretch on this branch can be the start of work on `scope.branch`: the base (sessions record its local name), where the session started, or a fresh worktree. */
+const leadsUpIn = (s: SessionInfo, scope: BranchScope) => (name: string | null) => !name || name === scope.baseName.replace(/^origin\//, '') || name === s.originalBranch || name.startsWith('worktree-');
 
 /** A session's work on the branch. Copilot doesn't record branches, so its sessions come whole. An unreadable transcript only costs context. */
 async function branchEvents(s: SessionInfo, scope: BranchScope): Promise<TraceEvent[]> {

@@ -496,6 +496,8 @@ export interface ReviewData {
   baseRef: string;
   /** You picked the base for this branch, instead of Hunkdory. */
   baseChosen: boolean;
+  /** That base is a local branch behind origin, so the review shows commits already on its copy there. */
+  staleBase: { remote: string; commits: number } | null;
   baseSha: string;
   head: string;
   pr: PullRequest | null;

@@ -12,7 +12,7 @@ import { detectedIcon, forgetIconFile, projectIconInfo, storeIconChoice } from '
 import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './sessions/claude.ts';
 import { belongsTo as copilotBelongsTo, readCopilotSessions } from './sessions/copilot.ts';
 import * as gh from './github.ts';
-import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback, type BranchSessions } from './match.ts';
+import { baseCandidates, buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback, type BranchSessions } from './match.ts';
 import { attention, buildSteps, estimateMinutes, overview } from './steps.ts';
 import { aiReviewSettings } from '../shared/aiReview.ts';
 import { projectName, toWatch, withProjectName, type Store } from './store.ts';
@@ -470,7 +470,7 @@ export class Projects {
       // A base you picked wins. Then an open pull request, which says what the branch merges into: that beats guessing, and matters for stacked PRs.
       const chosen = await chosenBase(project, name);
       const prBase = pr && !chosen ? await firstRef(root, [gh.baseRef(pr.baseRefName), `origin/${pr.baseRefName}`, pr.baseRefName]) : null;
-      const { ref: baseRef, ahead } = await this.pickBase(root, name, chosen ? [chosen] : prBase ? [prBase] : [match?.origin.originalBranch, project.baseBranch, ...exclude]);
+      const { ref: baseRef, ahead } = await g.pickBase(root, name, chosen ? [chosen] : prBase ? [prBase] : baseCandidates(name, [match?.origin.originalBranch, project.baseBranch, ...exclude]));
       const headSha = (await g.git(['rev-parse', name], root)).trim();
       const dirty = checkout.kind === 'none' ? 0 : (await g.dirtyFiles(checkout.path)).length;
       if (!ahead && !dirty) {
@@ -587,20 +587,6 @@ export class Projects {
       });
     }
     return out;
-  }
-
-  /**
-   * The integration branch this branch was cut from: the candidate it has the fewest
-   * commits on top of. Ties go to the earlier candidate (session origin, then project base).
-   */
-  private async pickBase(root: string, branch: string, candidates: (string | null | undefined)[]): Promise<{ ref: string; ahead: number }> {
-    let best: { ref: string; ahead: number } | null = null;
-    for (const ref of new Set(candidates.filter((c): c is string => !!c && c !== branch))) {
-      const n = (await g.tryGit(['rev-list', '--count', `${ref}..${branch}`], root))?.trim();
-      if (n === undefined || n === '') continue;
-      if (!best || Number(n) < best.ahead) best = { ref, ahead: Number(n) };
-    }
-    return best ?? { ref: candidates.find(Boolean)!, ahead: 0 };
   }
 
   /** The branch's own walkthrough wins. Without one, the walkthrough Hunkdory wrote, if any. */
@@ -904,9 +890,11 @@ export class Projects {
     const p = d.branch.pr;
     const prKey = p ? JSON.stringify([p.number, p.headRefOid, p.baseRefName, p.title, p.author, p.copilot]) : '';
     const hit = this.cache.get(cacheId);
+    // A fetch moves origin without moving this diff, so this is taken fresh too.
+    const behind = lines ? await g.staleBase(root, d.branch) : null;
     // The stack holds your reviews of the other PRs in it, and GitHub holds what others said: both change while
     // this diff doesn't, so they're taken fresh. The inbox (no lines) has no use for the comments.
-    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p, stack: await this.stack(project, d), ...(lines ? await this.fromGitHub(project, d, hit.data.prompt) : {}) };
+    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p, staleBase: behind, stack: await this.stack(project, d), ...(lines ? await this.fromGitHub(project, d, hit.data.prompt) : {}) };
 
     const out = await runner.run({ cwd, baseSha, head: inTree ? null : d.branch.headRef, walkthrough: wt.value, lines });
     const r = out.result;
@@ -986,6 +974,7 @@ export class Projects {
       branch: d.branch.name,
       baseRef: d.branch.baseName,
       baseChosen: d.branch.baseChosen,
+      staleBase: behind,
       baseSha,
       head: r.head,
       pr: d.branch.pr,

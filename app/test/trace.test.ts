@@ -136,6 +136,7 @@ test("the digest only reads sessions the writing assistant ran, and only this br
   const scope = { branch: 'feat/b', baseName: 'main' };
 
   assert.equal(await readSessionDigest(sessions, { ...scope, assistantId: 'claude-code' }), 'Agent: Plan\n\nAgent: Commit');
+  assert.equal(await readSessionDigest(sessions, { ...scope, baseName: 'origin/main', assistantId: 'claude-code' }), 'Agent: Plan\n\nAgent: Commit', 'sessions record the local name of a base on origin');
   assert.equal(await readSessionDigest(sessions, { ...scope, assistantId: 'copilot' }), 'Agent: From Copilot', 'Copilot sessions have no branches to filter on');
   assert.equal(await readSessionDigest(sessions, { ...scope, assistantId: 'acp:gemini' }), null, 'an ACP agent gets none');
   assert.equal(await readSessionDigest([session({})], { ...scope, assistantId: 'claude-code' }), null, 'an unreadable transcript only costs context');

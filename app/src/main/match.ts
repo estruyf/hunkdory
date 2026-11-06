@@ -97,6 +97,20 @@ export function integrationBranches(sessions: SessionInfo[], base: string): Set<
   return set;
 }
 
+/**
+ * What a branch may have been cut from, each with its copy on origin right after it: a worktree can start from an
+ * origin branch your local one is far behind. Never the branch's own copy, or its pushed commits would look like the base.
+ */
+export function baseCandidates(branch: string, names: (string | null | undefined)[]): string[] {
+  const out = new Set<string>();
+  for (const name of names) {
+    if (!name || name === branch) continue;
+    out.add(name);
+    if (!name.startsWith('origin/') && `origin/${name}` !== branch) out.add(`origin/${name}`);
+  }
+  return [...out];
+}
+
 /** "claude/*, copilot/*" style patterns. `*` stays within one path segment, `**` crosses them. */
 export function matchesPattern(branch: string, pattern: string): boolean {
   return pattern
