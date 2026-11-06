@@ -60,7 +60,13 @@ Merge, open or review a pull request, send it back to the agent, or close the re
 
 ## Get started
 
-Hunkdory isn't released yet. Until the first release, you can [run it from source](docs/development.md#run-it).
+[Download the latest version](https://github.com/estruyf/hunkdory/releases/latest) (the `.dmg`), or install it with Homebrew:
+
+```bash
+brew install --cask estruyf/tap/hunkdory
+```
+
+After that it keeps itself up to date: when there's a new version, Hunkdory tells you, and you restart when you're ready.
 
 The first time you open it, Hunkdory checks your tools and shows you what's missing, with a link to each.
 

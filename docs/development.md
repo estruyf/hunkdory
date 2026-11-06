@@ -52,11 +52,11 @@ The build signs with the Developer ID certificate in your keychain if it finds o
 
 ## Releasing
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) builds, signs and notarizes the app, then attaches the `.dmg` and `.zip` to a GitHub release.
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) builds, signs and notarizes the app, then attaches the `.dmg`, the `.zip` and the update feed to a GitHub release, and updates the Homebrew tap.
 
 1. Draft a release on GitHub with a tag like `v0.1.0`. The tag sets the app's version, so `app/package.json` doesn't need a bump.
-2. Tick **Set as a pre-release** for early versions (`v0.1.0-beta.1`, or any version you don't want to call stable). A release that isn't a pre-release must be tagged on `main`.
-3. Publish it. The files are attached once the build and its checks pass. When the release has no notes, GitHub's generated notes are filled in.
+2. Tick **Set as a pre-release** for early versions (`v0.1.0-beta.1`, or any version you don't want to call stable). A release that isn't a pre-release must be tagged on `main`. A pre-release gets no update feed and no cask, so nobody is updated to it.
+3. Publish it. The files are attached once the build and its checks pass. When the release has no notes, GitHub's generated notes are filled in. Every copy of the app offers it within a few hours.
 
 To try it without publishing anything, run the workflow by hand (Actions → Release → Run workflow). The signed build is kept as a workflow artifact for a week.
 
@@ -69,8 +69,34 @@ The workflow needs these repository secrets, the same ones Seshboard uses:
 | `APPLE_ID` | The Apple ID used for notarization |
 | `APPLE_APP_SPECIFIC_PASSWORD` | An app-specific password for that Apple ID |
 | `APPLE_TEAM_ID` | The team ID of the certificate |
+| `HOMEBREW_TAP_TOKEN` | A fine-grained token for `estruyf/homebrew-tap` alone, with **Contents: read and write** |
 
-Without them the run fails: nothing is ever attached unsigned.
+Without the signing secrets the run fails: nothing is ever attached unsigned. Without the tap token it warns and carries on, so a missing token delays the tap rather than failing a release.
+
+### Updates
+
+The app updates itself with [electron-updater](https://www.electron.build/auto-update) (`src/main/updater.ts`). It checks 15 seconds after launch and every 4 hours, reading `latest-mac.yml` from the latest GitHub release. A toast offers a new version, downloads it when you say so, and restarts into it. The `.zip` is what it installs, so every release has to keep it, its `.blockmap` and the feed.
+
+macOS only installs an update signed by the same developer as the running app, so a full run needs two signed builds, like those of two dry runs. Everything up to the restart works without one:
+
+```bash
+cd app
+node scripts/mock-update-server.ts --fake 9.9.9   # a made-up feed: the toast shows, the download fails
+node scripts/mock-update-server.ts --dir <folder> # a real build's latest-mac.yml and .zip
+HUNKDORY_MOCK_UPDATES_URL=http://localhost:8484 npm run dev
+```
+
+### Homebrew
+
+`brew install --cask estruyf/tap/hunkdory` installs the same signed, notarized `.zip` the release has. The cask is [`homebrew/hunkdory.rb`](../homebrew/hunkdory.rb), and this repository is where it is edited: [`homebrew/publish-cask.sh`](../homebrew/publish-cask.sh) stamps it with a version and a checksum and copies it into [estruyf/homebrew-tap](https://github.com/estruyf/homebrew-tap) on every release. Never edit it in the tap, as the next release overwrites the change.
+
+The cask says `auto_updates true`, so `brew upgrade` leaves the app to its own updater. `depends_on macos:` follows Electron's `LSMinimumSystemVersion`, so move it when an Electron upgrade raises that.
+
+If a release missed the tap, or to see what would land (without `--push` it only prints the cask):
+
+```bash
+VERSION=0.1.0 HOMEBREW_TAP_TOKEN=<token> ./homebrew/publish-cask.sh --push
+```
 
 ## Updating the app icon
 
