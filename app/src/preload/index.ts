@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ReviewerApi, ReviewState, WalkthroughJob } from '../shared/types.ts';
+import type { UpdateState } from '../shared/update.ts';
 
 const methods: (keyof ReviewerApi)[] = [
   'listProjects',
@@ -61,6 +62,8 @@ const methods: (keyof ReviewerApi)[] = [
   'setAcpAgent',
   'removeAcpAgent',
   'appInfo',
+  'updateState',
+  'runUpdate',
 ];
 
 const api = Object.fromEntries(methods.map((m) => [m, (...args: unknown[]) => ipcRenderer.invoke(`api:${m}`, ...args)])) as unknown as ReviewerApi;
@@ -104,5 +107,10 @@ contextBridge.exposeInMainWorld('events', {
     const listener = (_e: unknown, job: WalkthroughJob) => fn(job);
     ipcRenderer.on('walkthrough-changed', listener);
     return () => ipcRenderer.removeListener('walkthrough-changed', listener);
+  },
+  onUpdateChanged(fn: (state: UpdateState) => void) {
+    const listener = (_e: unknown, state: UpdateState) => fn(state);
+    ipcRenderer.on('update-changed', listener);
+    return () => ipcRenderer.removeListener('update-changed', listener);
   },
 });

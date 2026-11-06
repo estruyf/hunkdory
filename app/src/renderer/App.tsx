@@ -3,12 +3,14 @@ import { useInboxData, type InboxData } from './components/inbox/useInboxData.ts
 import { ShortcutsSheet } from './components/shortcuts/ShortcutsSheet.tsx';
 import { TabStrip } from './components/TabStrip.tsx';
 import { TooltipLayer } from './components/ui/Tooltip.tsx';
+import { UpdateToast } from './components/UpdateToast.tsx';
 import { matches, type ShortcutContext } from './lib/shortcuts.ts';
 import { stepBranch, useBranches } from './state/branches.ts';
 import { openSettings, useNav } from './state/nav.ts';
 import { loadProjectIcons } from './state/projectIcons.ts';
 import { TabPane } from './state/tabPane.ts';
 import { activate, activeRoute, closeTab, INBOX, move, navigate, reopenTab, restoreTabs, routeOf, savedTabs, startTabs, stepTab, tabAt, withoutProjectsGone, type Tabs } from './state/tabs.ts';
+import { watchUpdate } from './state/update.ts';
 import { jobKey, useWalkthroughs, watchWalkthroughs } from './state/walkthroughs.ts';
 import { rememberReadState } from './state/reviewReads.ts';
 import { Welcome } from './screens/Welcome.tsx';
@@ -149,6 +151,8 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => watchUpdate(), []);
+
   // The app's own shortcuts, from the registry: the same keys as Switchboard where they mean the same thing.
   useEffect(() => {
     const onMouse = (e: MouseEvent) => {
@@ -201,6 +205,7 @@ export function App() {
   const overlays = (
     <>
       <TooltipLayer />
+      <UpdateToast />
       {sheet && <ShortcutsSheet ctx={sheet} onClose={() => setSheet(null)} />}
     </>
   );

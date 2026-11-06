@@ -80,3 +80,7 @@ Everything is in `~/Library/Application Support/Hunkdory/`:
 | `bin/` | The `git` wrapper for agents |
 
 In your repos, Hunkdory only adds the private refs for pull requests, and a worktree if you check a pull request out from a review. Everything else there is what an agent does when you ask it to, and what you choose to commit or merge.
+
+## Updates
+
+Hunkdory looks at its [GitHub releases](https://github.com/estruyf/hunkdory/releases) for a newer version when it starts and every few hours, and tells you when there is one. Those checks only read from GitHub: nothing about you or your code is sent. It downloads an update when you ask, and installs it when you restart or quit. Pre-releases are never offered.

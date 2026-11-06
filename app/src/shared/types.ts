@@ -1,6 +1,8 @@
 // Data model shared by the main process and the renderer.
 // Stored: Project, Review, Comment. Everything else is derived from git, wtv and sessions.
 
+import type { UpdateCommand, UpdateState } from './update.ts';
+
 export type RiskLevel = 'high' | 'medium' | 'low';
 export type ReviewOrder = 'story' | 'risk' | 'file';
 
@@ -955,6 +957,8 @@ export interface ReviewerApi {
   setAcpAgent(agent: Omit<AcpAgentConfig, 'id'> & { id?: string }): Promise<AppSettings>;
   removeAcpAgent(id: string): Promise<AppSettings>;
   appInfo(): Promise<AppInfo>;
+  updateState(): Promise<UpdateState>;
+  runUpdate(command: UpdateCommand): Promise<void>;
 }
 
 export interface ProjectInput {

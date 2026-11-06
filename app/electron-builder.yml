@@ -46,3 +46,11 @@ mac:
 
 dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}
+
+# The update feed: packaged apps get app-update.yml pointing here, and the build writes latest-mac.yml.
+# Nothing is uploaded by electron-builder (--publish never); the release workflow attaches the files.
+publish:
+  provider: github
+  owner: estruyf
+  repo: hunkdory
+  releaseType: release
