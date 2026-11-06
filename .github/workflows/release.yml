@@ -160,6 +160,12 @@ jobs:
     env:
       TAG: ${{ github.event.release.tag_name }}
     steps:
+      # Only for CHANGELOG.md: nothing from the repo runs in this job.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
       - name: Download the build
         uses: actions/download-artifact@v7
         with:
@@ -180,17 +186,35 @@ jobs:
             gh release upload "$TAG" latest-mac.yml --clobber --repo "$GITHUB_REPOSITORY"
           fi
 
-      - name: Fill in empty release notes
+      - name: Fill in empty release notes from the changelog
         env:
           GH_TOKEN: ${{ github.token }}
           BODY: ${{ github.event.release.body }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           if [ -n "$(echo "$BODY" | tr -d '[:space:]')" ]; then
             echo "The release has notes; leaving them."
             exit 0
           fi
-          # No changelog yet: GitHub's own notes, from the pull requests and commits since the previous release.
-          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body > notes.md
+          # A section of CHANGELOG.md, without the link definitions.
+          section() {
+            awk -v v="$1" '
+              index($0, "## [" v "]") == 1 { on = 1; next }
+              on && /^## \[/ { exit }
+              on && !/^\[[^]]+\]: / { print }
+            ' CHANGELOG.md
+          }
+          # An empty section is still blank lines, so look for text.
+          has_text() { grep -q '[^[:space:]]' notes.md; }
+          section "${TAG#v}" > notes.md
+          # The changelog only lists releases, so a pre-release gets what is in Unreleased.
+          if ! has_text && [ "$PRERELEASE" == "true" ]; then
+            section Unreleased > notes.md
+          fi
+          if ! has_text; then
+            echo "::warning::CHANGELOG.md has nothing for $TAG, so the release has GitHub's generated notes. Edit them, and add the section to the changelog."
+            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body > notes.md
+          fi
           gh release edit "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
 
   # What makes `brew install --cask estruyf/tap/hunkdory` resolve. Its own job, so a tap failure can be re-run without

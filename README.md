@@ -91,6 +91,7 @@ Hunkdory runs on your Mac. Your code only goes to the assistant you picked for a
 - [How it works under the hood](docs/how-it-works.md): what the inbox looks for, how walkthroughs are made and checked, what agents may do, and where your data lives.
 - [Development](docs/development.md): run it from source, build the Mac app, and release it.
 - [`wtv`](tools/wtv/README.md): the command-line tool that checks an agent's walkthrough against the real diff.
+- [Changelog](CHANGELOG.md): what changed in each version.
 
 ## Feedback
 
