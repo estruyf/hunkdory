@@ -1,4 +1,5 @@
 import type { ReviewState, ReviewerApi, WalkthroughJob } from '../shared/types.ts';
+import type { UpdateState } from '../shared/update.ts';
 
 declare global {
   interface Window {
@@ -14,6 +15,8 @@ declare global {
       onCloseTab(fn: () => void): () => void;
       onNavigate(fn: (dir: 'back' | 'forward') => void): () => void;
       onReviewStateChanged(fn: (review: ReviewState) => void): () => void;
+      /** The in-app updater moved on: a new version found, downloading, ready to install. */
+      onUpdateChanged(fn: (state: UpdateState) => void): () => void;
     };
   }
 }

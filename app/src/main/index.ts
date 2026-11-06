@@ -19,6 +19,8 @@ import { ICON_EXTENSIONS, previewIconFile, useIconFolder } from './projectIcons.
 import { trayIcon } from './trayIcon.ts';
 import { restoredBounds } from './windowPlace.ts';
 import { installedEditors, openInEditor, pickEditor } from './editors.ts';
+import { Updater } from './updater.ts';
+import { updatesDisabledReason } from './updateState.ts';
 import { actOnFinding } from '../shared/aiReview.ts';
 import { addToStepComment, answerLine, removeFromStepComments, setAnswerLine } from '../shared/comments.ts';
 import { carryReviewed, markHunk } from '../shared/order.ts';
@@ -51,7 +53,30 @@ if (!process.env.REVIEWER_USER_DATA) {
 }
 // Lets tests and demo runs use a throwaway store instead of your real reviews.
 if (process.env.REVIEWER_USER_DATA) app.setPath('userData', process.env.REVIEWER_USER_DATA);
-if (!app.requestSingleInstanceLock()) app.quit();
+const firstInstance = app.requestSingleInstanceLock();
+if (!firstInstance) app.quit();
+
+// HUNKDORY_MOCK_UPDATES_URL points the updater at a local feed (scripts/mock-update-server.ts).
+const mockFeedUrl = process.env.HUNKDORY_MOCK_UPDATES_URL || undefined;
+const updater = new Updater({
+  currentVersion: app.getVersion(),
+  // app.quit() lets this module run on: a second copy must leave the first one's update marker alone.
+  disabledReason: firstInstance ? updatesDisabledReason({ packaged: app.isPackaged, hasFeed: app.isPackaged && existsSync(join(process.resourcesPath, 'app-update.yml')), mockFeed: !!mockFeedUrl }) : 'Hunkdory is already running.',
+  markerFile: join(app.getPath('userData'), 'update-marker.json'),
+  mockFeedUrl,
+  // A download can still report progress while the app quits, after the window is gone.
+  onState: (state) => {
+    if (win && !win.isDestroyed()) win.webContents.send('update-changed', state);
+  },
+  // Electron closes the windows ahead of before-quit here, and closing one otherwise only hides it.
+  beforeInstall: () => {
+    quitting = true;
+  },
+  installFailed: () => {
+    quitting = false;
+  },
+  log: (message) => console.log(`[updater] ${message}`),
+});
 
 const store = new Store(join(app.getPath('userData'), 'store.json'));
 setAcpAgents(store.settings().acpAgents);
@@ -218,6 +243,8 @@ const api: ReviewerApi = {
     return settings;
   },
   appInfo: async () => ({ version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, os: `${process.platform === 'darwin' ? `macOS ${process.getSystemVersion()}` : `${process.platform} ${release()}`} (${process.arch})` }),
+  updateState: async () => updater.state,
+  runUpdate: async (command) => updater.run(command),
   listProjects: async () => store.projects(),
   checkFolder: (path) => projects.checkFolder(path),
   chooseFolder: async () => {
@@ -479,6 +506,7 @@ app.on('second-instance', showWindow);
 app.on('activate', showWindow);
 app.on('before-quit', () => {
   quitting = true;
+  updater.stop();
   writer.stopAll();
   conversations.stopAll();
   aiReviews.stopAll();
@@ -495,4 +523,5 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   createTray();
+  updater.start();
 });

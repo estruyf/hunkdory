@@ -9,6 +9,8 @@ export default defineConfig({
   main: {
     // wtv is bundled into the main and worker chunks so the packaged app doesn't need it on disk.
     resolve: { alias: { '@wtv': wtv } },
+    // Bundled like everything else: electron-builder.yml keeps node_modules out of the app.
+    build: { externalizeDeps: { exclude: ['electron-updater'] } },
   },
   preload: {},
   renderer: {

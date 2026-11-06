@@ -1,15 +1,17 @@
 # Builds Hunkdory for a GitHub release and attaches it.
 #
 # Runs when a release is published on GitHub (for a tag like v0.1.0):
-# - mac: builds the app on an Apple Silicon runner, signs and notarises it, and checks both, giving the .dmg and
-#   the .zip (arm64 only, like electron-builder.yml);
-# - publish: only once the build passed its checks, attaches its files to the release. When the build fails,
-#   nothing is attached. Re-run the failed job to retry.
+# - mac: builds the app on an Apple Silicon runner, signs and notarises it, and checks both, giving the .dmg, the
+#   .zip and what the in-app updater reads (latest-mac.yml) (arm64 only, like electron-builder.yml);
+# - publish: only once the build passed its checks, attaches its files to the release, the feed last. When the
+#   build fails, nothing is attached. Re-run the failed job to retry.
+# - homebrew: for a release, stamps the cask with this version and pushes it to the tap.
 # The version comes from the tag: the app's About panel and the file names say what the release says.
 #
-# Releases and pre-releases: a release (v1.2.3) must be tagged on main. A pre-release (v0.1.0-beta.1, or any
-# version marked as one) may come from any branch. Hunkdory has no in-app updater yet, so nobody is updated to
-# either: people download them from the releases page.
+# Releases and pre-releases: a release (v1.2.3) must be tagged on main, and goes out to everyone: the app offers it
+# through the update feed, and Homebrew installs it. A pre-release (v0.1.0-beta.1, or any version marked as one) may
+# come from any branch. It gets no feed and no cask, so nobody is updated to it: people download it from the releases
+# page.
 #
 # Dry run: run this workflow by hand (Actions → Release → Run workflow). The app is built, signed, notarised and
 # checked, with a version like 0.1.0-dryrun.42, and kept as a workflow artifact for a week. Nothing is published.
@@ -128,7 +130,11 @@ jobs:
         run: |
           cd app/dist
           ls -la
-          ls "Hunkdory-$VERSION-arm64.dmg" "Hunkdory-$VERSION-arm64-mac.zip" >/dev/null
+          ls "Hunkdory-$VERSION-arm64.dmg" "Hunkdory-$VERSION-arm64-mac.zip" "Hunkdory-$VERSION-arm64-mac.zip.blockmap" latest-mac.yml >/dev/null
+          # The feed offers this build, and the app knows where to look for the next one.
+          grep -q "^version: $VERSION$" latest-mac.yml
+          grep -q "Hunkdory-$VERSION-arm64-mac.zip" latest-mac.yml
+          grep -q "repo: hunkdory" mac-arm64/Hunkdory.app/Contents/Resources/app-update.yml
 
       - name: Keep the build for the publish job
         uses: actions/upload-artifact@v7
@@ -137,6 +143,8 @@ jobs:
           path: |
             app/dist/*.dmg
             app/dist/*.zip
+            app/dist/*.zip.blockmap
+            app/dist/latest-mac.yml
           if-no-files-found: error
           retention-days: 7
 
@@ -161,10 +169,16 @@ jobs:
       - name: Attach it to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           cd dist
           ls -la
-          gh release upload "$TAG" *.dmg *.zip --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" *.dmg *.zip *.zip.blockmap --clobber --repo "$GITHUB_REPOSITORY"
+          # The feed last, so it never points at a file that isn't there yet. A pre-release gets none: the app only
+          # follows releases.
+          if [ "$PRERELEASE" != "true" ]; then
+            gh release upload "$TAG" latest-mac.yml --clobber --repo "$GITHUB_REPOSITORY"
+          fi
 
       - name: Fill in empty release notes
         env:
@@ -178,3 +192,36 @@ jobs:
           # No changelog yet: GitHub's own notes, from the pull requests and commits since the previous release.
           gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body > notes.md
           gh release edit "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+
+  # What makes `brew install --cask estruyf/tap/hunkdory` resolve. Its own job, so a tap failure can be re-run without
+  # touching the release, and the token never sits next to the one that can write to it. Only releases: a cask carries
+  # one version, and it should be the one releases/latest returns.
+  homebrew:
+    name: Update the Homebrew tap
+    needs: [publish]
+    if: github.event_name == 'release' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # The exact bytes attached to the release, so hashing them can't race the CDN.
+      - name: Download the build
+        uses: actions/download-artifact@v7
+        with:
+          name: release-mac
+          path: app/dist
+
+      - name: Stamp the cask and push it to the tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set, so the tap still serves the previous version. Run homebrew/publish-cask.sh --push by hand (docs/development.md → Homebrew)."
+            exit 0
+          fi
+          VERSION="${TAG#v}" ./homebrew/publish-cask.sh --push

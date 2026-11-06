@@ -13,10 +13,12 @@ import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { FIELD } from '../components/ui/field.ts';
 import type { DiffMode } from '../components/diff.tsx';
+import { useUpdate } from '../state/update.ts';
 import { resyncWalkthroughs } from '../state/walkthroughs.ts';
 import { watchSummary } from '../../shared/assistantText.ts';
 import { feedbackUrl, versionText } from '../../shared/feedback.ts';
 import { olderThan } from '../../shared/order.ts';
+import { updateStatusText, updateToast } from '../../shared/update.ts';
 import type { AcpAgentConfig, SavedWalkthrough, Theme } from '../../shared/types.ts';
 
 const THEMES: { value: Theme; label: string; hint: string }[] = [
@@ -47,6 +49,9 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
   }, [onClose]);
   const settings = useAsync(() => window.api.settings(), []);
   const info = useAsync(() => window.api.appInfo(), []);
+  const update = useUpdate((s) => s.state);
+  // The toast's next step, which still works after hiding the toast.
+  const updateAction = updateToast(update)?.action ?? { label: 'Check for updates', run: 'check' as const };
   const projects = useAsync(() => window.api.listProjects(), []);
   // The same prefs the review screens keep when you change them in place.
   const [mode, setMode] = usePref<DiffMode>('diff-mode', 'unified');
@@ -271,7 +276,13 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
                   </span>
                 </p>
                 <p className="text-meta text-muted">{info.value.os}</p>
+                {update && <p role="status" className="text-meta text-muted">{updateStatusText(update)}</p>}
                 <div className="flex flex-wrap gap-2">
+                  {update && update.status !== 'disabled' && (
+                    <Button disabled={update.status === 'checking' || update.status === 'downloading' || update.status === 'installing'} onClick={() => void window.api.runUpdate(updateAction.run)}>
+                      {updateAction.label}
+                    </Button>
+                  )}
                   <Button onClick={copy}>{copied ? 'Copied' : 'Copy for a bug report'}</Button>
                   <Button variant="quiet" data-tooltip="Opens a new issue on GitHub with your version filled in. Nothing is sent until you submit it." onClick={() => window.api.openExternal(feedbackUrl(info.value!))}>
                     Send feedback ↗
