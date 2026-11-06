@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { changeAfterQuestion, changeRequest, noteWasSent } from '../../shared/comments.ts';
 import type { Exchange, ReviewData, Step } from '../../shared/types.ts';
 import { Markdown } from './markdown.tsx';
 import { modKey } from '../lib/shortcuts.ts';
@@ -60,6 +61,62 @@ function useSend(data: ReviewData, step: Step, check?: number) {
     }
   };
   return { send, busy: !!pending, pending, error };
+}
+
+const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ']);
+
+/**
+ * Keeps the box where it is on screen while what you asked appears above it. `hold` starts that, and scrolling yourself
+ * ends it. So does the end of the run: the answer then pushes the box down, and you read it from its start, where the
+ * page already is. `holding` starts it right away, for a box that's built while a run goes on. The page can only move as
+ * far as it's long: on a short page the box still moves down.
+ */
+function useHoldInPlace(running: boolean, holding = false) {
+  const box = useRef<HTMLTextAreaElement>(null);
+  const top = useRef<number | null>(null);
+  const hold = () => {
+    if (box.current) top.current = box.current.getBoundingClientRect().top;
+  };
+  // Before the observer below sees the answer's height.
+  useLayoutEffect(() => {
+    if (!running) top.current = null;
+  }, [running]);
+  useEffect(() => {
+    const el = box.current;
+    let scroller = el?.parentElement ?? null;
+    while (scroller && !/auto|scroll/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    if (!el?.parentElement || !scroller) return;
+    if (holding) hold();
+    const page = scroller;
+    const letGo = () => {
+      top.current = null;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key) && !(e.target as HTMLElement).closest('input, textarea, select, [contenteditable]')) letGo();
+    };
+    // On the page itself is its scrollbar: everything else on it is on an element inside.
+    const onPointer = (e: PointerEvent) => {
+      if (e.target === page) letGo();
+    };
+    const moved = new ResizeObserver(() => {
+      // A hidden tab has no position to keep. It comes back the same size or bigger, and this runs again.
+      if (top.current === null || !el.offsetParent) return;
+      page.scrollTop += el.getBoundingClientRect().top - top.current;
+    });
+    moved.observe(el.parentElement);
+    page.addEventListener('wheel', letGo, { passive: true });
+    page.addEventListener('touchmove', letGo, { passive: true });
+    page.addEventListener('pointerdown', onPointer);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      moved.disconnect();
+      page.removeEventListener('wheel', letGo);
+      page.removeEventListener('touchmove', letGo);
+      page.removeEventListener('pointerdown', onPointer);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+  return { box, hold };
 }
 
 const CHECKOUT_TIP = "Checks the PR's branch out in a separate folder next to the project's (a git worktree), so the change has somewhere to happen.";
@@ -231,10 +288,12 @@ export function AskPanel({
 }) {
   const [text, setText] = useState(draft ?? '');
   const { send: ask, busy, pending, error } = useSend(data, step);
+  const { box, hold } = useHoldInPlace(busy || exchanges.some((e) => e.status === 'running'));
   const { canCheckout, checkout, checkingOut, checkoutError } = useCheckout(data, onCheckout);
   const canChange = !!data.ask.change.by;
   // The box empties right away: what you sent shows in the thread. It comes back if sending fails.
   const send = async (kind: Exchange['kind']) => {
+    hold();
     const sent = text;
     setText('');
     if (!(await ask(kind, sent))) setText(sent);
@@ -251,6 +310,7 @@ export function AskPanel({
       <Thread data={data} exchanges={exchanges} pending={pending} onShowChanges={onShowChanges} loadedAt={loadedAt} />
 
       <textarea
+        ref={box}
         aria-label="Your question or change"
         rows={3}
         className={TEXTAREA}
@@ -265,7 +325,7 @@ export function AskPanel({
         <Button variant="primary" kbd="mod+enter" disabled={!text.trim() || busy} aria-busy={busy} onClick={() => send('question')}>
           {busy ? 'Asking…' : 'Ask'}
         </Button>
-        <Button disabled={!text.trim() || busy || !canChange} onClick={() => send('change')} data-tooltip={canChange ? undefined : who(data, 'change')}>
+        <Button variant="side" disabled={!text.trim() || busy || !canChange} onClick={() => send('change')} data-tooltip={canChange ? undefined : who(data, 'change')}>
           Ask for this change
         </Button>
         {canCheckout && (
@@ -302,6 +362,7 @@ export function CheckFollowUp({
   loadedAt,
   autoFocus,
   onCheckout,
+  onChangeAsked,
 }: {
   data: ReviewData;
   step: Step;
@@ -316,24 +377,33 @@ export function CheckFollowUp({
   autoFocus?: boolean;
   /** Checks the pull request out in a worktree, so the change has somewhere to happen. */
   onCheckout?: () => Promise<void>;
+  /** From "Not sure": you asked for a change after all, with this as what should change. */
+  onChangeAsked: (note: string) => Promise<void>;
 }) {
   const question = step.checks[index];
   const change = value === 'no';
-  // A question starts from the one on screen; a change from what you said should change.
-  const [text, setText] = useState(change ? note : question);
+  // A question starts from the one on screen; a change from what you said should change, unless you already asked for it.
+  const [text, setText] = useState(change ? (noteWasSent(question, note, exchanges) ? '' : note) : question);
   const { send, busy, pending, error } = useSend(data, step, index);
   const { canCheckout, checkout, checkingOut, checkoutError } = useCheckout(data, onCheckout);
   const canChange = !!data.ask.change.by;
   const canAsk = !!data.ask.question.by;
-  const changeRunning = exchanges.some((e) => e.kind === 'change' && e.status === 'running');
+  const changes = exchanges.filter((e) => e.kind === 'change');
+  const name = data.assistant?.name ?? 'the assistant';
+  const changeRunning = changes.some((e) => e.status === 'running');
+  // Built while a change you just asked for runs: you came from "Not sure", with the same box in the same place.
+  const { box, hold } = useHoldInPlace(busy || exchanges.some((e) => e.status === 'running'), changeRunning && autoFocus);
+  const changeAsked = changes.some((e) => e.status !== 'failed' && e.status !== 'cancelled');
 
-  // The note goes with your review: saved shortly after typing stops, and when you leave.
-  const latest = useRef({ text, onNote, saved: note });
+  // The note goes with your review: saved shortly after typing stops, and when you leave. The box empties once you
+  // send it, but the note stays, until you write another. `sent` is the note the empty box stands for.
+  const latest = useRef({ text, onNote, saved: note, sent: noteWasSent(question, note, exchanges) ? note : null });
   latest.current = { ...latest.current, text, onNote };
   const save = () => {
-    const { text, onNote, saved } = latest.current;
-    if (!change || text.trim() === saved.trim()) return;
+    const { text, onNote, saved, sent } = latest.current;
+    if (!change || text.trim() === saved.trim() || (!text.trim() && sent !== null)) return;
     latest.current.saved = text;
+    latest.current.sent = null;
     onNote(text);
   };
   useEffect(() => {
@@ -342,7 +412,17 @@ export function CheckFollowUp({
   }, [text]);
   useEffect(() => save, []);
 
+  // That run failed or you stopped it: what you asked for comes back, to send again.
+  const lastStatus = changes.at(-1)?.status;
+  useEffect(() => {
+    const { text, sent } = latest.current;
+    if ((lastStatus !== 'failed' && lastStatus !== 'cancelled') || text.trim() || !sent) return;
+    latest.current.sent = null;
+    setText(sent);
+  }, [lastStatus]);
+
   const submit = async () => {
+    hold();
     if (!change) {
       const sent = text;
       setText('');
@@ -352,11 +432,31 @@ export function CheckFollowUp({
     save();
     // Nowhere to change it yet: check the PR out first, then ask in the same go.
     if (!canChange && !(await checkout())) return;
-    await send('change', text.trim() ? `${question}\n\n${text.trim()}` : question);
+    // The box empties right away: what you sent shows in the thread. It comes back if sending fails.
+    const sent = text;
+    latest.current.sent = sent.trim() ? sent : null;
+    setText('');
+    if (!(await send('change', changeRequest(question, sent)))) {
+      latest.current.sent = null;
+      setText(sent);
+    }
   };
-  const disabled = busy || checkingOut || (change ? !(canChange || canCheckout) || changeRunning : !text.trim() || !canAsk);
+  const disabled = busy || checkingOut || (change ? !(canChange || canCheckout) || changeRunning || (!text.trim() && changeAsked) : !text.trim() || !canAsk);
 
-  const name = data.assistant?.name ?? 'the assistant';
+  // From "Not sure": the box starts with the question, which says nothing about what should change.
+  const typed = text.trim() === question.trim() ? '' : text.trim();
+  const answered = exchanges.some((e) => e.kind === 'question' && e.status === 'done');
+  // Sent first: the answer only moves to "Needs a change" once the change is really on its way.
+  const askForChange = async () => {
+    hold();
+    if (!canChange && !(await checkout())) return;
+    const before = text;
+    setText('');
+    if (await send('change', changeAfterQuestion(question, typed, answered))) await onChangeAsked(typed);
+    else setText(before);
+  };
+  const changeLabel = canChange || !canCheckout ? `Ask ${name} to change it` : `Check out and ask ${name} to change it`;
+
   // Manual: nobody to ask. "Not sure" has nothing to offer, and "Needs a change" is a note for your review.
   if (!data.assistant && !change) return null;
 
@@ -364,6 +464,7 @@ export function CheckFollowUp({
     <div className="flex flex-col gap-3 border-t border-border pt-3">
       <Thread data={data} exchanges={exchanges} pending={pending} onShowChanges={onShowChanges} loadedAt={loadedAt} />
       <textarea
+        ref={box}
         aria-label={change ? 'What should change' : 'Your question'}
         rows={2}
         autoFocus={autoFocus}
@@ -383,18 +484,29 @@ export function CheckFollowUp({
       <div className="flex flex-wrap items-center gap-2">
         {data.assistant && (
         <Button
-          variant="primary"
+          variant={change ? 'side' : 'primary'}
           kbd="mod+enter"
           disabled={disabled}
           aria-busy={busy || checkingOut}
           onClick={submit}
           data-tooltip={change ? (canChange ? undefined : canCheckout ? CHECKOUT_TIP : who(data, 'change')) : !canAsk ? who(data, 'question') : undefined}
         >
-          {checkingOut ? 'Checking out…' : busy ? (change ? 'Starting…' : 'Asking…') : change ? (canChange || !canCheckout ? `Ask ${name} to change it` : `Check out and ask ${name} to change it`) : 'Ask'}
+          {checkingOut ? 'Checking out…' : busy ? (change ? 'Starting…' : 'Asking…') : change ? changeLabel : 'Ask'}
         </Button>
         )}
+        {!change && (
+          <Button
+            variant="side"
+            disabled={busy || checkingOut || changeRunning || !(canChange || canCheckout) || !(typed || answered)}
+            aria-busy={checkingOut}
+            onClick={askForChange}
+            data-tooltip={!(canChange || canCheckout) ? who(data, 'change') : !(typed || answered) ? 'Ask first, or type what should change.' : canChange ? who(data, 'change') : CHECKOUT_TIP}
+          >
+            {changeLabel}
+          </Button>
+        )}
         <span className="min-w-0 flex-1 text-meta text-muted">
-          {change ? (data.assistant ? <>Goes with your review as “Needs a change”, whether or not {name} changes it now. {canChange ? who(data, 'change') : ''}</> : 'Goes with your review as “Needs a change”.') : who(data, 'question')}
+          {change ? (data.assistant ? <>Goes with your review as “Needs a change”, whether or not {name} changes it now. {canChange ? who(data, 'change') : ''}</> : 'Goes with your review as “Needs a change”.') : <>{who(data, 'question')} Asking for a change marks this “Needs a change”.</>}
         </span>
       </div>
       {error && <Notice tone="error">{error}</Notice>}

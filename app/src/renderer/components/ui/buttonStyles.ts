@@ -35,7 +35,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   secondary: 'btn-secondary',
   quiet: 'text-muted enabled:hover:bg-border/50 enabled:hover:text-text',
   danger: 'btn-secondary border-error/50 text-error enabled:hover:bg-error/10',
-  // Ask about this session: outlined in the side channel's blue, never the accent.
+  // Ask about this session, or ask for a change: outlined in the side channel's blue, never the accent.
   side: 'border border-link/55 font-medium text-link enabled:hover:bg-link/10',
 };
 const DANGER_FILLED = 'bg-error font-semibold text-white enabled:hover:bg-error/85';

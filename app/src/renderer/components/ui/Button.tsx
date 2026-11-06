@@ -4,7 +4,7 @@ import { buttonClass, type ButtonSize, type ButtonVariant } from './buttonStyles
 import { Kbd } from './Kbd.tsx';
 
 interface BaseProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  /** `primary`: the one yellow action per area. `secondary` (default): Cancel, Close, Choose…. `quiet`: toolbar icons and inline controls. `danger`: deletes or reverts. `side`: Ask about this session, outlined in blue (`filled` for the panel's send button). */
+  /** `primary`: the one yellow action per area. `secondary` (default): Cancel, Close, Choose…. `quiet`: toolbar icons and inline controls. `danger`: deletes or reverts. `side`: Ask about this session, or ask for a change, outlined in blue (`filled` for the panel's send button). */
   variant?: ButtonVariant;
   /** `sm` 24px, `md` 28px (toolbars, dialogs), `lg` 32px (cards, the message box, a view's main action). */
   size?: ButtonSize;

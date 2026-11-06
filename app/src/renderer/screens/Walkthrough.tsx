@@ -596,6 +596,12 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     await patch({ type: 'answer', stepKey: key, index, question, value: 'no', note });
     setCommentKey((k) => k + 1);
   };
+  // You weren't sure, then asked for a change: that's your answer now.
+  const changeAsked = (key: string, index: number, question: string) => async (note: string) => {
+    await patch({ type: 'answer', stepKey: key, index, question, value: 'no', note });
+    setCommentKey((k) => k + 1);
+    setAnswered({ stepKey: key, index });
+  };
   const showChanges = () => go({ name: 'review', projectId: data.projectId, branch: data.branch, story, stepKey: cur.key, reload: Date.now() });
 
 
@@ -818,6 +824,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
                     value={a}
                     note={answerNotes[i] ?? ''}
                     onNote={saveNote(cur.key, i, q)}
+                    onChangeAsked={changeAsked(cur.key, i, q)}
                     exchanges={thread}
                     onShowChanges={showChanges}
                     loadedAt={loadedAt}

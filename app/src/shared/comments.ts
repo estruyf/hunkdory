@@ -1,5 +1,5 @@
 // Lines a review plan decision adds to a step comment, and takes away again. Pure, so it can be tested.
-import type { ReviewState } from './types.ts';
+import type { Exchange, ReviewState } from './types.ts';
 
 /** Appends a line to a step's comment, once. */
 export function addToStepComment(r: Pick<ReviewState, 'comments'>, stepKey: string, line: string) {
@@ -28,6 +28,17 @@ export function removeFromStepComments(r: Pick<ReviewState, 'comments'>, line: s
 
 const NOT_SURE = 'Not sure: ';
 const NEEDS_CHANGE = 'Needs a change: ';
+
+/** What a "Needs a change" asks the assistant for: the step's question, and what you said should change. */
+export const changeRequest = (question: string, note: string) => (note.trim() ? `${question}\n\n${note.trim()}` : question).trim();
+
+/** Asking for a change after a question: what you typed, or with nothing typed, the fix the answer described. Without an answer, just the question. */
+export const changeAfterQuestion = (question: string, typed: string, answered: boolean) =>
+  changeRequest(question, typed.trim() || (answered ? 'Go ahead and make the change you described in your answer to this.' : ''));
+
+/** You already asked for this note, and that run didn't fail or get stopped: it stays on your review, but there's nothing left to send. */
+export const noteWasSent = (question: string, note: string, exchanges: Pick<Exchange, 'kind' | 'status' | 'text'>[]) =>
+  !!note.trim() && exchanges.some((e) => e.kind === 'change' && e.status !== 'failed' && e.status !== 'cancelled' && e.text === changeRequest(question, note));
 
 /** The step comment's line for an answer to one of its questions: none for "Looks right". */
 export function answerLine(question: string, value: 'yes' | 'no' | 'unsure' | null, note?: string): string | null {
