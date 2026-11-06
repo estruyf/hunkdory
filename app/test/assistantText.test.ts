@@ -8,12 +8,12 @@ const claude = { id: 'claude-code', name: 'Claude Code' };
 const copilot = { id: 'copilot', name: 'GitHub Copilot' };
 const gemini = { id: 'acp:gemini', name: 'Gemini' };
 
-test('each assistant is honest about where the code goes and what a run costs', () => {
+test('each assistant is honest about where the code goes and what a run uses', () => {
   assert.match(whereCodeGoes(claude), /Anthropic/);
   assert.match(whereCodeGoes(copilot), /GitHub/);
   assert.doesNotMatch(whereCodeGoes(copilot), /Anthropic/);
   assert.equal(whereCodeGoes(gemini), '', 'an agent we know nothing about gets no claim');
-  assert.match(usageNote(claude), /\$0\.30/);
+  assert.equal(usageNote(claude), 'It uses your Claude plan or API credit.');
   assert.match(usageNote(copilot), /premium requests/);
   assert.match(usageNote(gemini), /Gemini/);
 });

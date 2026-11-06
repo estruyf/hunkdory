@@ -181,7 +181,7 @@ export function AiReviewCard({ data, state, act, onOpen, onSettings }: { data: R
               AI review
             </SectionHeader>
             <span className="min-w-0 flex-[1_1_280px] text-meta text-faint">
-              {[result.assistant, result.depth === 'quick' ? 'Quick' : 'Thorough', timeAgo(result.finishedAt), result.costUsd !== null ? `$${result.costUsd.toFixed(2)}` : null].filter(Boolean).join(' · ')}
+              {[result.assistant, result.depth === 'quick' ? 'Quick' : 'Thorough', timeAgo(result.finishedAt)].filter(Boolean).join(' · ')}
             </span>
             {!running && canRun && (
               <Button variant={view.stale ? 'secondary' : 'quiet'} size="sm" onClick={run}>

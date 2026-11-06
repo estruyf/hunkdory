@@ -12,9 +12,9 @@ export function whereCodeGoes(a: Named): string {
   return '';
 }
 
-/** What a run costs you, before you start one. */
+/** What a run uses, before you start one. */
 export function usageNote(a: Named): string {
-  if (a.id === 'claude-code') return 'It uses your Claude plan or API credit: about $0.30 on a small branch, more on a big one.';
+  if (a.id === 'claude-code') return 'It uses your Claude plan or API credit.';
   if (a.id === 'copilot') return 'It uses your Copilot premium requests.';
   return `It uses ${a.name}’s own usage.`;
 }
