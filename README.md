@@ -1,120 +1,95 @@
-# Hunkdory
+<p align="center">
+  <img src="app/resources/icon.png" width="128" height="128" alt="">
+</p>
 
-[![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fhunkdory&countColor=%233451d1&style=flat)](https://visitorbadge.io/status?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fhunkdory)
+<h1 align="center">Hunkdory</h1>
 
-Understand every change before you approve it.
+<h2 align="center">Understand every change before you approve it.</h2>
 
-Reviewing code you didn't write is hard, and harder when an agent wrote it.
-Hunkdory is a local macOS app that tells the change as a story: what was asked,
-what the change does in a sentence or two, then chapters in reading order that
-each explain one part in plain words. Ask your assistant about any step, or have
-it make a change. The changes nobody explained are flagged. When you're done you
-merge, send it back to the agent, or close the review.
+<p align="center">
+  A Mac app that tells a branch or pull request as a story, so you can review code you didn't write.<br>
+  Made for the code your coding agents hand you.
+</p>
 
-![Hunkdory: a 23-file agent branch told as a story, a question answered by Claude, and a merge](docs/hunkdory.gif)
+<p align="center">
+  <a href="https://visitorbadge.io/status?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fhunkdory"><img src="https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fhunkdory&countColor=%23202736&style=flat" alt="Visitors"></a>
+</p>
+
+![A branch in Hunkdory: what it does and what was asked come first, with Read the story as the way in](docs/screenshots/plan.png)
+
+<!-- The demo goes here: ![Hunkdory in action](docs/hunkdory.gif) -->
+
+## Why Hunkdory
+
+Reviewing code you didn't write is hard, and harder when an agent wrote 20 files of it in ten minutes. A diff shows you what changed, in file order. It doesn't tell you why, or where to start.
+
+Hunkdory gives you that first:
+
+- **What it does.** A sentence or two in plain words, next to what was asked.
+- **A story to follow.** The change split into steps in reading order, each explaining one part.
+- **Someone to ask.** Ask your assistant about any step, or have it make a change right there.
+- **Nothing hidden.** Every changed line is in some step, and work nobody asked for is called out.
+
+Then you merge it, post your review on GitHub, or send it back to the agent with your comments.
 
 ## How it works
 
-1. **Inbox.** Each project shows three kinds of work: local branches, open pull
-   requests (Copilot's too) and uncommitted changes. New ones show up as they
-   come in, and you choose what each project shows in its settings.
-2. **The plan.** Opening one leads with what the change does, then what was
-   asked. *Read the story* goes through every step in order. Or start with what
-   needs you: *Decide* (calls only you can make, like work you didn't ask for),
-   *Read closely*, and *Skim* (the low-risk rest, grouped by folder). A branch
-   without a walkthrough can get one from the project's assistant, written from
-   the diff, the commits and the agent's session.
-3. **The steps.** One step at a time, with the reason next to each change, the
-   choices the agent says it made, and how it got there in its session.
-   Comment on a line, ask the assistant about the step, or ask it to change the
-   code. If you want a second opinion first, run an AI review from the plan: the
-   assistant looks for bugs, accessibility issues and more, and puts what it
-   finds next to the lines. Each project sets what it checks.
-4. **Finish.** Merge, open a pull request, post your review on GitHub, send it
-   back to the agent with your comments, or close the review. If the branch
-   changed since you last looked at it, nothing happens until you've seen what's new.
+### 1. Everything waiting for you, in one inbox
 
-Hunkdory runs on your Mac. Your code only goes to the project's assistant when
-you let it write a walkthrough, answer a question, make a change, run an AI
-review, or take work back. When the same assistant ran the agent's session, a
-walkthrough also gets what the agent said and thought on that branch, so sharing
-one on a pull request can carry that reasoning to GitHub. Agents get read-only
-git without asking, but a small wrapper stops the git options that can write
-files or run programs.
+Local branches, open pull requests (Copilot's too) and uncommitted changes show up on their own, across all your projects.
 
-## What you need
+![The inbox with three things to review: uncommitted changes, and two branches](docs/screenshots/inbox.png)
 
-- A Mac with Apple Silicon, and git.
-- An assistant for the story, questions and changes:
-  [Claude Code](https://claude.com/claude-code), the
-  [Copilot CLI](https://github.com/github/copilot-cli), or any agent that speaks
-  the [Agent Client Protocol](https://agentclientprotocol.com) (experimental).
-  Without one, a project runs as Manual: the plain changes, one step per file.
-- The [GitHub CLI](https://cli.github.com), signed in with `gh auth login`, for
-  pull requests. Branches work without it.
+### 2. Read the story
 
-Hunkdory shows what's found and what's missing the first time you open it.
+Each step says why the change is there, what behaves differently, and what could break, right above the code it's about.
+
+![A step of the story, with its reason, the behaviour before and after, and what could break](docs/screenshots/step.png)
+
+### 3. Ask about anything that isn't clear
+
+Your assistant answers from the code, and from the agent's own session when there is one. Ask it to change something and it does that too.
+
+![A question about a step, answered with the exact lines of code](docs/screenshots/ask.png)
+
+### 4. Decide
+
+Merge, open or review a pull request, send it back to the agent, or close the review. If the branch changed since you last looked, Hunkdory stops and shows you what's new first.
+
+![The Finish screen, with its choices: approve and merge, send back to the agent, or close the review](docs/screenshots/finish.png)
+
+## Get started
+
+Hunkdory isn't released yet. Until the first release, you can [run it from source](docs/development.md#run-it).
+
+The first time you open it, Hunkdory checks your tools and shows you what's missing, with a link to each.
+
+![The Welcome screen: what you can review, and a check of your tools](docs/screenshots/welcome.png)
+
+You need:
+
+- **A Mac with Apple Silicon**, and git.
+- **An assistant** for the story, questions and changes: [Claude Code](https://claude.com/claude-code) or the [Copilot CLI](https://github.com/github/copilot-cli). Other agents work too, through the [Agent Client Protocol](https://agentclientprotocol.com) (experimental). Without one you still get the plain changes, one step per file.
+- **The [GitHub CLI](https://cli.github.com)**, signed in with `gh auth login`, for pull requests. Branches work without it.
+
+## Your code stays yours
+
+Hunkdory runs on your Mac. Your code only goes to the assistant you picked for a project, and only when you let it write a walkthrough, answer a question, make a change, run an AI review, or take work back. Nothing goes on GitHub until you finish a review, push a change or share a walkthrough. Set a project to Manual and it never leaves your Mac at all.
 
 ## Why "Hunkdory"
 
-"Hunky-dory" means that a situation is very satisfactory, pleasant, or going
-well without any problems. The name is a pun on that and on *hunk*, the unit of
-a git diff that the whole app is built on. Every hunk the agent touched has to
-be explained by its walkthrough, and the ones that aren't are where the
-surprises hide. Hunkdory answers one question before you merge: is this branch
-really hunky-dory?
+"Hunky-dory" means that everything is fine and going well. The name is a pun on that and on *hunk*, the unit of a git diff the whole app is built on. Hunkdory answers one question before you merge: is this branch really hunky-dory?
 
-## What's in here
+## Documentation
 
-- `app/`: the Electron + React app.
-- `tools/wtv/`: the `wtv` CLI that checks an agent's walkthrough against the
-  real diff. The app uses it as its engine. See [its README](tools/wtv/README.md).
+- [How it works under the hood](docs/how-it-works.md): what the inbox looks for, how walkthroughs are made and checked, what agents may do, and where your data lives.
+- [Development](docs/development.md): run it from source, build the Mac app, and release it.
+- [`wtv`](tools/wtv/README.md): the command-line tool that checks an agent's walkthrough against the real diff.
 
-## Run it
+## Feedback
 
-```bash
-npm install   # installs app/ too
-npm run dev
-```
+Found something, or missing something? [Open an issue](https://github.com/estruyf/hunkdory/issues/new), or use **Send feedback** in the app, which fills in your version.
 
-## Build the macOS app
+## License
 
-```bash
-npm run pack:mac    # just the .app, in app/dist/mac-arm64/
-npm run build:mac   # the .app plus a .dmg and .zip, in app/dist/
-npm run open:mac    # open the packaged app
-```
-
-The build signs with the Developer ID certificate in your keychain if it finds
-one. Set `CSC_IDENTITY_AUTO_DISCOVERY=false` to skip signing. It notarizes when
-`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` are set.
-
-## Releasing
-
-[`.github/workflows/release.yml`](.github/workflows/release.yml) builds,
-signs and notarizes the app, then attaches the `.dmg` and `.zip` to a GitHub
-release.
-
-1. Draft a release on GitHub with a tag like `v0.1.0`. The tag sets the app's
-   version, so `app/package.json` doesn't need a bump.
-2. Tick **Set as a pre-release** for early versions (`v0.1.0-beta.1`, or any
-   version you don't want to call stable). A release that isn't a pre-release
-   must be tagged on `main`.
-3. Publish it. The files are attached once the build and its checks pass. When
-   the release has no notes, GitHub's generated notes are filled in.
-
-To try it without publishing anything, run the workflow by hand (Actions →
-Release → Run workflow). The signed build is kept as a workflow artifact for
-a week.
-
-The workflow needs these repository secrets, the same ones Seshboard uses:
-
-| Secret | What it is |
-| --- | --- |
-| `MAC_CERTIFICATE_P12_BASE64` | The Developer ID Application certificate and its private key, exported as `.p12` and base64-encoded |
-| `MAC_CERTIFICATE_PASSWORD` | The `.p12`'s password |
-| `APPLE_ID` | The Apple ID used for notarization |
-| `APPLE_APP_SPECIFIC_PASSWORD` | An app-specific password for that Apple ID |
-| `APPLE_TEAM_ID` | The team ID of the certificate |
-
-Without them the run fails: nothing is ever attached unsigned.
+[MIT](LICENSE)
