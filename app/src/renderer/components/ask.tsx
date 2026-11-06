@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { STEP_GONE } from '../../shared/assistantText.ts';
 import { changeAfterQuestion, changeRequest, noteWasSent } from '../../shared/comments.ts';
 import type { Exchange, ReviewData, Step } from '../../shared/types.ts';
 import { Markdown } from './markdown.tsx';
@@ -117,6 +118,15 @@ function useHoldInPlace(running: boolean, holding = false) {
     };
   }, []);
   return { box, hold };
+}
+
+/** Why sending failed. When the step on screen is gone from the branch, reading it again is what helps, so that's on offer. */
+function SendError({ error, onReload }: { error: string; onReload: () => void }) {
+  return (
+    <Notice tone="error" actions={error === STEP_GONE ? <Button size="sm" onClick={onReload}>Reload the review</Button> : undefined}>
+      {error}
+    </Notice>
+  );
 }
 
 const CHECKOUT_TIP = "Checks the PR's branch out in a separate folder next to the project's (a git worktree), so the change has somewhere to happen.";
@@ -340,7 +350,7 @@ export function AskPanel({
         </p>
         {canChange && <OpenInEditor data={data} />}
       </div>
-      {error && <Notice tone="error">{error}</Notice>}
+      {error && <SendError error={error} onReload={onShowChanges} />}
       {checkoutError && <Notice tone="error">{checkoutError}</Notice>}
     </section>
   );
@@ -509,7 +519,7 @@ export function CheckFollowUp({
           {change ? (data.assistant ? <>Goes with your review as “Needs a change”, whether or not {name} changes it now. {canChange ? who(data, 'change') : ''}</> : 'Goes with your review as “Needs a change”.') : <>{who(data, 'question')} Asking for a change marks this “Needs a change”.</>}
         </span>
       </div>
-      {error && <Notice tone="error">{error}</Notice>}
+      {error && <SendError error={error} onReload={onShowChanges} />}
       {checkoutError && <Notice tone="error">{checkoutError}</Notice>}
     </div>
   );

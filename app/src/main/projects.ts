@@ -899,7 +899,7 @@ export class Projects {
     const out = await runner.run({ cwd, baseSha, head: inTree ? null : d.branch.headRef, walkthrough: wt.value, lines });
     const r = out.result;
     const source: WalkthroughSource = out.source === 'skeleton' ? 'skeleton' : wt.source;
-    const steps = buildSteps(r, source);
+    const steps = buildSteps(r, source, source === 'reviewer' ? (wt.value as { stepKeys?: Record<string, string> }).stepKeys : undefined);
     const flags = attention(r, steps, source);
     if (wt.error) flags.unshift({ severity: 'medium', title: 'Walkthrough unreadable', detail: wt.error, stepKey: null });
 

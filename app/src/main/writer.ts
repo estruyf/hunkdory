@@ -10,6 +10,7 @@ import * as gh from './github.ts';
 import type { Projects } from './projects.ts';
 import { readSessionDigest } from './sessions/trace.ts';
 import { olderThan, tooBig } from '../shared/order.ts';
+import { keptStepKeys } from './steps.ts';
 import { buildPlan, decisionsForComment } from '../shared/plan.ts';
 import type { HunkView, ReviewData, SavedWalkthrough, WalkthroughJob } from '../shared/types.ts';
 
@@ -421,6 +422,8 @@ export class Writer {
   /** With `update`, starts from that walkthrough instead of from nothing. */
   private async run(key: string, projectId: string, branch: string, data: ReviewData, update?: WriterFeedback) {
     const ctx = await this.projects.runContext(projectId, branch);
+    // What this update replaces: its steps stay the same steps, whatever it calls them now.
+    const before = update?.changed ? JSON.parse(this.generated.read(projectId, branch) ?? 'null') : null;
     if (!update && ((await this.useRebased(key, projectId, branch, ctx.baseSha, data.head)) || (await this.useShared(key, projectId, branch, ctx.baseSha)))) return;
     const commits = (await g.tryGit(['log', '--reverse', '--format=%s', `${ctx.baseSha}..${ctx.headRef}`], ctx.root))?.split('\n').filter(Boolean) ?? [];
     const { match } = (await this.projects.find(projectId, branch)).d;
@@ -453,7 +456,7 @@ export class Writer {
       feedback = { previous: out, missing, phantom: r.buckets.phantom };
     }
     if (this.jobs.get(key)?.status !== 'running' || !walkthrough) return;
-    this.generated.write(projectId, branch, walkthrough);
+    this.generated.write(projectId, branch, before ? { ...walkthrough, stepKeys: keptStepKeys(before, walkthrough as unknown as Parameters<typeof keptStepKeys>[1]) } : walkthrough);
     this.update(key, { status: 'done', finishedAt: new Date().toISOString(), activity: null });
   }
 

@@ -11,6 +11,7 @@ import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
 import { clip, whereSection } from './writer.ts';
 import type { AskAbility, BranchInfo, Exchange, HunkView, ReviewData, ReviewState, SessionInfo, Step } from '../shared/types.ts';
+import { STEP_GONE } from '../shared/assistantText.ts';
 
 const TIMEOUT_MS = 15 * 60_000;
 
@@ -159,7 +160,7 @@ export class Conversations {
     if (!text.trim()) throw new Error(kind === 'question' ? 'Type a question first.' : 'Describe the change first.');
     const data = await this.projects.review(projectId, branch);
     const step = data.steps.find((s) => s.key === stepKey);
-    if (!step) throw new Error('This step is no longer part of the review. Reload it.');
+    if (!step) throw new Error(STEP_GONE);
     const ability = kind === 'question' ? data.ask.question : data.ask.change;
     if (!ability.by) throw new Error((ability as { reason: string }).reason);
 

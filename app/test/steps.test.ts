@@ -5,7 +5,7 @@ import { join } from 'node:path';
 // The real wtv engine on its own "sneaky agent" fixture repo.
 import { buildFixture } from '../../tools/wtv/test/fixture.mjs';
 import { normalizeWalkthrough, skeleton, verify } from '../../tools/wtv/src/verify.mjs';
-import { attention, buildSteps, diffLines, estimateMinutes, overview, rangeText } from '../src/main/steps.ts';
+import { attention, buildSteps, keptStepKeys, diffLines, estimateMinutes, overview, rangeText } from '../src/main/steps.ts';
 import { carryReviewed, isReviewed, markHunk, orderSteps } from '../src/shared/order.ts';
 import type { Step } from '../src/shared/types.ts';
 import { sendBackPrompt } from '../src/main/actions.ts';
@@ -72,6 +72,30 @@ test('step keys are stable and unique', () => {
   assert.equal(keys[3], 'ch:retry-helper-2');
   const again = buildSteps(fixture((wt) => wt.chapters.push({ title: 'Retry helper', why: 'again', hunks: ['src/retry.js'] })).r, 'agent');
   assert.deepEqual(again.map((s) => s.key), keys);
+});
+
+test('a step keeps its key when an update rewords its title', () => {
+  const before = { chapters: [{ title: 'Add labels for the path filter', hunks: ['h:a', 'h:b'] }, { title: 'Fetch results', hunks: ['h:c'] }] };
+  const after = { chapters: [{ title: 'Fetch results', hunks: ['h:c', 'h:new'] }, { title: 'Add labels and license messages', hunks: ['h:a', 'h:b', 'h:d'] }] };
+  assert.deepEqual(keptStepKeys(before, after), { 'Add labels and license messages': 'ch:add-labels-for-the-path-filter' });
+});
+
+test('a key survives one update after another', () => {
+  const first = { chapters: [{ title: 'New name', hunks: ['h:a'] }], stepKeys: { 'New name': 'ch:first-name' } };
+  assert.deepEqual(keptStepKeys(first, { chapters: [{ title: 'Newest name', hunks: ['h:a'] }] }), { 'Newest name': 'ch:first-name' });
+  assert.deepEqual(keptStepKeys(first, { chapters: [{ title: 'New name', hunks: ['h:z'] }] }), { 'New name': 'ch:first-name' }, 'same title, whatever its hunks');
+});
+
+test('a chapter with nothing in common is a new step, and two can\'t take one key', () => {
+  const before = { chapters: [{ title: 'One', hunks: ['h:a'] }] };
+  assert.deepEqual(keptStepKeys(before, { chapters: [{ title: 'Other', hunks: ['h:z'] }] }), {});
+  assert.deepEqual(keptStepKeys(before, { chapters: [{ title: 'Half', hunks: ['h:a'] }, { title: 'Other half', hunks: ['h:a'] }] }), { Half: 'ch:one' });
+});
+
+test('steps use the keys their chapters kept', () => {
+  const { r } = fixture();
+  const title = buildSteps(r, 'agent')[0].title;
+  assert.equal(buildSteps(r, 'reviewer', { [title]: 'ch:what-it-was-called' })[0].key, 'ch:what-it-was-called');
 });
 
 test('attention panel lists outside-task steps, risks, phantoms and findings', () => {

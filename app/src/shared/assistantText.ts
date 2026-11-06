@@ -19,6 +19,9 @@ export function usageNote(a: Named): string {
   return `It uses ${a.name}’s own usage.`;
 }
 
+/** A step on your screen that a new read of the branch doesn't have: it says so, and the screen offers to read it again. */
+export const STEP_GONE = 'This step is no longer part of the review. Reload it.';
+
 /** Where to get an assistant that isn't installed. */
 export const INSTALL_URL: Record<string, string> = {
   'claude-code': 'https://claude.com/claude-code',
