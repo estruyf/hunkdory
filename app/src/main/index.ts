@@ -12,6 +12,10 @@ import { readStepTrace } from './sessions/trace.ts';
 import { AiReviews } from './aiReview.ts';
 import { GeneratedWalkthroughs, Writer } from './writer.ts';
 import { Conversations } from './conversations.ts';
+import * as gh from './github.ts';
+import { forgetShellEnv, shellEnv, which } from './shellEnv.ts';
+import { useGuardFolder } from './gitGuard.ts';
+import { ICON_EXTENSIONS, previewIconFile, useIconFolder } from './projectIcons.ts';
 import { trayIcon } from './trayIcon.ts';
 import { restoredBounds } from './windowPlace.ts';
 import { installedEditors, openInEditor, pickEditor } from './editors.ts';
@@ -34,12 +38,11 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 
-// The app used to be called Reviewer, then briefly hunkdory: move the old data folder over once, so your
-// projects and reviews stay. On a case-insensitive volume (the macOS default) "hunkdory" already is the
-// current folder, so existsSync(current) skips the move.
+// The app was briefly called hunkdory: move the old data folder over once, so your projects and reviews stay.
+// On a case-insensitive volume (the macOS default) it already is the current folder, so existsSync(current) skips the move.
 if (!process.env.REVIEWER_USER_DATA) {
   const current = app.getPath('userData');
-  const legacy = ['Reviewer', 'hunkdory'].map((n) => join(app.getPath('appData'), n)).find((p) => p !== current && existsSync(p));
+  const legacy = [join(app.getPath('appData'), 'hunkdory')].find((p) => p !== current && existsSync(p));
   try {
     if (legacy && !existsSync(current)) renameSync(legacy, current);
   } catch (e) {
@@ -73,6 +76,8 @@ const writer = new Writer({
   },
 });
 const wtvBin = resolve(app.getAppPath(), '../tools/wtv/bin/wtv.mjs');
+useGuardFolder(join(app.getPath('userData'), 'bin'));
+useIconFolder(join(app.getPath('userData'), 'project-icons'));
 const conversations = new Conversations({
   store,
   projects,
@@ -92,25 +97,48 @@ const actions = new Actions({
   projects,
   logDir,
   wtvBin,
-  onChange: () => win?.webContents.send('reviews-changed'),
+  onChange: (review) => {
+    win?.webContents.send('reviews-changed');
+    if (review) win?.webContents.send('review-state-changed', review);
+  },
 });
 
-/** A send-back run that was going when the app quit: settle it if its process is gone. */
+const assistantChoices = () =>
+  Promise.all(
+    allAssistants().map(async (a) => {
+      const r = await a.available();
+      return { id: a.id, name: a.name, available: r.ok, ...(r.ok ? {} : { reason: r.reason }) };
+    })
+  );
+
+/**
+ * A send-back run that was going when the app quit is out of reach: nothing here hears it end. Settle it once its
+ * process is gone, and keep looking while it isn't, so it can't stay "working" until the next launch.
+ */
 function settleStaleRuns() {
-  for (const r of store.reviews()) {
-    const pid = r.decision?.result === 'running' ? r.decision.pid : undefined;
-    if (r.decision?.result !== 'running') continue;
-    let alive = false;
-    try {
-      if (pid) alive = process.kill(pid, 0);
-    } catch {}
-    if (!alive) {
-      store.updateReview(r.projectId, r.branch, (x) => {
-        x.decision!.result = 'ok';
-        x.decision!.message = 'The agent run finished while Hunkdory was closed.';
+  const running = store.reviews().filter((r) => r.decision?.result === 'running');
+  const settle = () => {
+    for (const r of running.splice(0)) {
+      const pid = r.decision?.pid;
+      let alive = false;
+      try {
+        if (pid) alive = process.kill(pid, 0);
+      } catch {}
+      if (alive) {
+        running.push(r);
+        continue;
+      }
+      const review = store.updateReview(r.projectId, r.branch, (x) => {
+        if (x.decision?.result !== 'running') return;
+        x.decision.result = 'ok';
+        x.decision.message = 'The agent run finished while Hunkdory was closed.';
       });
+      win?.webContents.send('reviews-changed');
+      win?.webContents.send('review-state-changed', review);
     }
-  }
+    if (running.length) setTimeout(settle, 15_000).unref();
+  };
+  settle();
 }
 
 function applyPatch(r: ReviewState, patch: ReviewPatch) {
@@ -142,6 +170,9 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
     if (!body) r.comments = r.comments.filter((c) => c !== existing);
     else if (existing) existing.body = body;
     else r.comments.push({ id: crypto.randomUUID(), stepKey: patch.stepKey, hunkId: null, line: null, body, createdAt: new Date().toISOString() });
+  } else if (patch.type === 'leave-out') {
+    const c = r.comments.find((c) => c.id === patch.id);
+    if (c) c.leftOut = patch.on ? [...new Set([...(c.leftOut ?? []), patch.part])] : (c.leftOut ?? []).filter((p) => p !== patch.part);
   } else if (patch.type === 'settle') {
     r.settled ??= {};
     if (patch.value) r.settled[patch.id] = patch.value;
@@ -194,13 +225,36 @@ const api: ReviewerApi = {
     return res.canceled ? null : res.filePaths[0];
   },
   foundOnThisMac: async () => projects.foundOnThisMac(),
-  listAssistants: async () => Promise.all(allAssistants().map(async (a) => {
-    const r = await a.available();
-    return { id: a.id, name: a.name, available: r.ok, ...(r.ok ? {} : { reason: r.reason }) };
-  })),
-  addProject: (input) => projects.addProject(input),
-  updateProject: (id, input) => projects.updateProject(id, input),
-  removeProject: async (id) => store.removeProject(id),
+  projectIcons: async () => projects.projectIcons(),
+  chooseIconFile: async () => {
+    const res = await dialog.showOpenDialog(win!, { properties: ['openFile'], message: 'Pick an image for this project', filters: [{ name: 'Images', extensions: ICON_EXTENSIONS }] });
+    const path = res.canceled ? null : res.filePaths[0];
+    return path ? { path, icon: previewIconFile(path) } : null;
+  },
+  setupStatus: async (opts) => {
+    if (opts?.recheck) forgetShellEnv();
+    const env = await shellEnv();
+    const [gh_, assistants] = await Promise.all([gh.ghStatus(), assistantChoices()]);
+    return { git: !!(await which('git', env)), gh: gh_, assistants };
+  },
+  previewInbox: (root, baseBranch, repo) => projects.previewInbox(root, baseBranch, repo),
+  cancelSendBack: async (projectId, branch) => actions.cancelSendBack(projectId, branch),
+  listAssistants: assistantChoices,
+  // The inbox reads again: a new project, or new settings, change what's in it.
+  addProject: async (input) => {
+    const project = await projects.addProject(input);
+    win?.webContents.send('reviews-changed');
+    return project;
+  },
+  updateProject: async (id, input) => {
+    const project = await projects.updateProject(id, input);
+    win?.webContents.send('reviews-changed');
+    return project;
+  },
+  removeProject: async (id) => {
+    projects.removeProject(id);
+    win?.webContents.send('reviews-changed');
+  },
   setWriteWalkthroughs: async (id, on) => projects.setWriteWalkthroughs(id, on),
   checkGitHub: (path) => projects.checkGitHub(path),
   listBranches: (projectId) => projects.listBranches(projectId),

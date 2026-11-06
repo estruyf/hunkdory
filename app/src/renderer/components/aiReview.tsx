@@ -8,6 +8,7 @@ import type { PillTone } from './ui/buttonStyles.ts';
 import { Notice } from './ui/Notice.tsx';
 import { Pill } from './ui/Pill.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
+import { usageNote } from '../../shared/assistantText.ts';
 import { areaLabel, findingAsk, findingsView, notChecked, type PlacedFinding } from '../../shared/aiReview.ts';
 import { timeAgo } from '../../shared/order.ts';
 import type { AiFinding, ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
@@ -73,7 +74,7 @@ function FindingRow({ item, open, onToggle, onShow, act }: { item: PlacedFinding
         </button>
       </div>
       {open && (
-        <div className="mb-2.5 ml-8 flex flex-col gap-2.5 rounded-lg bg-border/45 px-3 py-2.5">
+        <div className="mb-2.5 ml-8 flex flex-col gap-2.5 px-2.5 py-1">
           <div className="flex flex-col gap-0.5">
             <span className="text-meta font-semibold tracking-wider text-faint uppercase">How it fails</span>
             <div className="text-body break-words select-text">
@@ -149,7 +150,7 @@ export function AiReviewCard({ data, state, act, onOpen, onSettings }: { data: R
   );
 
   return (
-    <section aria-label="AI review" className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-4">
+    <section aria-label="AI review" className="flex flex-col gap-2.5 border-t border-border pt-5">
       {!result && !running && (
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex min-w-0 flex-[1_1_360px] flex-col gap-0.5">
@@ -158,13 +159,13 @@ export function AiReviewCard({ data, state, act, onOpen, onSettings }: { data: R
               {settings.areas.length ? `A second opinion before you read: ${assistant!.name} looks for ${settings.areas.map((a) => areaLabel(a).toLowerCase()).join(', ')} issues in this change.` : 'Choose what it should check in the project’s settings first.'}
             </span>
             <span className="text-meta text-faint">
-              {assistant!.name} · {settings.depth === 'quick' ? 'Quick' : 'Thorough'} ·{' '}
+              {usageNote(assistant!)} {settings.depth === 'quick' ? 'Quick' : 'Thorough'} ·{' '}
               <button type="button" className="text-link hover:underline" onClick={onSettings}>
                 Change what it checks
               </button>
             </span>
           </div>
-          <Button size="lg" disabled={!canRun} onClick={run}>
+          <Button disabled={!canRun} onClick={run}>
             Run AI review
           </Button>
         </div>
@@ -180,7 +181,7 @@ export function AiReviewCard({ data, state, act, onOpen, onSettings }: { data: R
               AI review
             </SectionHeader>
             <span className="min-w-0 flex-[1_1_280px] text-meta text-faint">
-              {[result.assistant, result.depth === 'quick' ? 'Quick' : 'Thorough', timeAgo(result.finishedAt), result.costUsd !== null ? `$${result.costUsd.toFixed(2)}` : null].filter(Boolean).join(' · ')}
+              {[result.assistant, result.depth === 'quick' ? 'Quick' : 'Thorough', timeAgo(result.finishedAt)].filter(Boolean).join(' · ')}
             </span>
             {!running && canRun && (
               <Button variant={view.stale ? 'secondary' : 'quiet'} size="sm" onClick={run}>
@@ -283,7 +284,7 @@ export function StepFindings({ data, state, step, act, onAsk }: { data: ReviewDa
             <Button onClick={() => act(commented ? { type: 'ai-finding', id: f.id, action: 'uncomment' } : { type: 'ai-finding', id: f.id, action: 'comment', stepKey: step.key })}>{commented ? 'Remove from comments' : 'Add as comment'}</Button>
             {onAsk && (
               <Button disabled={!canAsk} onClick={() => onAsk(findingAsk(f, 'question'))}>
-                Ask {data.assistant?.name ?? 'Claude'}
+                Ask {data.assistant?.name ?? 'the assistant'}
               </Button>
             )}
             {onAsk && (

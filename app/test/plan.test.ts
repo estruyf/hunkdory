@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDecisions, buildPlan, decisionsForComment, defaultDrops, openItems, planProgress, resumePoint, settleComment, skimGroups } from '../src/shared/plan.ts';
+import { buildDecisions, buildPlan, decisionsForComment, defaultDrops, defaultReviewEvent, fileNames, openItems, planProgress, resumePoint, settleComment, skimGroups, stepsLabel, unpushedWork, vouchesForCode } from '../src/shared/plan.ts';
 import { addToStepComment, removeFromStepComments } from '../src/shared/comments.ts';
-import { prDescription } from '../src/main/actions.ts';
+import { githubReview, prDescription, sendBackPrompt } from '../src/main/actions.ts';
 import type { AttentionFlag, CheckItem, ReviewState, Step } from '../src/shared/types.ts';
 
 const step = (i: number, over: Partial<Step> = {}): Step => ({
@@ -45,6 +45,33 @@ test('flags of one kind group together, high severity and failing CI first', () 
   assert.deepEqual(d.map((x) => x.kind), ['ci', 'flag', 'flag']);
   assert.equal(d[1].title, 'Auth code changed (2 places)');
   assert.deepEqual(d[1].stepKeys, ['k0', 'k1']);
+});
+
+test('a flag about places in the diff gives its files, steps and reason apart, and every step it names', () => {
+  const where = { files: ['a/b/one.test.ts', 'c/two.test.ts'], steps: [62, 65], reason: 'Matched “assert” on line 3 of one.test.ts, first of them.' };
+  const [d] = buildDecisions([step(62), step(65)], [{ severity: 'medium', title: 'Lost 1 assertion', detail: 'a/b/one.test.ts, c/two.test.ts in steps 63, 66.', stepKey: 'k62', where }], [], true);
+  assert.deepEqual(d.files, where.files);
+  assert.deepEqual(d.stepIndexes, [62, 65]);
+  assert.equal(d.note, where.reason);
+  assert.deepEqual(d.stepKeys, ['k62'], 'where you start stays the same');
+  assert.match(d.detail, /a\/b\/one\.test\.ts/, 'comments still name the paths');
+});
+
+test('a flag without places keeps its detail as the note', () => {
+  const [d] = buildDecisions([], [{ severity: 'medium', title: 'Asked for, but not found', detail: 'Dark mode', stepKey: null }], [], true);
+  assert.equal(d.note, 'Dark mode');
+  assert.deepEqual(d.files, []);
+  assert.deepEqual(d.stepIndexes, []);
+});
+
+test('file names and steps read as a short line', () => {
+  assert.equal(fileNames(['a/b/one.ts']), 'one.ts');
+  assert.equal(fileNames(['a/one.ts', 'b/two.ts']), 'one.ts and two.ts');
+  assert.equal(fileNames(['a/one.ts', 'b/two.ts', 'c/three.ts', 'd/four.ts']), 'one.ts, two.ts and 2 more');
+  assert.equal(stepsLabel([2]), 'Step 3');
+  assert.equal(stepsLabel([62, 65]), 'Steps 63 and 66');
+  assert.equal(stepsLabel([0, 1, 2]), 'Steps 1, 2 and 3');
+  assert.equal(stepsLabel([0, 1, 2, 3, 4, 5]), 'Steps 1, 2, 3, 4 and 2 more');
 });
 
 test('risky and outside steps come first in the walkthrough, then the skim', () => {
@@ -141,4 +168,48 @@ test('decisions read as lines for a PR comment, without the app\'s words or fail
   const checks: CheckItem[] = [{ name: 'ci', state: 'fail', url: null } as CheckItem];
   const lines = decisionsForComment(buildDecisions(steps, flags, checks, true));
   assert.deepEqual(lines, ['**Touches auth.** token.js in step 2.', '**Outside the request.** Step 1: Bump lint.']);
+});
+
+test('a review on GitHub only starts as an approval once nothing is left open', () => {
+  const none = { decisions: [], careful: [], skim: [], fixes: [] };
+  const opts = { comments: 0, prByYou: false };
+  assert.equal(defaultReviewEvent(none, opts), 'APPROVE');
+  assert.equal(defaultReviewEvent({ ...none, skim: [step(0)] }, opts), 'COMMENT', 'nothing reviewed yet');
+  assert.equal(defaultReviewEvent({ ...none, careful: [step(0)] }, opts), 'COMMENT');
+  assert.equal(defaultReviewEvent({ ...none, decisions: [{ id: 'd' } as never] }, opts), 'COMMENT');
+  assert.equal(defaultReviewEvent(none, { comments: 1, prByYou: false }), 'COMMENT');
+  assert.equal(defaultReviewEvent(none, { comments: 0, prByYou: true }), 'COMMENT', "GitHub won't take your approval of your own");
+  assert.equal(defaultReviewEvent({ ...none, skim: [step(0)], fixes: [{ id: 'd' } as never] }, opts), 'REQUEST_CHANGES');
+});
+
+test('merging and approving vouch for the code; other reviews and finishes do not', () => {
+  assert.equal(vouchesForCode('merge', 'COMMENT'), true);
+  assert.equal(vouchesForCode('github', 'APPROVE'), true);
+  assert.equal(vouchesForCode('github', 'COMMENT'), false);
+  assert.equal(vouchesForCode('github', 'REQUEST_CHANGES'), false);
+  assert.equal(vouchesForCode('send-back', 'APPROVE'), false);
+  assert.equal(vouchesForCode('discard', 'APPROVE'), false);
+});
+
+test('work that is only on this Mac holds a PR back, and says what it is', () => {
+  const pr = { number: 3 } as never;
+  assert.equal(unpushedWork({ pr: null, dirtyFiles: 2, ahead: 1 }), null, 'a local branch merges what it has');
+  assert.equal(unpushedWork({ pr, dirtyFiles: 0, ahead: 0 }), null);
+  assert.equal(unpushedWork({ pr, dirtyFiles: 1, ahead: 0 }), "1 uncommitted file on this Mac isn't on PR #3, so GitHub wouldn't merge it. Push it from the plan, or undo it, first.");
+  assert.equal(unpushedWork({ pr, dirtyFiles: 2, ahead: 1 }), "2 uncommitted files and 1 unpushed commit on this Mac aren't on PR #3, so GitHub wouldn't merge them. Push them from the plan, or undo them, first.");
+});
+
+test('what you left out stays out of everything a review sends', () => {
+  const steps = [step(0)];
+  const comments = [{ id: 'c', stepKey: 'k0', hunkId: null, line: null, createdAt: '', body: 'Not sure: Fine now?\nNeeds a change: Is it? — Fix it', leftOut: ['Not sure: Fine now?'] }];
+  const req = { note: '', dropStepKeys: [] };
+  const back = sendBackPrompt({ steps }, { comments }, req, null);
+  assert.match(back, /Fix it/);
+  assert.doesNotMatch(back, /Fine now/);
+  const review = githubReview({ steps }, { comments }, req, { inline: false, copilot: false });
+  assert.match(review.body, /Fix it/);
+  assert.doesNotMatch(review.body, /Fine now/);
+  const pr = prDescription({ steps, intent: null, prompt: null }, { comments }, '');
+  assert.match(pr, /Fix it/);
+  assert.doesNotMatch(pr, /Fine now/);
 });

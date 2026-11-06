@@ -3,7 +3,7 @@
   "productName": "Hunkdory",
   "version": "0.1.0",
   "private": true,
-  "description": "Review what your coding agents wrote, one step at a time",
+  "description": "Understand every change before you approve it",
   "license": "MIT",
   "author": "Elio Struyf",
   "main": "out/main/index.js",

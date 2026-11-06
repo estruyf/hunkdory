@@ -94,6 +94,21 @@ export function parseChecks(rollup: Rollup[] | null | undefined): CheckItem[] {
   });
 }
 
+/** Is gh installed and signed in? `gh auth token` answers without the network, so being offline doesn't read as signed out. */
+export async function ghStatus(): Promise<{ installed: boolean; signedIn: boolean; login: string | null }> {
+  const env = await shellEnv();
+  const bin = await which('gh', env);
+  if (!bin) return { installed: false, signedIn: false, login: null };
+  try {
+    await run(bin, ['auth', 'token'], { env, timeout: 10_000 });
+  } catch {
+    me = null;
+    return { installed: true, signedIn: false, login: null };
+  }
+  const login = await run(bin, ['api', 'user', '--jq', '.login'], { env, timeout: 15_000 }).then((r) => r.stdout.trim() || null, () => null);
+  return { installed: true, signedIn: true, login };
+}
+
 /** Is this repo on GitHub, and can gh see it? Returns "owner/name". */
 export async function checkRepo(root: string): Promise<string> {
   const out = await gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], root);
@@ -508,14 +523,32 @@ export function readWalkthroughComment(body: string): unknown | null {
   }
 }
 
-/** The newest walkthrough a Hunkdory app posted on the PR. */
-export async function sharedWalkthrough(root: string, repo: string, pr: number): Promise<{ id: number; url: string; by: string; data: unknown } | null> {
-  const comments = (await ghApi('GET', `repos/${repo}/issues/${pr}/comments?per_page=100`, root)) as { id: number; html_url: string; body: string; user: { login: string } }[];
+export interface RawIssueComment {
+  id: number;
+  html_url: string;
+  body: string;
+  user: { login: string } | null;
+  author_association?: string;
+}
+
+/** Who has a say in a repo, as GitHub tells it. Anyone else can comment on a public PR, including whoever opened it. */
+const TRUSTED_AUTHORS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+/** The newest walkthrough on the PR from you or someone with a say in the repo: a walkthrough is what you read instead of the raw diff, so a stranger doesn't get to write it. Pure. */
+export function newestSharedWalkthrough(comments: RawIssueComment[], me: string | null): { id: number; url: string; by: string; data: unknown } | null {
   for (const c of [...comments].reverse()) {
+    const by = c.user?.login;
+    if (!by || !(TRUSTED_AUTHORS.has(c.author_association ?? '') || by.toLowerCase() === me?.toLowerCase())) continue;
     const data = readWalkthroughComment(c.body ?? '');
-    if (data) return { id: c.id, url: c.html_url, by: c.user?.login ?? 'someone', data };
+    if (data) return { id: c.id, url: c.html_url, by, data };
   }
   return null;
+}
+
+/** The newest walkthrough on the PR that Hunkdory can reuse. */
+export async function sharedWalkthrough(root: string, repo: string, pr: number): Promise<{ id: number; url: string; by: string; data: unknown } | null> {
+  const comments = (await ghApi('GET', `repos/${repo}/issues/${pr}/comments?per_page=100`, root)) as RawIssueComment[];
+  return newestSharedWalkthrough(comments, await login(root).catch(() => null));
 }
 
 /** Posts the walkthrough, or updates the comment Hunkdory posted before. */

@@ -184,14 +184,14 @@ export function GitHubReviews({
   const open = openThreads(feedback.threads).length;
   if (!feedback.reviews.length && !feedback.threads.length) return null;
   return (
-    <section className="flex flex-col gap-2.5" aria-label="Reviews on GitHub">
+    <section className="flex flex-col gap-2.5 border-t border-border pt-5" aria-label="Reviews on GitHub">
       <SectionHeader as="h2" count={feedback.reviews.length || null} action={feedback.threads.length ? <span className="text-meta text-faint">{open ? plural(open, 'open thread') : 'Every thread resolved'}</span> : undefined}>
         Reviews on GitHub
       </SectionHeader>
       {feedback.reviews.length > 0 && (
-        <ul className="m-0 flex list-none flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-card p-0">
+        <ul className="m-0 flex list-none flex-col divide-y divide-border p-0">
           {feedback.reviews.map((r) => (
-            <li key={r.url} className="flex flex-col gap-1 px-4 py-2.5">
+            <li key={r.url} className="flex flex-col gap-1 py-2.5">
               <span className="flex flex-wrap items-center gap-2 text-meta text-faint">
                 <span className="font-semibold text-text">@{r.author}</span>
                 <Pill tone={VERDICT[r.state].tone}>{VERDICT[r.state].label}</Pill>
@@ -211,12 +211,12 @@ export function GitHubReviews({
         </ul>
       )}
       {inDiff.length > 0 && (
-        <ul className="m-0 flex list-none flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-card p-0" aria-label="Threads on this diff">
+        <ul className="m-0 flex list-none flex-col divide-y divide-border p-0" aria-label="Threads on this diff">
           {inDiff.map(({ thread: t, step }) => {
             const first = t.comments[0]!;
             return (
               <li key={t.id}>
-                <button type="button" onClick={() => onOpen(step, t)} className={`group flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 px-4 py-2 text-left hover:bg-border/45 ${t.resolved ? 'text-muted' : ''}`}>
+                <button type="button" onClick={() => onOpen(step, t)} className={`group flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg px-2.5 py-2 text-left hover:bg-border/45 ${t.resolved ? 'text-muted' : ''}`}>
                   <MessageSquare size={13} className={`shrink-0 ${t.resolved ? 'text-faint' : 'text-link'}`} aria-hidden />
                   <span className="min-w-0 flex-[1_1_280px] truncate text-body">
                     <span className="font-semibold">@{first.author}</span>: {first.body.split('\n')[0]}

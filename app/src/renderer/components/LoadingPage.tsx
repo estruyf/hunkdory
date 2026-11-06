@@ -25,17 +25,16 @@ function Reading() {
 
 function PlanOutline({ meta }: { meta: React.ReactNode }) {
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7 pb-14">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-7 pb-14">
       <div className="flex flex-col gap-2.5">
         {meta}
         <Bar className="h-8 w-3/5" />
-        <Bar className="h-4 w-4/5" />
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <Bar className="h-10 w-52 rounded-lg" />
+          <Reading />
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Bar className="h-10 w-52 rounded-lg" />
-        <Reading />
-      </div>
-      <div aria-hidden className="grid grid-cols-[96px_1fr] items-center gap-x-4 gap-y-3.5 rounded-xl border border-border bg-card p-4">
+      <div aria-hidden className="grid grid-cols-[96px_1fr] items-center gap-x-5 gap-y-3.5 border-t border-border pt-5">
         {['w-3/4', 'w-11/12', 'w-1/2'].map((width) => (
           <div key={width} className="contents">
             <Bar className="h-3 w-20" />
@@ -43,7 +42,7 @@ function PlanOutline({ meta }: { meta: React.ReactNode }) {
           </div>
         ))}
       </div>
-      <div aria-hidden className="flex flex-col gap-3">
+      <div aria-hidden className="flex flex-col gap-3 border-t border-border pt-5">
         <Bar className="h-3 w-24" />
         <Bar className="h-3.5 w-1/2" />
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2.5">

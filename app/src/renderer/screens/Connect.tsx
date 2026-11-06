@@ -1,22 +1,28 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Go, Route } from '../App.tsx';
-import { Crumbs, cleanError, rememberProjectName } from '../components/ui.tsx';
+import { Crumbs, cleanError, plural, rememberProjectName } from '../components/ui.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Checkbox } from '../components/ui/Checkbox.tsx';
 import { Dialog } from '../components/ui/Dialog.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
-import { Pill } from '../components/ui/Pill.tsx';
 import { Radio, RadioGroup } from '../components/ui/Radio.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
 import { Select } from '../components/ui/Select.tsx';
 import { FIELD, FIELD_LG, TEXTAREA } from '../components/ui/field.ts';
 import { Toggle } from '../components/ui/Toggle.tsx';
-import { DEFAULT_AI_REVIEW, FINDING_LIMITS, REVIEW_AREAS, aiReviewSettings } from '../../shared/aiReview.ts';
+import { DEFAULT_AI_REVIEW, FINDING_LIMITS, REVIEW_AREAS, aiReviewSettings, areaLabel } from '../../shared/aiReview.ts';
+import { INSTALL_URL, usageNote, whereCodeGoes } from '../../shared/assistantText.ts';
 import { matches } from '../lib/shortcuts.ts';
 import { useTabActive } from '../state/tabPane.ts';
 import { FoundOnThisMac } from '../components/found.tsx';
-import type { AiReviewSettings, AssistantChoice, Project, RepoCheck, Watch } from '../../shared/types.ts';
+import { InstallLink } from '../components/setup.tsx';
+import { CircleCheck, RefreshCw } from 'lucide-react';
+import { IconPicker } from '../components/IconPicker.tsx';
+import type { AiReviewSettings, AssistantChoice, InboxPreview, Project, ProjectIconChoice, ProjectIconInfo, RepoCheck, Watch } from '../../shared/types.ts';
+
+/** Past this many open pull requests, say what watching them all means. */
+const BUSY_REPO = 30;
 
 /** Connect a new project, or change one you connected before (`projectId`). */
 export function Connect({ go, initialPath, projectId, back }: { go: Go; initialPath?: string; projectId?: string; back: Route }) {
@@ -41,16 +47,22 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const [githubError, setGithubError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // New projects keep the details folded away: the defaults suit most repos.
-  const [advanced, setAdvanced] = useState(!!projectId);
+  // Folded to one line once AI review is on: it only matters when you press its button.
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [preview, setPreview] = useState<InboxPreview | null>(null);
+  // Your icon choice, and what it shows, until you save. Null: nothing changed here.
+  const [iconChoice, setIconChoice] = useState<{ choice: ProjectIconChoice; shown: ProjectIconInfo } | null>(null);
+  const [savedIcon, setSavedIcon] = useState<ProjectIconInfo | null>(null);
 
-  useEffect(() => {
-    window.api.listAssistants().then((as) => {
+  const loadAssistants = (recheck = false) =>
+    (recheck ? window.api.setupStatus({ recheck }).then((s) => s.assistants) : window.api.listAssistants()).then((as) => {
       setAssistants(as);
-      // A new project defaults to the first one installed: Claude Code, then Manual.
-      setAssistant((a) => a ?? as.find((x) => x.available)?.id ?? as[0]?.id ?? 'claude-code');
+      // A new project defaults to the first one installed: Claude Code, then Copilot, then Manual.
+      setAssistant((a) => (a && (projectId || as.some((x) => x.id === a && x.available)) ? a : as.find((x) => x.available)?.id ?? as[0]?.id ?? 'claude-code'));
     });
+  useEffect(() => {
+    void loadAssistants();
   }, []);
 
   // Editing: start from the saved settings.
@@ -60,6 +72,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       const p = ps.find((x) => x.id === projectId);
       if (!p) return;
       setExisting(p);
+      window.api.projectIcons().then((icons) => setSavedIcon(icons[p.id] ?? null), () => {});
       setName(p.name);
       setPath(p.path);
       setGithub(p.github ?? null);
@@ -98,21 +111,51 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
     if (p) setPath(p);
   };
 
-  const toggleGithub = async (on: boolean) => {
+  // gh can take a while: an answer about the folder you were on before says nothing about this one.
+  const asked = useRef<string | null>(null);
+  const link = async (root: string) => {
+    asked.current = root;
     setGithubError(null);
-    if (!on) {
-      setGithub(null);
-      setPullRequests(false);
-      return;
-    }
     setLinking(true);
+    let linked: string | null = null;
+    let failed: string | null = null;
     try {
-      setGithub(await window.api.checkGitHub(check!.root!));
+      linked = await window.api.checkGitHub(root);
     } catch (e) {
-      setGithubError(cleanError(e));
+      failed = cleanError(e);
     }
+    if (asked.current !== root) return;
+    setGithub(linked);
+    setPullRequests(!!linked);
+    setGithubError(failed);
     setLinking(false);
   };
+  const unlink = () => {
+    asked.current = null;
+    setLinking(false);
+    setGithub(null);
+    setPullRequests(false);
+    setGithubError(null);
+  };
+
+  // A new project on GitHub links it straight away, with its pull requests on. One that's already connected keeps what you chose.
+  const root = check?.root ?? null;
+  const onGitHub = !!check?.remote?.startsWith('github.com/');
+  useEffect(() => {
+    if (projectId) return;
+    unlink();
+    if (root && onGitHub) void link(root);
+  }, [root, onGitHub, projectId]);
+
+  // What this repo's inbox would hold, for the choices below.
+  useEffect(() => {
+    if (!root || !base) return setPreview(null);
+    let live = true;
+    window.api.previewInbox(root, base, github).then((p) => live && setPreview(p), () => live && setPreview(null));
+    return () => {
+      live = false;
+    };
+  }, [root, base, github]);
 
   const save = async () => {
     setSaving(true);
@@ -121,9 +164,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
     const assistantInput = assistant ?? 'claude-code';
     try {
       if (existing) {
-        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview });
+        const saved = await window.api.updateProject(existing.id, { name: name ?? existing.name, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview, ...(iconChoice && { icon: iconChoice.choice }) });
         rememberProjectName(saved.id, saved.name);
-      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview });
+      } else await window.api.addProject({ path: check!.root!, name: name ?? folderName, baseBranch: base, watch: w, github, writeWalkthroughs, assistant: assistantInput, aiReview, ...(iconChoice && { icon: iconChoice.choice }) });
       go({ name: 'home' });
     } catch (e) {
       setError(cleanError(e));
@@ -138,9 +181,11 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   };
 
   const ok = !!check?.isRepo;
+  const chosen = assistants.find((a) => a.id === assistant);
+  const noIcon: ProjectIconInfo = { icon: null, source: null, path: null };
+  const detectedIcon = check?.icon ?? noIcon;
   // What an empty Name falls back to, like the main process does.
   const folderName = (check?.root ?? existing?.path ?? path).replace(/\/+$/, '').split('/').pop() ?? '';
-  const onGitHub = !!check?.remote?.startsWith('github.com/');
   const baseOptions = check ? [...new Set([base, check.baseBranch, ...check.branches].filter(Boolean) as string[])] : [];
 
   // Say why Connect is greyed out, instead of leaving you to guess.
@@ -151,7 +196,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
       : usePattern && !pattern.trim()
         ? 'Fill in a branch pattern, or turn the pattern off.'
         : !anyBranch && !usePattern && !pullRequests
-          ? 'Pick at least one thing to watch, under What needs a review.'
+          ? 'Pick at least one thing to show, under What shows up in your inbox.'
           : null;
 
   // ⌘↵ connects the project or saves its settings.
@@ -179,7 +224,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-hero font-semibold">{existing ? `${existing.name} settings` : 'Connect a project'}</h1>
-            <p className="text-body text-muted">A project is one git repo on your Mac. The defaults suit most repos: pick the folder, choose how steps get written, and connect.</p>
+            <p className="text-body text-muted">{existing ? 'What this project shows in your inbox, and who explains its changes.' : 'A project is one git repo on your Mac. Check what shows up in your inbox, choose who explains the changes, and connect.'}</p>
           </div>
 
           {/* Adding a project: the repos you work in with Claude Code, one click from filling in the folder. */}
@@ -208,21 +253,106 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                   <span className="text-muted">–</span>
                 )}
               </Tile>
-              <Tile label="Claude Code sessions">{ok ? <span className={check!.sessionCount ? 'text-ok' : 'text-muted'}>{check!.sessionCount ? `${check!.sessionCount} found` : 'None yet'}</span> : <span className="text-muted">–</span>}</Tile>
+              <Tile label="Agent sessions">{ok ? <span className={check!.sessionCount ? 'text-ok' : 'text-muted'}>{check!.sessionCount ? `${check!.sessionCount} found` : 'None yet'}</span> : <span className="text-muted">–</span>}</Tile>
               <Tile label="Remote">
                 <span className="font-mono text-meta break-all">{check?.remote ?? '–'}</span>
               </Tile>
             </div>
-            {ok && !check!.sessionCount && <p className="text-meta text-muted">No sessions yet in ~/.claude or any ~/.claude-* folder. Reviews still work, with less context: no prompt and no agent reasons.</p>}
+            <label className="flex flex-col gap-1 text-ui font-semibold">
+              Name
+              <input className={`${FIELD_LG} max-w-md font-normal`} value={name ?? folderName} onChange={(e) => setName(e.target.value)} placeholder={folderName || 'my-project'} />
+              <span className="text-meta font-normal text-muted">How the inbox and reviews show this project. Leave it empty to use the folder's name.</span>
+            </label>
+            {ok && <IconPicker name={name || folderName} shown={iconChoice?.shown ?? savedIcon ?? detectedIcon} detected={detectedIcon} onChange={(choice, shown) => setIconChoice({ choice, shown })} />}
+            {ok && !check!.sessionCount && <p className="text-meta text-muted">No Claude Code or Copilot sessions for this repo yet. Reviews still work, with less context: no prompt and no agent reasons.</p>}
+          </Section>
+
+          <Section title="What shows up in your inbox">
+            <div className="flex flex-col gap-1.5">
+              <Checkbox checked={anyBranch} onChange={setAnyBranch}>
+                Local branches{ok && preview ? <span className="text-muted"> · {plural(preview.branches, 'branch', 'branches')} with changes now</span> : null}
+              </Checkbox>
+              <span className="pl-6 text-meta text-muted">Every branch on this Mac with commits on top of {base ? <span className="font-mono">{base}</span> : 'the base'}, from an agent or a person.</span>
+              {!anyBranch && (
+                <>
+                  <Checkbox checked={usePattern} onChange={setUsePattern}>
+                    Only branches matching a pattern
+                  </Checkbox>
+                  {usePattern && <input aria-label="Branch pattern" className={`${FIELD} ml-6 w-full max-w-sm font-mono`} value={pattern} onChange={(e) => setPattern(e.target.value)} />}
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Checkbox checked={pullRequests} disabled={!github} onChange={setPullRequests}>
+                Pull requests{github ? <span className="font-mono text-muted"> on {github}</span> : null}
+                {github && preview?.pullRequests != null ? <span className="text-muted"> · {preview.pullRequests >= 100 ? '100+' : preview.pullRequests} open now</span> : null}
+              </Checkbox>
+              <span className="pl-6 text-meta text-muted">
+                {linking
+                  ? 'Checking with the GitHub CLI…'
+                  : github
+                    ? 'Every open pull request, from agents or people, including the ones Copilot opens. Your branches stay as they are, and nothing is posted until you finish a review.'
+                    : ok && !onGitHub
+                      ? "This repo's remote isn't on GitHub, so there are no pull requests to show."
+                      : 'Every open pull request on GitHub, from agents or people. Uses your GitHub CLI sign-in.'}
+              </span>
+              {githubError && (
+                <Notice
+                  tone="caution"
+                  role="note"
+                  actions={
+                    <Button size="sm" disabled={linking} aria-busy={linking} icon={<RefreshCw size={13} aria-hidden />} onClick={() => link(root!)}>
+                      Check again
+                    </Button>
+                  }
+                >
+                  {githubError}
+                  {/not installed/.test(githubError) && (
+                    <>
+                      {' '}
+                      <InstallLink id="gh">Get the GitHub CLI</InstallLink>
+                    </>
+                  )}
+                </Notice>
+              )}
+              {github && (preview?.pullRequests ?? 0) > BUSY_REPO && pullRequests && (
+                <Notice tone="info" role="note">
+                  <strong className="font-semibold">That's a busy repo.</strong> Each scan fetches every open pull request, and they all land in your inbox. If that's too much, turn this off and open the ones you want with Review another branch, or filter the inbox by person.
+                </Notice>
+              )}
+              {ok && onGitHub && !linking && !githubError && (
+                <span className="pl-6 text-meta">
+                  {github ? (
+                    <button type="button" className="text-link hover:underline" onClick={unlink}>
+                      Don't use GitHub for this project
+                    </button>
+                  ) : (
+                    <button type="button" className="text-link hover:underline" onClick={() => link(root!)}>
+                      Use GitHub for this project
+                    </button>
+                  )}
+                </span>
+              )}
+            </div>
+
+            <p className="flex items-center gap-2 text-ui">
+              <CircleCheck size={15} className="shrink-0 text-ok" aria-hidden />
+              <span>
+                Uncommitted changes <span className="text-muted">are always included: edits in this repo's folders that aren't committed yet.</span>
+              </span>
+            </p>
+            <p className="text-meta text-muted">Something else? You can always pick any branch with Review another branch in the inbox.</p>
           </Section>
 
           <Section title="Who does the work?">
             <RadioGroup label="Assistant" className="flex flex-col gap-2">
               {assistants.map((a) => (
-                <div key={a.id} className={`rounded-xl border p-3.5 ${assistant === a.id ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'} ${a.available ? '' : 'opacity-60'}`}>
+                <div key={a.id} className={`flex flex-col gap-1 rounded-xl border p-3.5 ${assistant === a.id ? 'border-edge bg-card shadow-[inset_3px_0_0_var(--sb-text)]' : 'border-border'}`}>
                   <Radio
                     checked={assistant === a.id}
                     disabled={!a.available}
+                    describedBy={a.available ? undefined : `assistant-why-${a.id}`}
                     tabbable={assistant === a.id}
                     onSelect={() => {
                       setAssistant(a.id);
@@ -232,14 +362,36 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                   >
                     <span className="flex flex-col gap-0.5">
                       <span className="text-body font-semibold">{a.name}</span>
-                      <span className="text-ui text-muted">
-                        {!a.available ? a.reason : a.id === 'manual' ? "No AI. Hunkdory never sends this project's code anywhere." : 'Writes walkthroughs, answers questions on a step and makes changes you ask for.'}
-                      </span>
+                      {a.available && (
+                        <span className="text-ui text-muted">
+                          {a.id === 'manual' ? "No AI: the plain changes, one step per file, with no story, questions or changes. Hunkdory never sends this project's code anywhere." : 'Tells each change as a story, answers your questions and makes the changes you ask for.'}
+                        </span>
+                      )}
                     </span>
                   </Radio>
+                  {/* Outside the radio: a disabled one is dimmed, and a link can't sit inside a button. */}
+                  {!a.available && (
+                    <p id={`assistant-why-${a.id}`} className="pl-[22px] text-ui text-muted">
+                      {a.reason} {INSTALL_URL[a.id] && <InstallLink id={a.id}>Get it</InstallLink>}
+                    </p>
+                  )}
                 </div>
               ))}
             </RadioGroup>
+            {assistants.length > 0 && !assistants.some((a) => a.available && a.id !== 'manual') && (
+              <Notice
+                tone="caution"
+                role="note"
+                actions={
+                  <Button size="sm" icon={<RefreshCw size={13} aria-hidden />} onClick={() => loadAssistants(true)}>
+                    Check again
+                  </Button>
+                }
+              >
+                <strong className="font-semibold">No AI assistant found on this Mac.</strong> You can connect this project as Manual, but the story, questions and changes need Claude Code or the Copilot CLI. Install one, then check again.
+              </Notice>
+            )}
+            {assistants.length > 0 && assistant && !assistants.some((a) => a.id === assistant) && <Notice tone="error">The agent this project used isn't in Settings any more. Pick another one, or add it again in Settings.</Notice>}
             {assistant?.startsWith('acp:') && (
               <Notice tone="info">Unlike Claude Code and Copilot, Hunkdory can't stop this agent from loading the repo's own config (an AGENTS.md, its MCP servers, …) when it runs.</Notice>
             )}
@@ -251,10 +403,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                 {[
                   {
                     on: true,
-                    title: `Let ${assistants.find((a) => a.id === assistant)?.name ?? 'Claude'} write a walkthrough`,
+                    title: `Let ${chosen?.name ?? 'the assistant'} write a walkthrough`,
                     note: assistant?.startsWith('acp:') ? '' : '(recommended)',
-                    detail: `Steps by intent, with a reason for each. For a branch that opens without one, ${assistants.find((a) => a.id === assistant)?.name ?? 'Claude Code'} reads the diff, the commits and the session.${assistant === 'copilot' ? ' Like any Copilot run, that goes to GitHub.' : assistant === 'claude-code' ? ' Like any Claude Code run, that goes to Anthropic.' : ''
-                      }`,
+                    detail: `The change as a story, with a reason for each step. For a branch that opens without one, ${chosen?.name ?? 'the assistant'} reads the diff, the commits and the session.${chosen ? ` ${whereCodeGoes(chosen)} ${usageNote(chosen)}` : ''}`,
                   },
                   { on: false, title: 'One step per file, fully offline', note: '', detail: 'Nothing is sent anywhere. You can still ask for a walkthrough on a branch when you want one.' },
                 ].map((o) => (
@@ -278,12 +429,20 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
             <Section title="AI review">
               <Toggle
                 label="Offer an AI review on this project's branches"
-                detail={`Adds a Run AI review button to each plan. ${assistants.find((a) => a.id === assistant)?.name ?? 'The assistant you picked above'} does the review, and only when you press it.`}
+                detail={`Adds a Run AI review button to each plan. ${chosen?.name ?? 'The assistant you picked above'} does the review, and only when you press it.`}
                 checked={aiReview.enabled}
                 attr="data-ai-review"
                 onChange={(enabled) => setAiReview({ ...aiReview, enabled })}
               />
-              {aiReview.enabled && (
+              {aiReview.enabled && !reviewOpen && (
+                <p className="text-ui text-muted">
+                  {aiReview.areas.map(areaLabel).join(', ') || 'Nothing chosen yet'} · {aiReview.depth === 'quick' ? 'Quick' : 'Thorough'} · up to {aiReview.maxFindings} findings.{' '}
+                  <button type="button" className="text-link hover:underline" onClick={() => setReviewOpen(true)}>
+                    Change what it checks
+                  </button>
+                </p>
+              )}
+              {aiReview.enabled && reviewOpen && (
                 <>
                   <div className="flex flex-col gap-2">
                     <SectionHeader as="h3">What to check</SectionHeader>
@@ -332,51 +491,6 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
               )}
             </Section>
           )}
-
-          <section className="flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3">
-            <SectionHeader as="h2" toggle={{ expanded: advanced, onToggle: () => setAdvanced(!advanced) }}>
-              Advanced: name, GitHub, what needs a review
-            </SectionHeader>
-            {advanced && (
-              <div className="flex flex-col gap-5 pb-1">
-                <label className="flex flex-col gap-1 text-ui font-semibold">
-                  Name
-                  <input className={`${FIELD_LG} max-w-md font-normal`} value={name ?? folderName} onChange={(e) => setName(e.target.value)} placeholder={folderName || 'my-project'} />
-                  <span className="text-meta font-normal text-muted">How the inbox and reviews show this project. Leave it empty to use the folder's name.</span>
-                </label>
-
-                <div className="flex flex-col gap-1.5">
-                  <SectionHeader as="h3">GitHub</SectionHeader>
-                  <Checkbox checked={!!github} disabled={!ok || !onGitHub || linking} onChange={toggleGithub}>
-                    Link the GitHub remote {github && <Pill tone="ok" className="ml-1.5">{github}</Pill>}
-                  </Checkbox>
-                  <span className="pl-6 text-meta text-muted">
-                    {linking ? 'Checking with the GitHub CLI…' : ok && !onGitHub ? 'The remote is not on GitHub.' : 'Uses your GitHub CLI sign-in to list open pull requests, including the ones GitHub Copilot opens. Nothing is posted until you finish a review.'}
-                  </span>
-                  {githubError && <Notice tone="error">{githubError}</Notice>}
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <SectionHeader as="h3">What needs a review</SectionHeader>
-                  <Checkbox checked={anyBranch} onChange={setAnyBranch}>
-                    Any branch <span className="text-muted">(recommended)</span>
-                  </Checkbox>
-                  <span className="-mt-1 pl-6 text-meta text-muted">Every local branch with commits on top of the base, from an agent or a person.</span>
-                  <Checkbox checked={usePattern} onChange={setUsePattern}>
-                    Branches matching a pattern
-                  </Checkbox>
-                  <div className="-mt-1 pl-6">
-                    {usePattern ? <input aria-label="Branch pattern" className={`${FIELD} w-full max-w-sm font-mono`} value={pattern} onChange={(e) => setPattern(e.target.value)} /> : <span className="font-mono text-meta text-muted">{pattern}</span>}
-                  </div>
-                  <Checkbox checked={pullRequests} disabled={!github} onChange={setPullRequests}>
-                    Every open pull request
-                  </Checkbox>
-                  <span className="-mt-1 pl-6 text-meta text-muted">{github ? 'From anyone, agents or people. Fetched into a private ref, your branches stay as they are.' : 'Link the GitHub remote above first.'}</span>
-                  <p className="text-meta text-muted">Pick any mix: a branch more than one of them finds shows up once. You can always review another branch from the inbox.</p>
-                </div>
-              </div>
-            )}
-          </section>
 
           {error && <Notice tone="error">{error}</Notice>}
           <div className="flex flex-wrap items-center justify-end gap-2 pt-1">

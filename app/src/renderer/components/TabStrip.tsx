@@ -2,6 +2,7 @@ import { House, Loader2, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { currentPlatform } from '../lib/platform.ts';
 import { formatShortcut, keysFor } from '../lib/shortcuts.ts';
+import { ProjectIcon } from './ProjectIcon.tsx';
 import { INBOX, routeOf, type Tab } from '../state/tabs.ts';
 import { useWalkthroughs } from '../state/walkthroughs.ts';
 import type { InboxData } from './inbox/useInboxData.ts';
@@ -53,6 +54,7 @@ function ReviewTab({ tab, on, inbox, onPick, onClose }: { tab: Tab; on: boolean;
     >
       <button type="button" aria-current={on ? 'page' : undefined} className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-t-lg pr-7 pl-3 text-left" data-tooltip={`${project ? `${project} · ` : ''}${branch}`} onClick={onPick}>
         {writing ? <Loader2 size={12} className="shrink-0 animate-spin text-link" aria-label="Writing a walkthrough" /> : ready ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-unread" role="img" aria-label="Walkthrough ready" /> : null}
+        {project && projectId && <ProjectIcon name={project} projectId={projectId} size={14} />}
         <span className="min-w-0 truncate">{title}</span>
       </button>
       <button

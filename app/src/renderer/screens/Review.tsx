@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
 import { useAsync } from '../components/ui.tsx';
 import { LoadingPage } from '../components/LoadingPage.tsx';
@@ -7,16 +7,18 @@ import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
+import { TextButton } from '../components/ui/TextButton.tsx';
 import { TEXTAREA } from '../components/ui/field.ts';
 import type { AgentChoice, IssueRef, ReviewData, ReviewState, Step } from '../../shared/types.ts';
-import { IssueRefsContext, Markdown } from '../components/markdown.tsx';
+import { ExternalLink, IssueRefsContext, Markdown } from '../components/markdown.tsx';
 import { timeAgo } from '../../shared/order.ts';
+import { promptPreview } from '../../shared/promptText.ts';
 import { Walkthrough } from './Walkthrough.tsx';
 import type { LineRef } from '../components/diff.tsx';
 
 type At = { stepKey?: string; decision?: string; group?: string; focus?: LineRef };
 
-export function Review({ go, projectId, branch, stepKey, decision, group, focus, preloaded }: { go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } } & At) {
+export function Review({ go, projectId, branch, stepKey, decision, group, story, focus, preloaded }: { story?: boolean; go: Go; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } } & At) {
   // Read once per branch. Moving between steps changes the route, not the review.
   const loaded = useAsync(() => (preloaded ? Promise.resolve(preloaded) : readReview(projectId, branch)), [projectId, branch]);
   const value = loaded.value ?? preloaded;
@@ -24,7 +26,7 @@ export function Review({ go, projectId, branch, stepKey, decision, group, focus,
   if (!value) return <LoadingPage shape="step" projectId={projectId} branch={branch} />;
   return (
     <IssueRefsContext.Provider value={value.data.references}>
-      <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} focus={focus} />
+      <Walkthrough go={go} data={value.data} initialState={value.state} stepKey={stepKey} decision={decision} group={group} story={story} focus={focus} />
     </IssueRefsContext.Provider>
   );
 }
@@ -46,12 +48,12 @@ export function ReviewError({ go, message }: { go: Go; message: string }) {
 }
 
 /** The prompt when a session made the branch, else the PR description, else a plain note. */
-export function AskedFor({ data, clamp }: { data: ReviewData; clamp?: number }) {
-  if (data.prompt) return <Prompt text={data.prompt} clamp={clamp} />;
-  if (data.pr?.body.trim()) return <Prompt text={data.pr.body.trim()} clamp={clamp} />;
+export function AskedFor({ data, clamp, plain }: { data: ReviewData; clamp?: number; plain?: boolean }) {
+  if (data.prompt) return <Prompt text={data.prompt} clamp={clamp} plain={plain} />;
+  if (data.pr?.body.trim()) return <Prompt text={data.pr.body.trim()} clamp={clamp} plain={plain} />;
   return (
     <p className="text-body text-muted">
-      {data.pr ? 'The pull request has no description, and no Claude Code session on this Mac worked on its branch.' : 'No Claude Code session ran on this branch, so there is no prompt to show.'}
+      {data.pr ? 'The pull request has no description, and no agent session on this Mac worked on its branch.' : 'No agent session ran on this branch, so there is no prompt to show.'}
     </p>
   );
 }
@@ -60,18 +62,18 @@ const linkedIssues = (data: ReviewData) => data.references?.refs.filter((r) => r
 export const hasLinkedIssues = (data: ReviewData) => linkedIssues(data).length > 0;
 
 /** The issues the PR points at: what the work is about, in the words of whoever reported it. PRs are left out: the stack shows those. */
-export function LinkedIssues({ data, clamp }: { data: ReviewData; clamp?: number }) {
+export function LinkedIssues({ data, clamp, plain }: { data: ReviewData; clamp?: number; plain?: boolean }) {
   return (
     <div className="flex flex-col gap-3">
       {linkedIssues(data).map((issue) => (
-        <LinkedIssue key={issue.number} issue={issue} clamp={clamp} />
+        <LinkedIssue key={issue.number} issue={issue} clamp={clamp} plain={plain} />
       ))}
     </div>
   );
 }
 
 /** The issue a PR fixes opens with its text; one it only mentions stays a title until you ask. */
-function LinkedIssue({ issue, clamp }: { issue: IssueRef; clamp?: number }) {
+function LinkedIssue({ issue, clamp, plain }: { issue: IssueRef; clamp?: number; plain?: boolean }) {
   const [open, setOpen] = useState(issue.closes);
   const body = issue.body.trim();
   return (
@@ -80,7 +82,7 @@ function LinkedIssue({ issue, clamp }: { issue: IssueRef; clamp?: number }) {
         #{issue.number} {issue.title} ↗
       </button>
       {(issue.closes || issue.state !== 'open') && <span className="text-meta text-muted">{[issue.closes && 'This PR says it fixes this', issue.state !== 'open' && 'Closed'].filter(Boolean).join(' · ')}</span>}
-      {body && open && <Prompt text={body} clamp={clamp} />}
+      {body && open && <Prompt text={body} clamp={clamp} plain={plain} />}
       {body && !open && (
         <button type="button" className="self-start text-link hover:underline" onClick={() => setOpen(true)}>
           Show what it says
@@ -204,8 +206,41 @@ export function CommentBox({ initial, onSave, children }: { initial: string; onS
   );
 }
 
-export function Prompt({ text, clamp = 600 }: { text: string; clamp?: number }) {
+/** A prompt without a box of its own, for a section that's plain too: a preview in plain text, then all of it, with long links shortened. */
+function PlainPrompt({ text, clamp }: { text: string; clamp: number }) {
   const [open, setOpen] = useState(false);
+  const preview = useMemo(() => promptPreview(text, clamp), [text, clamp]);
+  if (!preview.cut || open) {
+    return (
+      <div className="text-body break-words select-text">
+        <Markdown text={text} shortLinks />
+        {preview.cut && (
+          <TextButton className="mt-1 block text-ui" onClick={() => setOpen(false)}>
+            Show less
+          </TextButton>
+        )}
+      </div>
+    );
+  }
+  return (
+    <p className="m-0 text-body break-words whitespace-pre-line select-text">
+      {preview.parts.map((part, i) =>
+        'url' in part ? (
+          <ExternalLink key={i} href={part.url} title={part.url} className="text-link [overflow-wrap:anywhere] hover:underline">
+            {part.label}
+          </ExternalLink>
+        ) : (
+          <span key={i}>{part.text}</span>
+        )
+      )}{' '}
+      <TextButton onClick={() => setOpen(true)}>Show all</TextButton>
+    </p>
+  );
+}
+
+export function Prompt({ text, clamp = 600, plain = false }: { text: string; clamp?: number; plain?: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (plain) return <PlainPrompt text={text} clamp={clamp} />;
   const long = text.length > clamp;
   // Cut by height, not characters: slicing markdown can break a table or code block halfway.
   const collapsed = long && !open;

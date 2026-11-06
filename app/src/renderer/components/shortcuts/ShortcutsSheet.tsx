@@ -140,9 +140,9 @@ function Section({ section }: { section: SheetSection }) {
 
 function Row({ row }: { row: SheetRow }) {
   return (
-    <li tabIndex={-1} className={`flex items-center gap-3 rounded-md px-2 py-1.5 outline-none focus-visible:bg-border/45 ${row.available ? '' : 'opacity-40'}`} data-shortcut-row={row.id}>
+    <li tabIndex={-1} className={`flex items-center gap-3 rounded-md px-2 py-1.5 outline-none focus-visible:bg-border/45`} data-shortcut-row={row.id}>
       <span className="min-w-0 flex-1">
-        <span className="block text-ui text-text">{row.action}</span>
+        <span className={`block text-ui ${row.available ? 'text-text' : 'text-muted'}`}>{row.action}</span>
         {(row.context || row.note) && (
           <span className="block text-meta text-muted">
             {row.context}
@@ -150,7 +150,7 @@ function Row({ row }: { row: SheetRow }) {
             {row.note}
           </span>
         )}
-        {!row.available && <span className="sr-only">, not available here</span>}
+        {!row.available && <span className="block text-meta text-faint">Not available here</span>}
       </span>
       <KeyCombo combos={row.keys} marked={row.marked} className="shrink-0" />
     </li>

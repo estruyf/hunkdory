@@ -6,17 +6,19 @@ import remarkGemoji from 'remark-gemoji';
 import remarkGfm from 'remark-gfm';
 import { codeLanguage } from '../../shared/diff.ts';
 import { issueLinks } from '../../shared/issueRefs.ts';
+import { shortUrl } from '../../shared/promptText.ts';
 import type { IssueRefs } from '../../shared/types.ts';
 
 const open = (href: string | undefined) => {
   if (href && /^https:\/\//.test(href)) window.api.openExternal(href);
 };
 
-// Links open in the browser. Images can't load here (the page only allows its own), so they become links too.
-const components: Components = {
-  a: ({ href, title, children }) => (
+/** A link that opens in the browser. */
+export function ExternalLink({ href, title, className, children }: { href?: string; title?: string; className?: string; children?: ReactNode }) {
+  return (
     <a
       href={href}
+      className={className}
       data-tooltip={title}
       onClick={(e) => {
         e.preventDefault();
@@ -25,7 +27,12 @@ const components: Components = {
     >
       {children}
     </a>
-  ),
+  );
+}
+
+// Links open in the browser. Images can't load here (the page only allows its own), so they become links too.
+const components: Components = {
+  a: ({ href, title, children }) => <ExternalLink href={href} title={title}>{children}</ExternalLink>,
   img: ({ src, alt }) => (
     <a
       href={typeof src === 'string' ? src : undefined}
@@ -72,9 +79,19 @@ export const IssueRefsContext = createContext<IssueRefs | null>(null);
 /**
  * GitHub-flavoured markdown from a PR description or prompt. Raw HTML is dropped, never rendered.
  * `path` is the file it's about, like a review comment's, for the code blocks that don't name a language.
+ * `shortLinks` shows a bare URL by its readable label; it still links to the whole URL.
  */
-export function Markdown({ text, path }: { text: string; path?: string }) {
-  const withCode = useMemo<Components>(() => ({ ...components, pre: ({ children }) => <CodeBlock path={path}>{children}</CodeBlock> }), [path]);
+export function Markdown({ text, path, shortLinks = false }: { text: string; path?: string; shortLinks?: boolean }) {
+  const withCode = useMemo<Components>(
+    () => ({
+      ...components,
+      pre: ({ children }) => <CodeBlock path={path}>{children}</CodeBlock>,
+      ...(shortLinks
+        ? { a: ({ href, title, children }) => (typeof children === 'string' && children === href ? <ExternalLink href={href} title={href}>{shortUrl(href)}</ExternalLink> : <ExternalLink href={href} title={title}>{children}</ExternalLink>) } satisfies Components
+        : {}),
+    }),
+    [path, shortLinks]
+  );
   const refs = useContext(IssueRefsContext);
   const plugins = useMemo(() => [remarkGfm, remarkGemoji, remarkBreaks, ...(refs ? [issueLinks(refs)] : [])], [refs]);
   return (

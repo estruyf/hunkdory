@@ -14,7 +14,7 @@
 # Dry run: run this workflow by hand (Actions → Release → Run workflow). The app is built, signed, notarised and
 # checked, with a version like 0.1.0-dryrun.42, and kept as a workflow artifact for a week. Nothing is published.
 #
-# Nothing is ever attached unsigned: without the signing secrets the run fails. See README → Releasing.
+# Nothing is ever attached unsigned: without the signing secrets the run fails. See docs/development.md → Releasing.
 name: Release
 
 on:
@@ -108,7 +108,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ -z "$CSC_LINK" ] || [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
-            echo "::error::Signing secrets are missing, and nothing is attached unsigned. See README → Releasing."
+            echo "::error::Signing secrets are missing, and nothing is attached unsigned. See docs/development.md → Releasing."
             exit 1
           fi
           # The app's version (About panel, file names) is the release's.

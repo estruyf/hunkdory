@@ -9,7 +9,8 @@ import { dirname, isAbsolute, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { tryGit } from '../git.ts';
-import { shellEnv, which } from '../shellEnv.ts';
+import { agentEnv } from '../gitGuard.ts';
+import { shellEnv, which, pathOnlyEnv } from '../shellEnv.ts';
 import { parseStructured } from './copilot.ts';
 import type { Access, Assistant, AssistantResult, AssistantRun, RunOptions, SendBackHandle, SendBackOptions } from './types.ts';
 
@@ -24,6 +25,15 @@ const PROTOCOL_VERSION = 1;
 
 /** Read-only git commands an agent's `execute` tool calls may run without asking again, same rule as Claude's READ_GIT and Copilot's READ_GIT_SHELL. */
 const READ_GIT_CMD = /^git (diff|show|log|grep|ls-tree|cat-file|status)\b/;
+/** What makes a command line more than the command it starts with: chaining, pipes, redirects, substitution. */
+const SHELL_SYNTAX = /[;&|<>`$()\\\n\r]/;
+/** git's own ways out of read-only: `grep -O<program>` (also `-iO`), `--open-files-in-pager` and `--output=<file>`. git takes shortened long options, hence the short prefixes. */
+const WRITES_OR_RUNS = /(^|\s)(-[a-zA-Z0-9]*O|--op|--ou)/;
+
+/** A read-only git command and nothing else. Refuses what it can't be sure of: an agent can run a harmless command another way. */
+function isReadOnlyGit(cmd: string): boolean {
+  return READ_GIT_CMD.test(cmd) && !SHELL_SYNTAX.test(cmd) && !WRITES_OR_RUNS.test(cmd.replace(/["']/g, ''));
+}
 
 function commandOf(rawInput: unknown): string | null {
   if (!rawInput || typeof rawInput !== 'object') return null;
@@ -44,7 +54,7 @@ export function decidePermission(access: Access, toolCall: { kind?: string | nul
   if (kind === 'read' || kind === 'search') return 'allow';
   if (kind === 'execute') {
     const cmd = commandOf(toolCall.rawInput)?.trim();
-    return cmd && READ_GIT_CMD.test(cmd) ? 'allow' : 'reject';
+    return cmd && isReadOnlyGit(cmd) ? 'allow' : 'reject';
   }
   if (kind === 'edit' || kind === 'delete' || kind === 'move') return access === 'edit' ? 'allow' : 'reject';
   return 'reject';
@@ -247,7 +257,7 @@ export class AcpAssistant implements Assistant {
   }
 
   async run(opts: RunOptions): Promise<AssistantRun> {
-    const env = await shellEnv();
+    const env = await agentEnv(pathOnlyEnv());
     const bin = await which(this.command, env);
     if (!bin) throw new Error(`Could not find "${this.command}". Is ${this.name} installed?`);
     const child = spawn(bin, this.args, { cwd: opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });

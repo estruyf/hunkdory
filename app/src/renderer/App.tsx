@@ -6,6 +6,7 @@ import { TooltipLayer } from './components/ui/Tooltip.tsx';
 import { matches, type ShortcutContext } from './lib/shortcuts.ts';
 import { stepBranch, useBranches } from './state/branches.ts';
 import { openSettings, useNav } from './state/nav.ts';
+import { loadProjectIcons } from './state/projectIcons.ts';
 import { TabPane } from './state/tabPane.ts';
 import { activate, activeRoute, closeTab, INBOX, move, navigate, reopenTab, restoreTabs, routeOf, savedTabs, startTabs, stepTab, tabAt, withoutProjectsGone, type Tabs } from './state/tabs.ts';
 import { jobKey, useWalkthroughs, watchWalkthroughs } from './state/walkthroughs.ts';
@@ -31,8 +32,8 @@ export type Route =
   | { name: 'home'; projectId?: string }
   | { name: 'plan'; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }
   // `decision` is set while you go through the decisions: the step shown is the one the decision is about.
-  // `group` shows a whole skim folder on one page.
-  | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; group?: string; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number; focus?: LineRef }
+  // `group` shows a whole skim folder on one page. `story` goes through every step in the walkthrough's order.
+  | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; group?: string; story?: boolean; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number; focus?: LineRef }
   | { name: 'finish'; projectId: string; branch: string }
   | { name: 'done'; projectId: string; branch: string; result: FinishResult; stack?: ReviewData['stack'] };
 
@@ -92,6 +93,7 @@ export function App() {
 
   useEffect(() => {
     if (inbox.projects.length) setNav((n) => withoutProjectsGone(n, new Set(inbox.projects.map((p) => p.id))));
+    void loadProjectIcons();
   }, [inbox.projects]);
 
   const goFrom =
@@ -263,7 +265,7 @@ function view(route: Route, go: Go, hasProjects: boolean, inbox: InboxData) {
       return <PlanScreen key={`${route.projectId}:${route.branch}`} go={go} projectId={route.projectId} branch={route.branch} preloaded={route.preloaded} />;
     case 'review':
       // A new `reload` remounts the review, so it reads the branch again.
-      return <Review key={`${route.projectId}:${route.branch}:${route.reload ?? ''}`} go={go} projectId={route.projectId} branch={route.branch} stepKey={route.stepKey} decision={route.decision} group={route.group} focus={route.focus} preloaded={route.preloaded} />;
+      return <Review key={`${route.projectId}:${route.branch}:${route.reload ?? ''}`} go={go} projectId={route.projectId} branch={route.branch} stepKey={route.stepKey} decision={route.decision} group={route.group} story={route.story} focus={route.focus} preloaded={route.preloaded} />;
     case 'finish':
       return <Finish go={go} projectId={route.projectId} branch={route.branch} />;
     case 'done':

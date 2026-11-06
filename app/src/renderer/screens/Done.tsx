@@ -15,15 +15,19 @@ import { useTabActive } from '../state/tabPane.ts';
 import { formatDuration, suggestedOrder } from '../../shared/order.ts';
 import type { FinishResult, InboxItem, ReviewData, StackEntry } from '../../shared/types.ts';
 
-const HEADINGS = { merge: 'Merged', 'send-back': 'Sent back to Claude Code', discard: 'Discarded', github: 'Review posted on GitHub' } as const;
+const HEADINGS = { merge: 'Merged', 'send-back': 'Sent back to the agent', discard: 'Review closed', github: 'Review posted on GitHub' } as const;
 
 export function Done({ go, projectId, branch, result, stack }: { go: Go; projectId: string; branch: string; result: FinishResult; stack: ReviewData['stack'] }) {
   const inbox = useInbox();
   const [error, setError] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
-  const decision = result.review?.decision;
+  // How a send-back is going changes while you're here.
+  const [decision, setDecision] = useState(result.review?.decision);
   useEffect(() => {
     if (result.review) rememberReview(result.review);
+    return window.events.onReviewStateChanged((r) => {
+      if (r.projectId === projectId && r.branch === branch && r.decision) setDecision(r.decision);
+    });
   }, []);
   const kind = decision?.kind ?? 'merge';
   // A stacked PR: the one you just finished counts as done, and the next one up the stack comes before the inbox.
@@ -84,23 +88,54 @@ export function Done({ go, projectId, branch, result, stack }: { go: Go; project
 
           {kind === 'send-back' && !decision?.github && (
             <Notice
-              tone="neutral"
+              tone={decision?.result === 'failed' ? 'error' : decision?.result === 'ok' ? 'success' : 'neutral'}
               icon={
-                <span className="working-dots mt-1.5" aria-hidden>
-                  <span />
-                  <span />
-                  <span />
-                </span>
-              }
-              actions={
-                decision?.logFile ? (
-                  <Button size="sm" onClick={() => setShowLog(true)}>
-                    Show the run log
-                  </Button>
+                decision?.result === 'running' ? (
+                  <span className="working-dots mt-1.5" aria-hidden>
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 ) : undefined
               }
+              actions={
+                <>
+                  {decision?.logFile && (
+                    <Button size="sm" onClick={() => setShowLog(true)}>
+                      Show the run log
+                    </Button>
+                  )}
+                  {decision?.result === 'running' && (
+                    <Button size="sm" onClick={() => window.api.cancelSendBack(projectId, branch)}>
+                      Stop
+                    </Button>
+                  )}
+                  {decision?.result === 'ok' && (
+                    <Button size="sm" variant="primary" onClick={() => go({ name: 'plan', projectId, branch })}>
+                      See what changed
+                    </Button>
+                  )}
+                  {decision?.result === 'failed' && (
+                    <Button size="sm" onClick={() => go({ name: 'finish', projectId, branch })}>
+                      Send it back again
+                    </Button>
+                  )}
+                </>
+              }
             >
-              <strong className="font-semibold text-text">The agent is working</strong> <span className="font-mono">{branch}</span> · started just now
+              {decision?.result === 'running' ? (
+                <>
+                  <strong className="font-semibold text-text">The agent is working</strong> <span className="font-mono">{branch}</span>
+                </>
+              ) : decision?.result === 'ok' ? (
+                <>
+                  <strong className="font-semibold">The agent is done.</strong> {decision.message}
+                </>
+              ) : (
+                <>
+                  <strong className="font-semibold">The agent didn't finish.</strong> {decision?.message}
+                </>
+              )}
             </Notice>
           )}
 

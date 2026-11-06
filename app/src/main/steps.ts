@@ -15,12 +15,52 @@ const isTodo = (s: string | null | undefined) => !s || /^todo\b/i.test(s.trim())
 const CODE_FILE = /\.([cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php|swift|c|h|cpp|hpp|vue|svelte)$/;
 const isCode = (h: WtvHunk) => CODE_FILE.test(h.path) && !h.isTest && !h.lockfile && !h.generated && !h.whitespaceOnly;
 
+type ChapterIds = { title: string; hunks?: string[]; refs?: string[] };
+
+/** Each chapter's step key, as `buildSteps` gives it: the one it kept through an update, else from its title. */
+function chapterKeys(chapters: ChapterIds[], kept: Record<string, string> = {}): string[] {
+  const keys = new Set<string>();
+  return chapters.map((c) => {
+    const k = kept[c.title] ?? `ch:${slug(c.title)}`;
+    let key = k;
+    for (let n = 2; keys.has(key); n++) key = `${k}-${n}`;
+    keys.add(key);
+    return key;
+  });
+}
+
+/**
+ * Your answers, notes and comments hang on a step's key, and an update can reword a title without the step being
+ * another one. So a chapter keeps the key of the chapter it was: the one with its title, else the one it shares most
+ * hunks with. Returns the keys, by title, of the chapters a title alone wouldn't give the same one.
+ */
+export function keptStepKeys(before: { chapters: ChapterIds[]; stepKeys?: Record<string, string> }, after: { chapters: ChapterIds[] }): Record<string, string> {
+  const old = chapterKeys(before.chapters, before.stepKeys).map((key, i) => ({ key, title: before.chapters[i].title, hunks: new Set(before.chapters[i].hunks ?? before.chapters[i].refs ?? []), taken: false }));
+  const found = new Map<ChapterIds, string>();
+  for (const c of after.chapters) {
+    const same = old.find((o) => !o.taken && o.title === c.title);
+    if (!same) continue;
+    same.taken = true;
+    found.set(c, same.key);
+  }
+  for (const c of after.chapters) {
+    if (found.has(c)) continue;
+    const shared = (o: (typeof old)[number]) => (c.hunks ?? c.refs ?? []).filter((h) => o.hunks.has(h)).length;
+    const best = old.filter((o) => !o.taken && shared(o) > 0).sort((a, b) => shared(b) - shared(a))[0];
+    if (!best) continue;
+    best.taken = true;
+    found.set(c, best.key);
+  }
+  return Object.fromEntries(after.chapters.filter((c) => found.has(c) && found.get(c) !== `ch:${slug(c.title)}`).map((c) => [c.title, found.get(c)!]));
+}
+
 /**
  * Every changed hunk ends up in at least one step:
  * walkthrough chapters in the agent's order, then one "outside the task" step per file
  * with hunks the walkthrough doesn't explain, then whitespace-only and generated hunks.
+ * `kept` is the keys chapters kept through an update (`keptStepKeys`).
  */
-export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
+export function buildSteps(r: WtvResult, source: WalkthroughSource, kept: Record<string, string> = {}): Step[] {
   const byId = new Map(r.hunks.map((h) => [h.id, h]));
   const steps: Step[] = [];
   const keys = new Set<string>();
@@ -56,7 +96,7 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
     const checks = ch.checks.length ? ch.checks : risk ? [risk] : [];
     steps.push(
       make({
-        key: uniqueKey(skeleton ? `file:${ch.title}` : `ch:${slug(ch.title)}`),
+        key: uniqueKey(skeleton ? `file:${ch.title}` : (kept[ch.title] ?? `ch:${slug(ch.title)}`)),
         title: ch.title,
         why: isTodo(ch.why) ? '' : ch.why,
         checks,
@@ -87,7 +127,7 @@ export function buildSteps(r: WtvResult, source: WalkthroughSource): Step[] {
         key: uniqueKey(`out:${path}`),
         title: `Not in the walkthrough: ${path}`,
         why: source === 'reviewer' ? `This file changed in ${ids.length} place${ids.length > 1 ? 's' : ''} that the walkthrough Hunkdory wrote doesn't cover.` : `The agent ${what}, but the walkthrough doesn't explain it.`,
-        checks: ['Did you ask for this? If not, drop it before merging.', ...labels.map((l) => `wtv flags: ${l}.`)],
+        checks: ['Did you ask for this? If not, drop it before merging.', ...labels.map((l) => `Hunkdory noticed: ${l}.`)],
         outsideTask: true,
         minRisk: 'medium',
         source: 'unnarrated',
@@ -178,6 +218,7 @@ export function attention(r: WtvResult, steps: Step[], source: WalkthroughSource
       title: g.label,
       detail: `${where}${stepNames(ids) ? ` in ${stepNames(ids)}` : ''}.${g.reason ? ` ${g.reason}${g.hunks.length > 1 ? ', first of them' : ''}.` : ''}`,
       stepKey: stepOf(ids[0])?.key ?? null,
+      where: { files, steps: [...new Set(ids.map((id) => stepOf(id)?.index).filter((n): n is number => n !== undefined))].sort((a, b) => a - b), reason: g.reason ? `${g.reason}${g.hunks.length > 1 ? ', first of them' : ''}.` : null },
     });
   }
 

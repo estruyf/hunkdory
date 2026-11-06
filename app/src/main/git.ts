@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { shellEnv } from './shellEnv.ts';
+import type { BranchInfo, ReviewData } from '../shared/types.ts';
 
 const run = promisify(execFile);
 
@@ -37,6 +38,31 @@ export async function detectBaseBranch(root: string): Promise<string | null> {
 
 export async function refExists(root: string, ref: string): Promise<boolean> {
   return (await tryGit(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], root)) !== null;
+}
+
+/**
+ * The integration branch this branch was cut from: the candidate it has the fewest
+ * commits on top of. Ties go to the earlier candidate (session origin, then project base),
+ * so a local branch that's up to date keeps its name over its copy on origin.
+ */
+export async function pickBase(root: string, branch: string, candidates: (string | null | undefined)[]): Promise<{ ref: string; ahead: number }> {
+  let best: { ref: string; ahead: number } | null = null;
+  for (const ref of new Set(candidates.filter((c): c is string => !!c && c !== branch))) {
+    const n = (await tryGit(['rev-list', '--count', `${ref}..${branch}`], root))?.trim();
+    if (n === undefined || n === '') continue;
+    if (!best || Number(n) < best.ahead) best = { ref, ahead: Number(n) };
+  }
+  return best ?? { ref: candidates.find(Boolean)!, ahead: 0 };
+}
+
+/** A local base you picked that's behind origin: how many of the review's commits are already on its copy there. Hunkdory's own pick never needs this. */
+export async function staleBase(root: string, branch: Pick<BranchInfo, 'baseRef' | 'baseChosen' | 'headRef' | 'uncommitted'>): Promise<ReviewData['staleBase']> {
+  if (!branch.baseChosen || branch.uncommitted || branch.baseRef.startsWith('origin/')) return null;
+  const remote = `origin/${branch.baseRef}`;
+  if (!(await refExists(root, remote))) return null;
+  const onTop = async (ref: string) => Number((await git(['rev-list', '--count', `${ref}..${branch.headRef}`], root)).trim());
+  const commits = (await onTop(branch.baseRef)) - (await onTop(remote));
+  return commits > 0 ? { remote, commits } : null;
 }
 
 export async function remoteUrl(root: string): Promise<string | null> {
@@ -106,4 +132,10 @@ export async function dirtyFiles(cwd: string): Promise<string[]> {
 
 export async function currentBranch(cwd: string): Promise<string | null> {
   return (await tryGit(['symbolic-ref', '--short', 'HEAD'], cwd))?.trim() || null;
+}
+
+/** Why an agent can't edit `branch` from `cwd`: a session's folder may have moved on since, and its edits would land there. Null when it's on it. */
+export async function notOnBranch(cwd: string, branch: string): Promise<string | null> {
+  const current = await currentBranch(cwd);
+  return current === branch ? null : `${cwd} is on "${current ?? 'a detached HEAD'}" now, so an agent working there wouldn't change ${branch}. Switch that folder back to ${branch} first (if git says it's checked out elsewhere, work from that folder instead).`;
 }

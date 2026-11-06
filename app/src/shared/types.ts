@@ -4,10 +4,25 @@
 export type RiskLevel = 'high' | 'medium' | 'low';
 export type ReviewOrder = 'story' | 'risk' | 'file';
 
+/** What a project shows as its icon. */
+export type ProjectIconValue = { kind: 'image'; dataUrl: string } | { kind: 'emoji'; value: string };
+/** What you can pick for a project. `auto` goes back to what its repo has; `none` is the letter, even when the repo has an icon. */
+export type ProjectIconChoice = { kind: 'auto' } | { kind: 'none' } | { kind: 'emoji'; value: string } | { kind: 'file'; path: string };
+/** What's kept for a project you picked an icon for: an image is a copy in Hunkdory's own folder. */
+export type StoredProjectIcon = { kind: 'none' } | { kind: 'emoji'; value: string } | { kind: 'file'; path: string };
+/** The icon a project shows, and where it came from. Null `icon`: its letter. `path` is where in the repo it was found. */
+export interface ProjectIconInfo {
+  icon: ProjectIconValue | null;
+  source: 'detected' | 'custom' | null;
+  path: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;
   path: string;
+  /** Unset: whatever icon its repo has. */
+  icon?: StoredProjectIcon;
   /** Branch or ref to compare against when a session doesn't say where it branched from. */
   baseBranch: string;
   remote: string | null;
@@ -468,6 +483,8 @@ export interface AttentionFlag {
   title: string;
   detail: string;
   stepKey: string | null;
+  /** What `detail` says in one sentence, in parts, when it's about places in the diff: every file, every step (by index), and why. */
+  where?: { files: string[]; steps: number[]; reason: string | null };
 }
 
 export interface ReviewData {
@@ -481,6 +498,8 @@ export interface ReviewData {
   baseRef: string;
   /** You picked the base for this branch, instead of Hunkdory. */
   baseChosen: boolean;
+  /** That base is a local branch behind origin, so the review shows commits already on its copy there. */
+  staleBase: { remote: string; commits: number } | null;
   baseSha: string;
   head: string;
   pr: PullRequest | null;
@@ -586,6 +605,8 @@ export interface Comment {
   side?: 'LEFT' | 'RIGHT' | null;
   body: string;
   createdAt: string;
+  /** The parts of the body (`commentParts`) that stay here and don't go with your review, like a question that turned out fine. */
+  leftOut?: string[];
 }
 
 /** `github` posts your review on the pull request. */
@@ -711,8 +732,25 @@ export interface InboxItem {
 export interface FoundFolder {
   name: string;
   path: string;
+  icon: ProjectIconValue | null;
   sessions: number;
   lastActive: string;
+}
+
+/** What Hunkdory can use on this Mac, for onboarding. */
+export interface SetupStatus {
+  git: boolean;
+  gh: { installed: boolean; signedIn: boolean; login: string | null };
+  assistants: AssistantChoice[];
+}
+
+/** What a repo's inbox would hold, before you connect it. */
+export interface InboxPreview {
+  /** Local branches with commits on top of the base. */
+  branches: number;
+  /** Open pull requests, up to the 100 Hunkdory reads. Null without a linked repo, or when they couldn't be read. */
+  pullRequests: number | null;
+  error?: string;
 }
 
 export interface RepoCheck {
@@ -725,6 +763,8 @@ export interface RepoCheck {
   /** Where sessions for this repo were found, one entry per Claude Code config dir. */
   sessionSources: { dir: string; sessions: number }[];
   sessionCount: number;
+  /** The icon the repo has. */
+  icon: ProjectIconInfo;
   error?: string;
 }
 
@@ -748,6 +788,8 @@ export interface FinishRequest {
   kind: Decision;
   note: string;
   dropStepKeys: string[];
+  /** The branch as you last saw it: approving, merging or deleting stops when it has changed since. */
+  seen: { headSha: string; hunkIds: string[] };
   /** Merge only: commit uncommitted changes in the branch's worktree first. */
   commitFirst?: boolean;
   /** Merge of uncommitted work on a base branch only: the message of the commit it becomes. */
@@ -765,6 +807,8 @@ export interface FinishResult {
   message: string;
   /** Merge can't go ahead because the branch has uncommitted changes. */
   needsCommit?: number;
+  /** Nothing happened: the branch changed since you last saw it. */
+  changed?: boolean;
   review?: ReviewState;
 }
 
@@ -820,6 +864,13 @@ export interface ReviewerApi {
   checkFolder(path: string): Promise<RepoCheck>;
   chooseFolder(): Promise<string | null>;
   foundOnThisMac(): Promise<FoundFolder[]>;
+  /** What each project shows as its icon, by project id. */
+  projectIcons(): Promise<Record<string, ProjectIconInfo>>;
+  /** Asks for an image to use as an icon. Null when you cancel; throws when it can't be one. */
+  chooseIconFile(): Promise<{ path: string; icon: ProjectIconValue } | null>;
+  /** What's installed and signed in. `recheck` reads your shell's environment again, for after installing something. */
+  setupStatus(opts?: { recheck?: boolean }): Promise<SetupStatus>;
+  previewInbox(root: string, baseBranch: string, repo: string | null): Promise<InboxPreview>;
   /** Every assistant Hunkdory can be connected to, with whether it's installed. */
   listAssistants(): Promise<AssistantChoice[]>;
   addProject(input: ProjectInput): Promise<Project>;
@@ -856,6 +907,8 @@ export interface ReviewerApi {
   loadReview(projectId: string, branch: string, opts?: { refresh?: boolean }): Promise<{ data: ReviewData; state: ReviewState }>;
   updateReview(projectId: string, branch: string, patch: ReviewPatch): Promise<ReviewState>;
   finish(req: FinishRequest): Promise<FinishResult>;
+  /** Stops an agent you sent this branch back to. */
+  cancelSendBack(projectId: string, branch: string): Promise<void>;
   openSessionFile(file: string): Promise<void>;
   /** The log of the agent run this branch was sent back to, in words; null when it has none. */
   runLog(projectId: string, branch: string): Promise<RunLog | null>;
@@ -917,6 +970,8 @@ export interface ProjectInput {
   assistant?: string;
   /** Left out: keep what the project had. */
   aiReview?: AiReviewSettings;
+  /** Left out: keep what the project had. */
+  icon?: ProjectIconChoice;
 }
 
 export type ReviewPatch =
@@ -926,6 +981,8 @@ export type ReviewPatch =
   /** Ticks one hunk of a step off, or back on. `hunkIds` are the step's hunks now. Ticking the last one makes the step reviewed. */
   | { type: 'reviewed-hunk'; stepKey: string; hunkIds: string[]; hunkId: string; on: boolean }
   | { type: 'comment'; stepKey: string; body: string }
+  /** Keeps a part of a comment out of what your review sends, or puts it back. */
+  | { type: 'leave-out'; id: string; part: string; on: boolean }
   /**
    * Settles a review plan decision. `comment` is the line a "needs a fix" adds to the step's comment;
    * any other value takes it out again, so a decision you changed doesn't leave its old comment behind.

@@ -13,18 +13,18 @@
   --sb-border: #e1e4e8;
   --sb-text: #202736;
   --sb-muted: #505869;
-  /* Faint is for small secondary text, so it keeps at least 4.5:1 on the background and sidebar. */
-  --sb-faint: #687082;
+  /* Faint is for small secondary text, so it keeps at least 4.5:1 everywhere it sits: selected rows and diff lines too. */
+  --sb-faint: #62697a;
   /* Yellow fills (buttons, tints); accent-ink is the readable version for text, icons, dots and borders. */
   --sb-accent: #ffd43b;
-  --sb-accent-ink: #916c00;
+  --sb-accent-ink: #866400;
   --sb-on-accent: #15181f;
   --sb-link: #005cc5;
-  --sb-ok: #00806f;
-  --sb-warn: #d1186b;
-  --sb-error: #d73a49;
+  --sb-ok: #007767;
+  --sb-warn: #c91767;
+  --sb-error: #c03441;
   --sb-unread: #005cc5;
-  --sb-caution: #b35900;
+  --sb-caution: #a55200;
   /* The selected row: a tint of the text colour, so it shows on every surface. */
   --sb-selected: color-mix(in srgb, var(--sb-text) 10%, transparent);
   --sb-profile-yellow: #b08300;
@@ -37,19 +37,21 @@
   /* Menus, popovers and dialogs. */
   --sb-popover: #ffffff;
   --sb-overlay-border: #d1d5da;
+  /* What marks out a field you type in: stronger than other borders, since nothing else says it's there (3:1). */
+  --sb-field-border: #8c8e92;
   --sb-overlay-shadow: 0 2px 6px rgb(21 24 31 / 0.08), 0 12px 32px -4px rgb(21 24 31 / 0.2);
   --sb-scrim: rgb(21 24 31 / 0.35);
   /* Code blocks and diffs: their own surface, and the backgrounds of added and removed lines. */
   --sb-code-bg: #f4f6fa;
   --sb-diff-added: #00806f1f;
   --sb-diff-removed: #d73a491f;
-  --sb-focus-ring: #916c008c;
+  --sb-focus-ring: #866400;
   /* Syntax colours in diffs: GitHub's light set. */
   --hl-keyword: #cf222e;
   --hl-string: #0a3069;
-  --hl-comment: #6e7781;
+  --hl-comment: #626972;
   --hl-number: #0550ae;
-  --hl-title: #8250df;
+  --hl-title: #7c4cd4;
   --hl-type: #953800;
   --hl-tag: #116329;
   color-scheme: light;
@@ -64,13 +66,13 @@
     --sb-border: #2d3142;
     --sb-text: #d9dbe1;
     --sb-muted: #9ba4b7;
-    --sb-faint: #8b94a6;
+    --sb-faint: #9da5b4;
     --sb-accent: #ffd43b;
     --sb-accent-ink: #ffd43b;
     --sb-on-accent: #15181f;
     --sb-link: #74c0fc;
     --sb-ok: #51cf66;
-    --sb-warn: #ed217c;
+    --sb-warn: #f369a6;
     --sb-error: #ff6b6b;
     --sb-unread: #74c0fc;
     --sb-caution: #ffa94d;
@@ -84,6 +86,7 @@
     --sb-profile-gray: #9ba4b7;
     --sb-popover: #2a3244;
     --sb-overlay-border: #414861;
+    --sb-field-border: #757a8c;
     --sb-overlay-shadow: 0 0 0 1px rgb(0 0 0 / 0.35), 0 4px 10px rgb(0 0 0 / 0.35), 0 16px 40px -6px rgb(0 0 0 / 0.7);
     --sb-scrim: rgb(0 0 0 / 0.6);
     --sb-code-bg: #202736;
@@ -109,6 +112,7 @@
   --color-border: var(--sb-border);
   /* A border that stays visible on dialogs and popovers (fields, chips, cards inside an overlay). */
   --color-edge: var(--sb-overlay-border);
+  --color-field: var(--sb-field-border);
   --color-text: var(--sb-text);
   --color-muted: var(--sb-muted);
   --color-faint: var(--sb-faint);

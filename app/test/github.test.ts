@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { apiErrorText, baseRef, fetchError, fetchRefspecs, signInFailed, foldComments, isCopilot, isOwnPrError, parseChecks, prRef, readWalkthroughComment, stackOf, toPullRequest, walkthroughComment, type RawPullRequest } from '../src/main/github.ts';
+import { apiErrorText, baseRef, fetchError, fetchRefspecs, signInFailed, foldComments, isCopilot, isOwnPrError, newestSharedWalkthrough, parseChecks, prRef, readWalkthroughComment, stackOf, toPullRequest, walkthroughComment, type RawIssueComment, type RawPullRequest } from '../src/main/github.ts';
 import type { PullRequest } from '../src/shared/types.ts';
 
 const pr = (number: number, headRefOid: string, baseRefName = 'develop/5.5'): PullRequest => ({
@@ -241,4 +241,19 @@ test('the comment leads with what to look at, and each step gets its risk and th
   assert.match(walkthroughComment({ fromSession: true, chapters: [{ title: 'One' }] }, {}), /<summary>1 step, explained by Hunkdory from the diff and the agent’s session<\/summary>/);
 
   assert.ok(!walkthroughComment({ chapters: [] }, {}).includes('Before approving'), 'nothing to look at, no heading');
+});
+
+test('a shared walkthrough is only reused from you or someone with a say in the repo', () => {
+  const body = walkthroughComment({ title: 'T', intent: 'I', chapters: [] }, { base: 'b', chapters: [] });
+  const comment = (id: number, login: string, author_association: string): RawIssueComment => ({ id, html_url: `u${id}`, body, user: { login }, author_association });
+  // Oldest first, as GitHub lists them.
+  const owner = comment(1, 'owner', 'OWNER');
+  assert.equal(newestSharedWalkthrough([owner, comment(2, 'stranger', 'NONE')], 'me')?.by, 'owner', 'skips a newer one from a stranger');
+  assert.equal(newestSharedWalkthrough([comment(2, 'stranger', 'NONE')], 'me'), null);
+  assert.equal(newestSharedWalkthrough([comment(3, 'past', 'CONTRIBUTOR'), comment(4, 'first', 'FIRST_TIME_CONTRIBUTOR')], 'me'), null, 'having a merged commit is not having a say');
+  for (const a of ['OWNER', 'MEMBER', 'COLLABORATOR']) assert.equal(newestSharedWalkthrough([comment(5, 'someone', a)], 'me')?.id, 5, a);
+  assert.equal(newestSharedWalkthrough([comment(6, 'Me', 'NONE')], 'me')?.id, 6, 'your own, whatever your role and in any case');
+  assert.equal(newestSharedWalkthrough([comment(7, 'someone', 'NONE')], null), null, 'not knowing who you are trusts nobody extra');
+  assert.equal(newestSharedWalkthrough([{ id: 8, html_url: 'u', body, user: null, author_association: 'OWNER' }], 'me'), null, 'a deleted account');
+  assert.equal(newestSharedWalkthrough([{ ...owner, body: 'just a comment' }], 'me'), null);
 });

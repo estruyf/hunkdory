@@ -19,7 +19,7 @@ import { ChecksCard, PrLink, PushToPrNotice, StackBar } from '../components/gith
 import { sinceLastRound } from '../../shared/rounds.ts';
 import { findingsView } from '../../shared/aiReview.ts';
 import { OUTSIDE_HINT, isReviewed } from '../../shared/order.ts';
-import { buildPlan, decisionLabels, resumePoint, settleComment, type PlanDecision } from '../../shared/plan.ts';
+import { buildPlan, decisionLabels, resumePoint, settleComment, storySteps, type PlanDecision } from '../../shared/plan.ts';
 import type { CheckAnswer, GitHubThread, ReviewData, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 import { answerLine } from '../../shared/comments.ts';
 import { AskPanel, CheckFollowUp, Thread } from '../components/ask.tsx';
@@ -34,14 +34,15 @@ import { useOnReturn, useTabActive } from '../state/tabPane.ts';
 import { AgentChoices, AgentTests, AskedFor, CommentBox, LinkedIssues, NO_TEST_HINT, RiskNote, hasLinkedIssues, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
 
-export function Walkthrough({ go, data, initialState, stepKey, decision, group, focus }: { go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string; focus?: LineRef }) {
+export function Walkthrough({ go, data, initialState, stepKey, decision, group, story, focus }: { story?: boolean; go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string; focus?: LineRef }) {
   const [state, setState] = useState(initialState);
   const latestState = useRef(state);
   latestState.current = state;
   // A review reads the branch once, so this is how old the diff on screen is. "Show the new diff" remounts it.
   const [loadedAt] = useState(() => new Date().toISOString());
   const plan = useMemo(() => buildPlan(data, state), [data, state.order, state.aiReview]);
-  const steps = plan.sequence;
+  // The story: every step, in the walkthrough's order. Otherwise what needs you first: read closely, then skim.
+  const steps = useMemo(() => (story ? storySteps(data) : plan.sequence), [story, data, plan]);
   // Where you are comes from the route, so back and forward move between steps and decisions.
   // Opened without a place ("Continue review"): the first thing not done yet, decisions first.
   const [start] = useState(() => (stepKey || decision || group ? null : resumePoint(plan, state)));
@@ -63,14 +64,16 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   const placed = useMemo(() => placeThreads(feedback?.threads ?? [], data.hunks), [feedback, data.hunks]);
   // Back on this tab after a while: new replies show right away, and new code is yours to bring in, so nothing moves as you read.
   const [moved, setMoved] = useState(false);
+  const [unreadable, setUnreadable] = useState<string | null>(null);
   useOnReturn(() => {
     window.api.loadReview(data.projectId, data.branch).then(
       ({ data: now }) => {
+        setUnreadable(null);
         if (now.headSha !== data.headSha || now.dirtyFiles !== data.dirtyFiles) setMoved(true);
         else setFeedback(now.github);
       },
-      // It can't be read right now: what's on screen stays, as it would without looking.
-      () => {}
+      // It can't be read right now: what's on screen stays, and says so, since finishing won't work from here.
+      (e) => setUnreadable(cleanError(e))
     );
   });
   // The question you just answered "Needs a change" or "Not sure", so its box takes the focus.
@@ -121,7 +124,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     }
   };
 
-  const at = (to: { stepKey?: string; decision?: string; group?: string; focus?: LineRef }) => go({ name: 'review', projectId: data.projectId, branch: data.branch, ...to });
+  const at = (to: { stepKey?: string; decision?: string; group?: string; focus?: LineRef }) => go({ name: 'review', projectId: data.projectId, branch: data.branch, story: story && !to.decision && !to.group, ...to });
   const select = (key: string) => at({ stepKey: key });
   const decide = (d: PlanDecision) => at({ decision: d.id, stepKey: d.stepKeys[0] });
   const toPlan = () => go({ name: 'plan', projectId: data.projectId, branch: data.branch });
@@ -181,7 +184,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
       if (matches(e, 'review.good')) return run(dec ? () => (state.settled?.[dec.id] ? nextDecision() : settle(dec, 'fine')) : () => keys.current.looksGood());
       if (matches(e, 'review.fix') && dec && !state.settled?.[dec.id]) return run(() => settle(dec, 'fix'));
       if (matches(e, 'review.comment') && cur) return run(openComment);
-      if (matches(e, 'review.ask') && cur) return run(openAsk);
+      if (matches(e, 'review.ask') && cur && data.ask.question.by) return run(openAsk);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -259,14 +262,14 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     }
   };
 
-  const segs = (list: Step[]) => list.map((s) => ({ key: s.key, title: `Step ${s.index + 1}: ${s.title}`, done: isReviewed(s, state.reviewed), current: !dec && s.key === cur?.key, onClick: () => select(s.key) }));
+  const segs = (list: Step[]) => list.map((s) => ({ key: s.key, title: `Step ${s.index + 1}: ${s.title}`, done: isReviewed(s, state.reviewed), needsFix: false, current: !dec && s.key === cur?.key, onClick: () => select(s.key) }));
   const firstOf = (list: Step[]) => list.find((s) => !isReviewed(s, state.reviewed)) ?? list[0];
-  const phases = [
+  const phases = story ? [{ label: 'The story', now: !!cur, onClick: () => select(firstOf(steps).key), segments: segs(steps) }] : [
     {
       label: 'Decide',
       now: !!dec,
       onClick: () => decide(plan.decisions.find((d) => !state.settled?.[d.id]) ?? plan.decisions[0]),
-      segments: plan.decisions.map((d) => ({ key: d.id, title: d.title, done: !!state.settled?.[d.id], current: d.id === dec?.id, onClick: () => decide(d) })),
+      segments: plan.decisions.map((d) => ({ key: d.id, title: d.title, done: !!state.settled?.[d.id], needsFix: state.settled?.[d.id] === 'fix', current: d.id === dec?.id, onClick: () => decide(d) })),
     },
     { label: 'Read closely', now: !dec && careful, onClick: () => select(firstOf(plan.careful).key), segments: segs(plan.careful) },
     { label: 'Skim', now: !dec && !!cur && !careful, onClick: () => select(firstOf(plan.skim).key), segments: segs(plan.skim) },
@@ -278,7 +281,9 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     : dec
       ? `Decision ${decPos + 1} of ${plan.decisions.length}`
       : cur
-        ? `${careful ? 'Read closely' : 'Skim'} · step ${phaseList.findIndex((s) => s.key === cur.key) + 1} of ${phaseList.length}`
+        ? story
+          ? `The story · step ${steps.findIndex((s) => s.key === cur.key) + 1} of ${steps.length}`
+          : `${careful ? 'Read closely' : 'Skim'} · step ${phaseList.findIndex((s) => s.key === cur.key) + 1} of ${phaseList.length}`
         : '';
 
   const allDone = steps.every((x) => isReviewed(x, state.reviewed)) && plan.decisions.every((d) => state.settled?.[d.id]);
@@ -294,13 +299,14 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
           <span key={p.label} data-tooltip={`${p.label} · ${done} of ${n} done`} className="flex min-w-0 gap-0.5" style={{ flex: `${Math.max(2, Math.min(n, 12))} 1 60px` }}>
             {n <= 40 ? (
               p.segments.map((x) => (
-                <button key={x.key} type="button" data-tooltip={x.title} aria-label={x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} className="min-w-0 flex-1 py-1">
-                  <span className={`block h-1 rounded-full ${x.done ? 'bg-text' : x.current ? 'bg-text/45 outline-2 outline-offset-1 outline-text' : 'bg-selected'}`} />
+                <button key={x.key} type="button" data-tooltip={x.title} aria-label={x.done ? `${x.title}, done` : x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} className="flex h-3 min-w-0 flex-1 items-center">
+                  {/* The colour is how far it got, the height is where you are: a step you went back to shows both. */}
+                  <span className={`block w-full rounded-full ${x.current ? 'h-1.5' : 'h-1'} ${x.needsFix ? 'bg-text' : x.done ? 'bg-ok' : x.current ? 'bg-faint' : 'bg-selected'}`} />
                 </button>
               ))
             ) : (
               <button type="button" onClick={p.onClick} aria-label={`${p.label}: ${done} of ${n} done`} className="flex-1 py-1">
-                <span className="block h-1 rounded-full" style={{ background: `linear-gradient(to right, var(--sb-text) ${(done / n) * 100}%, var(--sb-selected) 0)` }} />
+                <span className="block h-1 rounded-full" style={{ background: `linear-gradient(to right, var(--sb-ok) ${(done / n) * 100}%, var(--sb-selected) 0)` }} />
               </button>
             )}
           </span>
@@ -389,14 +395,24 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
   const shell = (body: React.ReactNode, foot: React.ReactNode, aside?: React.ReactNode) => (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {header}
-      <WalkthroughBar data={data} onSwitch={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, reload: Date.now() })} />
+      <WalkthroughBar data={data} onSwitch={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, story, reload: Date.now() })} />
       {moved && (
         <div role="status" className="flex shrink-0 items-center gap-2 border-b border-link/30 bg-link/8 px-6 py-1.5 text-meta text-text">
           <span className="min-w-0 flex-1 truncate">
             <strong className="font-semibold">This branch changed while you were away.</strong> You're still looking at the diff from when you opened it.
           </span>
-          <Button size="sm" variant="primary" onClick={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: selKey, decision: dec?.id, group, reload: Date.now() })}>
+          <Button size="sm" variant="primary" onClick={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, story, stepKey: selKey, decision: dec?.id, group, reload: Date.now() })}>
             Show the new diff
+          </Button>
+        </div>
+      )}
+      {unreadable && (
+        <div role="alert" className="flex shrink-0 items-center gap-2 border-b border-caution/30 bg-caution/8 px-6 py-1.5 text-meta text-text">
+          <span className="min-w-0 flex-1 truncate" data-tooltip={unreadable}>
+            <strong className="font-semibold">Hunkdory can't read this branch right now.</strong> {unreadable} What's on screen is from before, and finishing the review may not work. Your comments are saved.
+          </span>
+          <Button size="sm" onClick={() => go({ name: 'home' })}>
+            Back to the inbox
           </Button>
         </div>
       )}
@@ -580,7 +596,13 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     await patch({ type: 'answer', stepKey: key, index, question, value: 'no', note });
     setCommentKey((k) => k + 1);
   };
-  const showChanges = () => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() });
+  // You weren't sure, then asked for a change: that's your answer now.
+  const changeAsked = (key: string, index: number, question: string) => async (note: string) => {
+    await patch({ type: 'answer', stepKey: key, index, question, value: 'no', note });
+    setCommentKey((k) => k + 1);
+    setAnswered({ stepKey: key, index });
+  };
+  const showChanges = () => go({ name: 'review', projectId: data.projectId, branch: data.branch, story, stepKey: cur.key, reload: Date.now() });
 
 
   const changedSince = since?.byStep[cur.key];
@@ -716,7 +738,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
       )}
 
       {!cur.hunkIds.length && (
-        <EmptyStepNotice data={data} onReload={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, stepKey: cur.key, reload: Date.now() })} onOpenStep={select} />
+        <EmptyStepNotice data={data} onReload={() => go({ name: 'review', projectId: data.projectId, branch: data.branch, story, stepKey: cur.key, reload: Date.now() })} onOpenStep={select} />
       )}
 
       {cur.hunkIds.length > 0 && (
@@ -802,6 +824,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
                     value={a}
                     note={answerNotes[i] ?? ''}
                     onNote={saveNote(cur.key, i, q)}
+                    onChangeAsked={changeAsked(cur.key, i, q)}
                     exchanges={thread}
                     onShowChanges={showChanges}
                     loadedAt={loadedAt}
@@ -848,7 +871,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
       </Button>
       {!asking && !stepExchanges.length && data.ask.question.by && (
         <Button size="lg" shortcut="review.ask" onClick={openAsk}>
-          Ask {data.assistant?.name ?? 'the assistant'}
+          Ask or change
         </Button>
       )}
       {dec ? (

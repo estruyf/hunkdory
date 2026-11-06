@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback } from '../src/main/match.ts';
+import { baseCandidates, integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback } from '../src/main/match.ts';
 import type { SessionInfo } from '../src/shared/types.ts';
 
 const session = (id: string, startedAt: string, branches: [string, string, string?][], originalBranch: string | null = null): SessionInfo => ({
@@ -53,6 +53,15 @@ test('drops deleted branches and integration branches', () => {
   const m = matchSessions(all, { exists, exclude });
   assert.ok(!m.has('feat/gone'));
   assert.ok(!m.has('main'));
+});
+
+test('a base candidate brings its copy on origin along, right after it', () => {
+  assert.deepEqual(baseCandidates('feat/x', ['develop', null, 'main', 'origin/main', undefined]), ['develop', 'origin/develop', 'main', 'origin/main']);
+});
+
+test("a branch is never its own base, not even through its copy on origin", () => {
+  assert.deepEqual(baseCandidates('feat/x', ['feat/x', 'main']), ['main', 'origin/main']);
+  assert.deepEqual(baseCandidates('origin/feat/x', ['feat/x']), ['feat/x']);
 });
 
 test('matches branch patterns like the Connect screen shows them', () => {

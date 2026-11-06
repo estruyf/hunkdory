@@ -202,7 +202,7 @@ function rebasable(stored: object | null, opts: { covers?: boolean } = {}) {
   if (stored) generated.write('p', 'b', stored);
   const at = { baseSha: 'base-1', head: 'head-1', covers: opts.covers ?? true, checks: 0 };
   const projects = {
-    review: async () => ({ walkthrough: 'skeleton', assistant: { id: 'claude-code' }, writeWalkthroughs: true, baseSha: at.baseSha, head: at.head, hunks: { aaaaaaaaaa: {} } }),
+    review: async () => ({ walkthrough: 'skeleton', assistant: { id: 'claude-code' }, writeWalkthroughs: true, minutes: 1, steps: [], baseSha: at.baseSha, head: at.head, hunks: { aaaaaaaaaa: {} } }),
     runContext: async () => ({ root: tmpdir(), baseSha: at.baseSha, inTree: false, headRef: 'b', cwd: tmpdir() }),
     check: async () => {
       at.checks++;

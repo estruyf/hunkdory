@@ -73,7 +73,7 @@ export function PickBranch({ go, initialProject }: { go: Go; initialProject?: st
           <div className="flex flex-col gap-1.5">
             <h1 className="text-hero font-semibold">Review another branch</h1>
             <p className="text-body text-muted">
-              Any branch with commits on top of {project ? <span className="font-mono">{project.baseBranch}</span> : 'the base'}: yours, a colleague's, or an agent's. Or just the uncommitted changes in a folder. Remote branches are as fresh as your last fetch.
+              Any branch with commits on top of {project ? <span className="font-mono">{project.baseBranch}</span> : 'its main branch'}: yours, a colleague's, or an agent's. Or just the uncommitted changes in a folder. Remote branches are as fresh as your last fetch.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

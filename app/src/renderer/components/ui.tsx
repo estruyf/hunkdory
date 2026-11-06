@@ -1,20 +1,48 @@
 import { Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useId, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ReviewerApi, ReviewState, RiskLevel } from '../../shared/types.ts';
 import type { Go } from '../App.tsx';
 import { RISK_LABEL } from '../../shared/order.ts';
 import { Pill } from './ui/Pill.tsx';
 
-/** The Hunkdory app icon: three diff lines and a check on a blue tile. */
+/**
+ * The Hunkdory app icon (resources/icon.svg): diff lines and a check on a dark tile. Without its shadows and highlights,
+ * which don't show at the size it's drawn here. The ids are per instance: a duplicate in a hidden tab would leave the others without colour.
+ */
 export function Logo({ size = 20 }: { size?: number }) {
+  const id = useId();
   return (
     <svg width={size} height={size} viewBox="100 100 824 824" aria-hidden="true" className="shrink-0">
-      <rect x="100" y="100" width="824" height="824" rx="185" fill="#3451d1" />
-      <rect x="232" y="290" width="300" height="80" rx="40" fill="#FF8E85" />
-      <rect x="232" y="412" width="470" height="80" rx="40" fill="#7BE3A6" />
-      <rect x="232" y="534" width="390" height="80" rx="40" fill="#7BE3A6" />
-      <rect x="232" y="656" width="230" height="80" rx="40" fill="#fff" fillOpacity="0.28" />
-      <path d="M548 700 L642 794 L812 594" fill="none" stroke="#fff" strokeWidth="80" strokeLinecap="round" strokeLinejoin="round" />
+      <defs>
+        <linearGradient id={`${id}body`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#34363f" />
+          <stop offset="1" stopColor="#17181d" />
+        </linearGradient>
+        <linearGradient id={`${id}ring`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#2a2c33" />
+          <stop offset="1" stopColor="#4a4d58" />
+        </linearGradient>
+        <linearGradient id={`${id}gold`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ffd27a" />
+          <stop offset="1" stopColor="#e09a2c" />
+        </linearGradient>
+        <linearGradient id={`${id}warm`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#f3a27f" />
+          <stop offset="1" stopColor="#c95f3d" />
+        </linearGradient>
+        <linearGradient id={`${id}green`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#9be3a5" />
+          <stop offset="1" stopColor="#3fa957" />
+        </linearGradient>
+      </defs>
+      <rect x="100" y="100" width="824" height="824" rx="185" fill={`url(#${id}body)`} />
+      <rect x="236" y="256" width="440" height="88" rx="44" fill={`url(#${id}ring)`} />
+      <rect x="254" y="274" width="404" height="52" rx="26" fill={`url(#${id}warm)`} />
+      <rect x="236" y="392" width="552" height="88" rx="44" fill={`url(#${id}ring)`} />
+      <rect x="254" y="410" width="516" height="52" rx="26" fill={`url(#${id}warm)`} />
+      <rect x="236" y="528" width="264" height="88" rx="44" fill={`url(#${id}ring)`} />
+      <rect x="254" y="546" width="228" height="52" rx="26" fill={`url(#${id}green)`} />
+      <polyline points="540,690 636,786 812,566" fill="none" stroke={`url(#${id}gold)`} strokeWidth="76" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

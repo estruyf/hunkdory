@@ -19,6 +19,7 @@ export function Radio({
   disabled,
   tabbable,
   label,
+  describedBy,
   children,
   className = '',
   dataAttrs,
@@ -29,6 +30,8 @@ export function Radio({
   tabbable?: boolean;
   /** Accessible name when the visible text alone is ambiguous (several "Default" radios on one page). */
   label?: string;
+  /** The id of text about this option outside the radio, such as why it's off: a disabled radio is dimmed, and that text must stay readable. */
+  describedBy?: string;
   children: ReactNode;
   className?: string;
   dataAttrs?: Record<`data-${string}`, string | boolean | undefined>;
@@ -39,6 +42,7 @@ export function Radio({
       role="radio"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={describedBy}
       tabIndex={checked || tabbable ? 0 : -1}
       disabled={disabled}
       onClick={onSelect}

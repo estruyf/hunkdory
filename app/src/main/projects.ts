@@ -8,10 +8,11 @@ import createWtvWorker from './wtv-worker.ts?nodeWorker';
 import type { WtvJob, WtvOutput } from './wtv-worker.ts';
 import * as g from './git.ts';
 import { pathKey } from './paths.ts';
+import { detectedIcon, forgetIconFile, projectIconInfo, storeIconChoice } from './projectIcons.ts';
 import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './sessions/claude.ts';
 import { belongsTo as copilotBelongsTo, readCopilotSessions } from './sessions/copilot.ts';
 import * as gh from './github.ts';
-import { buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback, type BranchSessions } from './match.ts';
+import { baseCandidates, buildsOn, duplicateBranches, integrationBranches, matchesPattern, matchSessions, weakMatchMainFolder, withCheckoutFallback, type BranchSessions } from './match.ts';
 import { attention, buildSteps, estimateMinutes, overview } from './steps.ts';
 import { aiReviewSettings } from '../shared/aiReview.ts';
 import { projectName, toWatch, withProjectName, type Store } from './store.ts';
@@ -19,7 +20,7 @@ import type { GeneratedWalkthroughs } from './writer.ts';
 import { asOfNow, type Summaries, type Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
 import { assistantFor } from './assistants/index.ts';
-import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, InboxPreview, ProjectIconInfo, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -83,7 +84,7 @@ export class Projects {
 
   async checkFolder(path: string): Promise<RepoCheck> {
     const full = path.replace(/^~(?=\/|$)/, homedir());
-    const empty: RepoCheck = { path: full, isRepo: false, root: null, baseBranch: null, branches: [], remote: null, sessionSources: [], sessionCount: 0 };
+    const empty: RepoCheck = { path: full, isRepo: false, root: null, baseBranch: null, branches: [], remote: null, sessionSources: [], sessionCount: 0, icon: { icon: null, source: null, path: null } };
     if (!existsSync(full)) return { ...empty, error: 'Folder not found' };
     const root = await g.repoRoot(full);
     if (!root) return { ...empty, error: 'Not a git repository' };
@@ -104,6 +105,7 @@ export class Projects {
       remote,
       sessionSources: sources.sort((a, b) => b.sessions - a.sessions),
       sessionCount: claudeSessions.length + copilotSessions.length,
+      icon: detectedIcon(root),
     };
   }
 
@@ -111,7 +113,8 @@ export class Projects {
     // Saved paths come from git, session folders from wherever the agent ran: compare them as folders, not strings.
     const known = new Set(this.store.projects().map((p) => pathKey(p.path)));
     const byPath = new Map<string, FoundFolder & { at: number }>();
-    for (const f of scanSessionFolders()) {
+    const copilot = readCopilotSessions().map((s) => ({ cwd: s.cwd, sessions: 1, lastActive: Date.parse(s.endedAt ?? '') || 0 }));
+    for (const f of [...scanSessionFolders(), ...copilot]) {
       // Worktree sessions count towards their repo.
       const path = f.cwd.replace(/\/\.claude\/worktrees\/[^/]+.*$/, '');
       const key = pathKey(path);
@@ -123,9 +126,10 @@ export class Projects {
         sessions: (prev?.sessions ?? 0) + f.sessions,
         at: Math.max(prev?.at ?? 0, f.lastActive),
         lastActive: new Date(Math.max(prev?.at ?? 0, f.lastActive)).toISOString(),
+        icon: null,
       });
     }
-    return [...byPath.values()].sort((a, b) => b.at - a.at).slice(0, 8).map(({ at: _at, ...f }) => ({ ...f, path: tilde(f.path) }));
+    return [...byPath.values()].sort((a, b) => b.at - a.at).slice(0, 8).map(({ at: _at, ...f }) => ({ ...f, path: tilde(f.path), icon: detectedIcon(f.path).icon }));
   }
 
   private async validate(root: string, input: Omit<ProjectInput, 'path'>) {
@@ -134,6 +138,21 @@ export class Projects {
     if (w.pattern !== null && !w.pattern.trim()) throw new Error('Enter a branch pattern, like claude/*');
     if (w.pullRequests && !input.github) throw new Error('Link the GitHub remote to review open pull requests.');
     if (!w.anyBranch && w.pattern === null && !w.pullRequests) throw new Error('Pick at least one kind of branch to review.');
+  }
+
+  /** What the inbox would show for a repo you're about to connect, so you can see what you're choosing. */
+  async previewInbox(root: string, baseBranch: string, repo: string | null): Promise<InboxPreview> {
+    const refs = (await g.tryGit(['for-each-ref', `--format=%(refname:short)%00%(ahead-behind:${baseBranch})`, 'refs/heads'], root)) ?? '';
+    const branches = refs.split('\n').filter((l) => {
+      const [name, counts] = l.split('\0');
+      return name && name !== baseBranch && Number(counts?.split(' ')[0] ?? 0) > 0;
+    }).length;
+    if (!repo) return { branches, pullRequests: null };
+    try {
+      return { branches, pullRequests: (await gh.openPullRequests(root, repo)).length };
+    } catch (e) {
+      return { branches, pullRequests: null, error: (e as Error).message };
+    }
   }
 
   async checkGitHub(path: string): Promise<string> {
@@ -147,8 +166,10 @@ export class Projects {
     const check = await this.checkFolder(input.path);
     if (!check.root) throw new Error(check.error ?? 'Not a git repository');
     await this.validate(check.root, input);
+    const id = randomUUID();
+    const icon = input.icon && storeIconChoice(id, input.icon);
     const project: Project = {
-      id: randomUUID(),
+      id,
       name: projectName(input.name, check.root),
       path: check.root,
       baseBranch: input.baseBranch,
@@ -158,17 +179,45 @@ export class Projects {
       writeWalkthroughs: input.writeWalkthroughs,
       assistant: input.assistant,
       ...(input.aiReview && { aiReview: aiReviewSettings(input.aiReview) }),
+      ...(icon && { icon }),
       addedAt: new Date().toISOString(),
     };
     this.store.addProject(project);
+    // A scan already going read the project list before this one was on it.
+    this.scanning = null;
     return project;
+  }
+
+  removeProject(id: string) {
+    forgetIconFile(this.store.projects().find((p) => p.id === id)?.icon);
+    this.icons.delete(id);
+    this.store.removeProject(id);
+    this.scanning = null;
+  }
+
+  // Reading a repo for its icon touches a lot of files, and every screen with a project on it asks.
+  private icons = new Map<string, { at: number; info: ProjectIconInfo }>();
+
+  /** What each project shows as its icon. A repo's own icon is looked for again after a minute. */
+  projectIcons(): Record<string, ProjectIconInfo> {
+    const now = Date.now();
+    const out: Record<string, ProjectIconInfo> = {};
+    for (const p of this.store.projects()) {
+      let hit = this.icons.get(p.id);
+      if (!hit || now - hit.at > 60_000) this.icons.set(p.id, (hit = { at: now, info: projectIconInfo(p) }));
+      out[p.id] = hit.info;
+    }
+    return out;
   }
 
   async updateProject(id: string, input: Omit<ProjectInput, 'path'>): Promise<Project> {
     const project = this.store.project(id);
     await this.validate(project.path, input);
+    // Before anything is saved: an image that can't be an icon leaves the settings as they were.
+    const icon = input.icon ? storeIconChoice(id, input.icon) : project.icon;
     const updated: Project = {
       ...withProjectName(project, input.name),
+      icon,
       baseBranch: input.baseBranch,
       watch: toWatch(input.watch),
       github: input.github,
@@ -178,6 +227,8 @@ export class Projects {
       remote: await g.remoteUrl(project.path),
     };
     this.store.addProject(updated);
+    forgetIconFile(project.icon, icon);
+    this.icons.delete(id);
     // Bases and watch rules change what every review looks like, and the name is on every one.
     for (const k of [...this.cache.keys()]) if (k.startsWith(`${id}::`)) this.cache.delete(k);
     // A scan that started before this would hand back the old name.
@@ -419,7 +470,7 @@ export class Projects {
       // A base you picked wins. Then an open pull request, which says what the branch merges into: that beats guessing, and matters for stacked PRs.
       const chosen = await chosenBase(project, name);
       const prBase = pr && !chosen ? await firstRef(root, [gh.baseRef(pr.baseRefName), `origin/${pr.baseRefName}`, pr.baseRefName]) : null;
-      const { ref: baseRef, ahead } = await this.pickBase(root, name, chosen ? [chosen] : prBase ? [prBase] : [match?.origin.originalBranch, project.baseBranch, ...exclude]);
+      const { ref: baseRef, ahead } = await g.pickBase(root, name, chosen ? [chosen] : prBase ? [prBase] : baseCandidates(name, [match?.origin.originalBranch, project.baseBranch, ...exclude]));
       const headSha = (await g.git(['rev-parse', name], root)).trim();
       const dirty = checkout.kind === 'none' ? 0 : (await g.dirtyFiles(checkout.path)).length;
       if (!ahead && !dirty) {
@@ -538,20 +589,6 @@ export class Projects {
     return out;
   }
 
-  /**
-   * The integration branch this branch was cut from: the candidate it has the fewest
-   * commits on top of. Ties go to the earlier candidate (session origin, then project base).
-   */
-  private async pickBase(root: string, branch: string, candidates: (string | null | undefined)[]): Promise<{ ref: string; ahead: number }> {
-    let best: { ref: string; ahead: number } | null = null;
-    for (const ref of new Set(candidates.filter((c): c is string => !!c && c !== branch))) {
-      const n = (await g.tryGit(['rev-list', '--count', `${ref}..${branch}`], root))?.trim();
-      if (n === undefined || n === '') continue;
-      if (!best || Number(n) < best.ahead) best = { ref, ahead: Number(n) };
-    }
-    return best ?? { ref: candidates.find(Boolean)!, ahead: 0 };
-  }
-
   /** The branch's own walkthrough wins. Without one, the walkthrough Hunkdory wrote, if any. */
   private async readWalkthrough(d: Discovered, root: string, baseSha: string): Promise<{ value: unknown | null; text: string; source: Exclude<WalkthroughSource, 'skeleton'>; error?: string }> {
     let text: string | null = null;
@@ -600,7 +637,10 @@ export class Projects {
 
   async find(projectId: string, branch: string): Promise<{ project: Project; d: Discovered }> {
     const project = this.store.project(projectId);
-    const d = (await this.discover(project, branch)).items.find((x) => x.branch.name === branch);
+    const { items, scan } = await this.discover(project, branch);
+    const d = items.find((x) => x.branch.name === branch);
+    // GitHub couldn't be read, such as gh being signed out: that says more than guessing the branch is gone.
+    if (!d && scan.error) throw new Error(`Couldn't read ${branch}: ${scan.error}`);
     if (!d) throw new Error(`Branch ${branch} has nothing left to review. It may have been merged or deleted.`);
     return { project, d };
   }
@@ -716,7 +756,14 @@ export class Projects {
       });
     }
     await gh.pushBranch(project.path, project.github, pr.headRefName);
-    gh.forget(project.github);
+    // GitHub's list can lag behind a push for a moment: wait for it, or the plan goes on saying the commits aren't on the PR.
+    const pushed = (await g.git(['rev-parse', 'HEAD'], wt)).trim();
+    for (let i = 0; i < 6; i++) {
+      gh.forget(project.github);
+      const now = await gh.openPullRequests(project.path, project.github).catch(() => []);
+      if (now.find((p) => p.number === pr.number)?.headRefOid === pushed) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
     this.cache.delete(`${project.id}::${pr.headRefName}`);
     return files ? `Committed ${files} file${files === 1 ? '' : 's'} and pushed to PR #${pr.number}.` : `Pushed the commits on this Mac to PR #${pr.number}.`;
   }
@@ -843,14 +890,16 @@ export class Projects {
     const p = d.branch.pr;
     const prKey = p ? JSON.stringify([p.number, p.headRefOid, p.baseRefName, p.title, p.author, p.copilot]) : '';
     const hit = this.cache.get(cacheId);
+    // A fetch moves origin without moving this diff, so this is taken fresh too.
+    const behind = lines ? await g.staleBase(root, d.branch) : null;
     // The stack holds your reviews of the other PRs in it, and GitHub holds what others said: both change while
     // this diff doesn't, so they're taken fresh. The inbox (no lines) has no use for the comments.
-    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p, stack: await this.stack(project, d), ...(lines ? await this.fromGitHub(project, d, hit.data.prompt) : {}) };
+    if (!refresh && hit?.key === key && hit.pr === prKey && (hit.full || !lines)) return { ...hit.data, pr: p, staleBase: behind, stack: await this.stack(project, d), ...(lines ? await this.fromGitHub(project, d, hit.data.prompt) : {}) };
 
     const out = await runner.run({ cwd, baseSha, head: inTree ? null : d.branch.headRef, walkthrough: wt.value, lines });
     const r = out.result;
     const source: WalkthroughSource = out.source === 'skeleton' ? 'skeleton' : wt.source;
-    const steps = buildSteps(r, source);
+    const steps = buildSteps(r, source, source === 'reviewer' ? (wt.value as { stepKeys?: Record<string, string> }).stepKeys : undefined);
     const flags = attention(r, steps, source);
     if (wt.error) flags.unshift({ severity: 'medium', title: 'Walkthrough unreadable', detail: wt.error, stepKey: null });
 
@@ -925,6 +974,7 @@ export class Projects {
       branch: d.branch.name,
       baseRef: d.branch.baseName,
       baseChosen: d.branch.baseChosen,
+      staleBase: behind,
       baseSha,
       head: r.head,
       pr: d.branch.pr,
