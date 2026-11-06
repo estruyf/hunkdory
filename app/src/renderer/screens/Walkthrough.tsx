@@ -262,14 +262,14 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
     }
   };
 
-  const segs = (list: Step[]) => list.map((s) => ({ key: s.key, title: `Step ${s.index + 1}: ${s.title}`, done: isReviewed(s, state.reviewed), current: !dec && s.key === cur?.key, onClick: () => select(s.key) }));
+  const segs = (list: Step[]) => list.map((s) => ({ key: s.key, title: `Step ${s.index + 1}: ${s.title}`, done: isReviewed(s, state.reviewed), needsFix: false, current: !dec && s.key === cur?.key, onClick: () => select(s.key) }));
   const firstOf = (list: Step[]) => list.find((s) => !isReviewed(s, state.reviewed)) ?? list[0];
   const phases = story ? [{ label: 'The story', now: !!cur, onClick: () => select(firstOf(steps).key), segments: segs(steps) }] : [
     {
       label: 'Decide',
       now: !!dec,
       onClick: () => decide(plan.decisions.find((d) => !state.settled?.[d.id]) ?? plan.decisions[0]),
-      segments: plan.decisions.map((d) => ({ key: d.id, title: d.title, done: !!state.settled?.[d.id], current: d.id === dec?.id, onClick: () => decide(d) })),
+      segments: plan.decisions.map((d) => ({ key: d.id, title: d.title, done: !!state.settled?.[d.id], needsFix: state.settled?.[d.id] === 'fix', current: d.id === dec?.id, onClick: () => decide(d) })),
     },
     { label: 'Read closely', now: !dec && careful, onClick: () => select(firstOf(plan.careful).key), segments: segs(plan.careful) },
     { label: 'Skim', now: !dec && !!cur && !careful, onClick: () => select(firstOf(plan.skim).key), segments: segs(plan.skim) },
@@ -299,13 +299,14 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
           <span key={p.label} data-tooltip={`${p.label} · ${done} of ${n} done`} className="flex min-w-0 gap-0.5" style={{ flex: `${Math.max(2, Math.min(n, 12))} 1 60px` }}>
             {n <= 40 ? (
               p.segments.map((x) => (
-                <button key={x.key} type="button" data-tooltip={x.title} aria-label={x.done ? `${x.title}, done` : x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} className="min-w-0 flex-1 py-1">
-                  <span className={`block h-1 rounded-full ${x.done ? 'bg-text' : x.current ? 'bg-text/45 outline-2 outline-offset-1 outline-text' : 'bg-selected'}`} />
+                <button key={x.key} type="button" data-tooltip={x.title} aria-label={x.done ? `${x.title}, done` : x.title} aria-current={x.current ? 'step' : undefined} onClick={x.onClick} className="flex h-3 min-w-0 flex-1 items-center">
+                  {/* The colour is how far it got, the height is where you are: a step you went back to shows both. */}
+                  <span className={`block w-full rounded-full ${x.current ? 'h-1.5' : 'h-1'} ${x.needsFix ? 'bg-text' : x.done ? 'bg-ok' : x.current ? 'bg-faint' : 'bg-selected'}`} />
                 </button>
               ))
             ) : (
               <button type="button" onClick={p.onClick} aria-label={`${p.label}: ${done} of ${n} done`} className="flex-1 py-1">
-                <span className="block h-1 rounded-full" style={{ background: `linear-gradient(to right, var(--sb-text) ${(done / n) * 100}%, var(--sb-selected) 0)` }} />
+                <span className="block h-1 rounded-full" style={{ background: `linear-gradient(to right, var(--sb-ok) ${(done / n) * 100}%, var(--sb-selected) 0)` }} />
               </button>
             )}
           </span>

@@ -1,20 +1,21 @@
 // The review plan, and the way into a review: decide, read closely, skim.
 // Opening a branch lands here. One button starts (or continues) the review where it makes sense.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { Go } from '../App.tsx';
-import { Crumbs, RiskPill, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
+import { Crumbs, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
 import { LoadingPage } from '../components/LoadingPage.tsx';
 import { lastRead, readReview } from '../state/reviewReads.ts';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { buttonClass } from '../components/ui/buttonStyles.ts';
 import { Checkbox } from '../components/ui/Checkbox.tsx';
+import { Dialog } from '../components/ui/Dialog.tsx';
 import { Kbd } from '../components/ui/Kbd.tsx';
 import { Notice } from '../components/ui/Notice.tsx';
 import { Pill } from '../components/ui/Pill.tsx';
 import { SectionHeader } from '../components/ui/SectionHeader.tsx';
-import { SegmentedControl } from '../components/ui/SegmentedControl.tsx';
 import { Select } from '../components/ui/Select.tsx';
+import { TextButton } from '../components/ui/TextButton.tsx';
 import { matches } from '../lib/shortcuts.ts';
 import { useOnReturn, useTabActive } from '../state/tabPane.ts';
 import { PrLink, PushToPrNotice, StackBar, checksText, checksTone } from '../components/github.tsx';
@@ -28,11 +29,12 @@ import { RunLogDialog } from '../components/runLog.tsx';
 import type { LineRef } from '../components/diff.tsx';
 import { AiReviewCard, FindingsPill, openFindingsIn } from '../components/aiReview.tsx';
 import { ChangeOverview, RequestedList } from '../components/understand.tsx';
-import { WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
+import { WalkthroughLine, WalkthroughNotice, useWalkthroughJob } from '../components/walkthrough.tsx';
 import { RunningWork } from '../components/RunningWork.tsx';
 import { sinceLastRound } from '../../shared/rounds.ts';
+import { usageNote } from '../../shared/assistantText.ts';
 import { OUTSIDE_HINT, RISK_LABEL, formatDuration, isReviewed, timeAgo, tooBig } from '../../shared/order.ts';
-import { buildPlan, decisionLabels, planProgress, resumePoint, settleComment, storyResume, type PlanDecision } from '../../shared/plan.ts';
+import { buildPlan, decisionLabels, fileNames, planProgress, resumePoint, settleComment, stepsLabel, storyResume, type PlanDecision } from '../../shared/plan.ts';
 import type { ReviewData, ReviewOrder, ReviewPatch, ReviewState, Step } from '../../shared/types.ts';
 
 const ORDERS: { id: ReviewOrder; label: string }[] = [
@@ -98,11 +100,9 @@ function BasePicker({ data, onChanged, onError }: { data: ReviewData; onChanged:
   );
 }
 
-/** Uncommitted edits in the branch's folder: review them on their own, or go back to the whole branch. */
-function UncommittedNotice({ data, onChanged, onError }: { data: ReviewData; onChanged: () => void; onError: (message: string | null) => void }) {
+/** Changes what the review compares against, and nothing in git. */
+function useSetBase(data: ReviewData, onChanged: () => void, onError: (message: string | null) => void) {
   const [busy, setBusy] = useState(false);
-  if (!data.dirty || data.pr || (data.uncommitted && !data.baseChosen)) return null;
-  const files = plural(data.dirtyFiles, 'file');
   const set = async (base: string | null) => {
     setBusy(true);
     try {
@@ -114,41 +114,79 @@ function UncommittedNotice({ data, onChanged, onError }: { data: ReviewData; onC
       setBusy(false);
     }
   };
-  return data.uncommitted ? (
-    <Notice
-      tone="info"
-      role="note"
-      actions={
-        <Button size="sm" disabled={busy} onClick={() => set(null)}>
-          Include its commits
-        </Button>
-      }
-    >
-      <strong className="font-semibold">Only the uncommitted changes.</strong> You're reviewing the {files} on <span className="font-mono">{data.branch}</span> that aren't committed yet, against its last commit.
-    </Notice>
-  ) : (
-    <Notice
-      tone="info"
-      role="note"
-      actions={
-        <Button size="sm" disabled={busy} onClick={() => set(data.branch)}>
-          Review only the uncommitted changes
-        </Button>
-      }
-    >
-      <strong className="font-semibold">{files} on <span className="font-mono">{data.branch}</span> {data.dirtyFiles === 1 ? "isn't" : "aren't"} committed yet.</strong> They're part of this review, on top of its commits.
-    </Notice>
+  return { busy, set };
+}
+
+/** The base you picked is a local branch behind origin: its commits read as this branch's. */
+function StaleBaseLine({ data, onChanged, onError }: { data: ReviewData; onChanged: () => void; onError: (message: string | null) => void }) {
+  const { busy, set } = useSetBase(data, onChanged, onError);
+  if (!data.staleBase) return null;
+  const { remote, commits } = data.staleBase;
+  return (
+    <p className="m-0">
+      <strong className="font-semibold">{plural(commits, 'commit')} in this review {commits === 1 ? 'is' : 'are'} already on <span className="font-mono">{remote}</span>.</strong> Your local <span className="font-mono">{data.baseRef}</span> is behind, so {commits === 1 ? 'it counts' : 'they count'} as part of this branch.{' '}
+      <TextButton disabled={busy} onClick={() => set(remote)}>
+        Compare with <span className="font-mono">{remote}</span>
+      </TextButton>
+    </p>
   );
 }
 
-const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
-const count = (n: number) => words[n] ?? String(n);
+/** More than one sitting takes in: split it, or read it over several. */
+function TooBigLine({ data }: { data: ReviewData }) {
+  const [copied, setCopied] = useState(false);
+  if (!tooBig({ minutes: data.minutes, steps: data.steps.length })) return null;
+  return (
+    <p className="m-0">
+      <strong className="font-semibold">About {formatDuration(data.minutes)} of reading.</strong> Smaller branches get a better review.{' '}
+      <TextButton
+        onClick={async () => {
+          await navigator.clipboard.writeText(splitRequest(data.branch, data.steps.length, formatDuration(data.minutes)));
+          setCopied(true);
+        }}
+      >
+        {copied ? 'Copied' : 'Copy a request to split it'}
+      </TextButton>
+      {copied ? ' (paste it into the agent’s session)' : ''}, or read it over several sittings: Hunkdory keeps your place.
+    </p>
+  );
+}
 
-function headline(decisions: number, careful: number, skim: number) {
-  if (decisions && careful) return `${count(decisions)} ${decisions === 1 ? 'decision' : 'decisions'}, then ${careful === 1 ? 'one step' : `${careful} steps`} to read closely`;
-  if (decisions) return `${count(decisions)} ${decisions === 1 ? 'decision' : 'decisions'}, then a quick skim`;
-  if (careful) return `${careful === 1 ? 'One step' : `${careful} steps`} to read closely${skim ? ', then a quick skim' : ''}`;
-  return 'Low risk all round: a quick skim';
+/** Uncommitted edits in the branch's folder: review them on their own, or go back to the whole branch. */
+function UncommittedLine({ data, onChanged, onError }: { data: ReviewData; onChanged: () => void; onError: (message: string | null) => void }) {
+  const { busy, set } = useSetBase(data, onChanged, onError);
+  if (!data.dirty || data.pr || (data.uncommitted && !data.baseChosen)) return null;
+  const files = plural(data.dirtyFiles, 'file');
+  const one = data.dirtyFiles === 1;
+  return data.uncommitted ? (
+    <p className="m-0">
+      <strong className="font-semibold">Only the uncommitted changes.</strong> You’re reviewing the {files} on <span className="font-mono">{data.branch}</span> that {one ? 'isn’t' : 'aren’t'} committed yet, against its last commit.{' '}
+      <TextButton disabled={busy} onClick={() => set(null)}>
+        Include its commits
+      </TextButton>
+    </p>
+  ) : (
+    <p className="m-0">
+      <strong className="font-semibold">{files} {one ? 'isn’t' : 'aren’t'} committed yet.</strong> {one ? 'It’s' : 'They’re'} part of this review, on top of the commits.{' '}
+      <TextButton disabled={busy} onClick={() => set(data.branch)}>
+        Review only {one ? 'that' : 'those'}
+      </TextButton>
+    </p>
+  );
+}
+
+/** How the steps are ordered: the current one as plain text, the others to pick. */
+function OrderPicker({ value, onChange }: { value: ReviewOrder; onChange: (order: ReviewOrder) => void }) {
+  return (
+    <span role="group" aria-label="Order" className="text-ui text-muted">
+      {ORDERS.map((o, i) => (
+        <Fragment key={o.id}>
+          {i > 0 && ' · '}
+          {o.id === value ? <span aria-current="true">{o.label}</span> : <TextButton onClick={() => onChange(o.id)}>{o.label}</TextButton>}
+        </Fragment>
+      ))}
+    </span>
+  );
 }
 
 function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewData; initialState: ReviewState; onReload: () => void }) {
@@ -158,7 +196,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
   const [error, setError] = useState<string | null>(null);
   const [allCareful, setAllCareful] = useState(false);
   const [skipSeen, setSkipSeen] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [howItWorks, setHowItWorks] = useState(false);
   const plan = useMemo(() => buildPlan(data, state), [data, state.order, state.aiReview]);
   const progress = planProgress(plan, state);
   // What people said on GitHub. Replying or resolving here changes it without reading the branch again.
@@ -296,6 +334,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
   };
 
   const carefulShown = allCareful ? plan.careful : plan.careful.slice(0, 8);
+  const oneFileEach = plan.careful.every((s) => s.files.length === 1);
   const minutesFor = (n: number) => Math.max(1, Math.round((data.minutes * n) / Math.max(1, data.steps.length)));
 
   return (
@@ -314,8 +353,8 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
       {search.panel}
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7 pb-14">
-          <div className="flex flex-col gap-2">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-7 pb-14">
+          <div className="flex flex-col gap-2.5">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-faint">
               <span className="flex min-w-0 items-baseline gap-1 font-mono">
                 {/* The branch is what you're reviewing: it stands out from the grey line around it. */}
@@ -346,48 +385,45 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                           : 'No agent session found'}
               </span>
               {data.session && data.sessionProbable && (
-                <button
-                  type="button"
-                  className="text-link hover:underline"
+                <TextButton
                   onClick={async () => {
                     await window.api.unlinkSession(data.projectId, data.session!.id, true);
                     onReload();
                   }}
                 >
                   Not this session? Unlink
-                </button>
+                </TextButton>
               )}
               {data.pr && data.pr.checks.length > 0 && <Pill tone={checksTone(data.pr.checks)}>CI: {checksText(data.pr.checks)}</Pill>}
             </span>
             {/* The story first: what this change is, in words, before how much of it there is. */}
             <h1 className="text-hero font-semibold break-words">{data.title}</h1>
-            {data.intent ? <p className="text-body select-text">{data.intent}</p> : !nothing && <p className="text-body text-muted">{data.walkthrough === 'skeleton' ? 'No walkthrough yet, so there is no story to tell: the steps are one per file.' : 'The walkthrough has no summary.'}</p>}
+            {data.intent ? <p className="text-body select-text">{data.intent}</p> : !nothing && data.walkthrough !== 'skeleton' && <p className="text-body text-muted">The walkthrough has no summary.</p>}
+            {!nothing && (
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <Button variant="primary" size="lg" shortcut={allDone ? 'review.finish' : 'plan.start'} onClick={primary}>
+                  {primaryLabel}
+                </Button>
+                {story && resume && (plan.decisions.length > 0 || data.steps.length > 1) && (
+                  <Button size="lg" onClick={go1}>
+                    Start with what needs me
+                  </Button>
+                )}
+                {data.walkthrough === 'skeleton' && data.assistant && !writing && !w.asking && (
+                  <>
+                    <Button size="lg" onClick={w.write}>
+                      {w.failed ? 'Try again' : 'Write a walkthrough'}
+                    </Button>
+                    <span className="text-meta text-faint">{usageNote(data.assistant)}</span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
-          {nothing ? (
+          {nothing && (
             <Notice tone="neutral" actions={<Button size="sm" onClick={toFinish}>Close this review</Button>}>
               <strong className="font-semibold text-text">There's nothing to review here.</strong> This branch has no changes compared with <span className="font-mono">{data.baseRef}</span>: it may be merged already, or its commits cancel each other out.
             </Notice>
-          ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button variant="primary" size="lg" shortcut={allDone ? 'review.finish' : 'plan.start'} onClick={primary}>
-                {primaryLabel}
-              </Button>
-              {story && resume && (plan.decisions.length > 0 || data.steps.length > 1) && (
-                <Button size="lg" onClick={go1}>
-                  Start with what needs me
-                </Button>
-              )}
-              <span className="flex items-center gap-1.5 text-meta text-faint">
-                <Kbd shortcut="shortcuts" /> every shortcut
-              </span>
-            </div>
-            <p className="text-ui text-muted">
-              {allDone
-                ? 'You made every decision and looked at every step. Finish to merge, send it back, or post your review.'
-                : `${headline(plan.decisions.length, plan.careful.length, plan.skim.length)}. ${story ? (data.steps.length > 1 ? `The story goes through all ${data.steps.length} steps in order; what needs you first starts with what only you can decide.` : '') : plan.skim.length ? 'The low-risk rest is grouped by folder so you can skim it.' : ''}`}
-            </p>
-          </div>
           )}
 
           <SendBackStatus data={data} state={state} onFinish={toFinish} />
@@ -412,12 +448,13 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
             </Notice>
           )}
 
-          {!nothing && data.walkthrough === 'skeleton' && (
-            <div ref={walkthroughCard} className="empty:hidden">
-              <WalkthroughNotice data={data} w={w} />
-            </div>
-          )}
-          <UncommittedNotice data={data} onChanged={onReload} onError={setError} />
+          {/* What to know before you start, in one place. Each line takes itself out, and with none left so does the block. */}
+          <section ref={data.walkthrough === 'skeleton' ? walkthroughCard : undefined} aria-label="Before you start" className="flex flex-col gap-1.5 border-l-[3px] border-caution pl-3 text-body empty:hidden">
+            <StaleBaseLine data={data} onChanged={onReload} onError={setError} />
+            {!nothing && data.walkthrough === 'skeleton' && <WalkthroughLine data={data} w={w} />}
+            {!nothing && <TooBigLine data={data} />}
+            <UncommittedLine data={data} onChanged={onReload} onError={setError} />
+          </section>
           <PushToPrNotice data={data} onPushed={onReload} />
           {data.stack && <StackBar data={data} go={go} />}
 
@@ -431,28 +468,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
             </div>
           )}
 
-          {tooBig({ minutes: data.minutes, steps: data.steps.length }) && (
-            <Notice
-              tone="caution"
-              role="note"
-              actions={
-                <Button
-                  size="sm"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(splitRequest(data.branch, data.steps.length, formatDuration(data.minutes)));
-                    setCopied(true);
-                  }}
-                >
-                  {copied ? 'Copied' : 'Copy a request to split it'}
-                </Button>
-              }
-            >
-              <strong className="font-semibold">Too big for one sitting.</strong> About {formatDuration(data.minutes)} of reading. Smaller branches get a better review: ask the agent to split it{copied ? ' (paste the request into its session)' : ''}. Or take it over
-              several sittings: Hunkdory keeps your place.{!data.baseChosen && !data.uncommitted && <> More than you expected? Check the branch it compares against, next to the branch name above.</>}
-            </Notice>
-          )}
-
-          <HowItWorks data={data} />
+          <HowItWorksOnce data={data} />
           <div ref={aiReviewCard} className="empty:hidden">
             <AiReviewCard
               data={data}
@@ -504,8 +520,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
               title="Read closely"
               count={plan.careful.length}
               meta={`${progress.carefulDone} reviewed · about ${minutesFor(plan.careful.length)} min`}
-              hint="Steps that need attention, or that you didn’t ask for. Read the code."
-              action={<SegmentedControl<ReviewOrder> mode="radio" label="Order" size="sm" value={state.order} onChange={(order) => patch({ type: 'order', order })} segments={ORDERS.map((o) => ({ value: o.id, label: o.label }))} />}
+              action={<OrderPicker value={state.order} onChange={(order) => patch({ type: 'order', order })} />}
             >
               <ul className="m-0 flex list-none flex-col gap-px p-0">
                 {carefulShown.map((s) => {
@@ -516,18 +531,19 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                     <li key={s.key}>
                       <button type="button" onClick={() => open(s)} className="group flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg px-2.5 py-2 text-left hover:bg-border/45">
                         <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${done ? 'bg-text' : 'border-2 border-faint'}`} />
-                        <span className={`min-w-0 flex-[1_1_320px] text-body break-words ${done ? 'text-muted' : 'text-text'}`}>{s.title}</span>
+                        {/* Without a walkthrough a step's title is its file's path. */}
+                        <span className={`min-w-0 flex-[1_1_320px] ${s.source === 'skeleton' ? 'font-mono text-ui [overflow-wrap:anywhere]' : 'text-body break-words'} ${done ? 'text-muted' : 'text-text'}`}>{s.title}</span>
                         {changed && changed !== 'same' && <Pill tone="link">{changed === 'new' ? 'New' : 'Changed'}</Pill>}
                         {threads > 0 && (
                           <Pill tone="link" icon={<MessageSquare size={12} aria-hidden />} data-tooltip={`${plural(threads, 'open comment')} on GitHub`}>
                             {threads}
                           </Pill>
                         )}
-                        <RiskPill risk={s.risk} />
+                        <span className="text-meta text-muted">{RISK_LABEL[s.risk]}</span>
                         {s.outsideTask && <Pill data-tooltip={OUTSIDE_HINT}>Outside your request</Pill>}
                         {s.noTestChange && <Pill tone="muted" data-tooltip={NO_TEST_HINT}>No test changed</Pill>}
                         <FindingsPill data={data} state={state} step={s} />
-                        <span className="w-14 text-right text-meta text-faint">{plural(s.files.length, 'file')}</span>
+                        {!oneFileEach && <span className="w-14 text-right text-meta text-faint">{plural(s.files.length, 'file')}</span>}
                         <span className={`w-20 text-right text-ui ${done ? 'text-muted' : 'text-link opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}>{done ? 'Reviewed' : 'Review →'}</span>
                       </button>
                     </li>
@@ -549,28 +565,37 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
               meta={`${progress.skimDone} reviewed · about ${minutesFor(plan.skim.length)} min`}
               hint="Low-risk steps, grouped by folder. Open a folder to see all of it on one page, then mark it reviewed in one go."
             >
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2.5">
+              <ul className="m-0 flex list-none flex-col gap-1 p-0">
                 {plan.skimGroups.map((g) => {
                   const done = g.steps.filter((s) => isReviewed(s, state.reviewed)).length;
                   const threads = openThreadsIn(g.steps);
                   const findings = g.steps.reduce((n, s) => n + openFindingsIn(data, state, s).length, 0);
                   return (
-                    <div key={g.name} className="flex flex-col gap-1 rounded-lg border border-border p-3">
-                      <span className="font-mono text-ui font-semibold break-all">{g.name}</span>
+                    <li key={g.name} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2.5 py-1">
+                      <span className="min-w-0 flex-[1_1_240px] font-mono text-ui [overflow-wrap:anywhere]">{g.name}</span>
                       <span className="text-meta text-faint">
                         {plural(g.steps.length, 'step')} · {plural(g.files, 'file')}
                         {done && done < g.steps.length ? ` · ${done} reviewed` : ''}
                         {threads ? ` · ${plural(threads, 'comment')} on GitHub` : ''}
                         {findings ? ` · ${plural(findings, 'AI finding')}` : ''}
                       </span>
-                      <Button size="sm" className="mt-1 self-start" onClick={() => enter({ group: g.name })}>
+                      <Button size="sm" onClick={() => enter({ group: g.name })}>
                         {done === g.steps.length ? 'Reviewed ✓' : 'Skim folder'}
                       </Button>
-                    </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             </Phase>
+          )}
+
+          <p className="m-0 flex flex-wrap items-center gap-x-1 text-meta text-faint">
+            New here? <TextButton onClick={() => setHowItWorks(true)}>How a review works</TextButton> · <Kbd shortcut="shortcuts" /> every shortcut
+          </p>
+          {howItWorks && (
+            <Dialog title="How a review works" onClose={() => setHowItWorks(false)}>
+              <HowItWorksList data={data} />
+            </Dialog>
           )}
           </>
           )}
@@ -591,10 +616,7 @@ function splitRequest(branch: string, steps: number, time: string) {
   ].join(' ');
 }
 
-/** A first-run explainer of the review flow. Dismissed once, for good (Settings brings it back). */
-function HowItWorks({ data }: { data: ReviewData }) {
-  const [show, setShow] = usePref<boolean>('plan-how-it-works', true);
-  if (!show) return null;
+function HowItWorksList({ data }: { data: ReviewData }) {
   const name = data.assistant?.name;
   const items = [
     ['Read the story', `Each step explains one part in plain words, in order.${name ? ` Ask ${name} about anything that isn’t clear, or have it make a change, right there on the step.` : ''}`],
@@ -603,15 +625,30 @@ function HowItWorks({ data }: { data: ReviewData }) {
     ['Finish', name ? 'Merge, post your review on GitHub, or send your comments back to the agent.' : 'Merge, or post your review on GitHub.'],
   ];
   return (
+    <ul className="m-0 flex list-disc flex-col gap-0.5 pl-5">
+      {items.map(([t, d]) => (
+        <li key={t}>
+          <strong className="font-semibold">{t}.</strong> {d}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The explainer on your first plan, that one time (Settings brings it back). After that it's the link at the bottom of the page. */
+function HowItWorksOnce({ data }: { data: ReviewData }) {
+  const [unseen, setUnseen] = usePref<boolean>('plan-how-it-works', true);
+  const [show, setShow] = useState(unseen);
+  useEffect(() => {
+    if (unseen) setUnseen(false);
+  }, []);
+  if (!show) return null;
+  return (
     <Notice tone="info" onDismiss={() => setShow(false)} aria-label="How a review works">
       <strong className="font-semibold">How a review works</strong>
-      <ul className="m-0 mt-1 flex list-disc flex-col gap-0.5 pl-5">
-        {items.map(([t, d]) => (
-          <li key={t}>
-            <strong className="font-semibold">{t}.</strong> {d}
-          </li>
-        ))}
-      </ul>
+      <div className="mt-1">
+        <HowItWorksList data={data} />
+      </div>
     </Notice>
   );
 }
@@ -675,19 +712,19 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
     </>
   );
   return (
-    <section aria-label="The change" className="grid grid-cols-[minmax(96px,max-content)_1fr] gap-x-4 gap-y-3 rounded-xl border border-border bg-card p-4">
+    <section aria-label="The change" className="grid grid-cols-[minmax(96px,max-content)_minmax(0,1fr)] gap-x-5 gap-y-2.5 border-t border-border pt-5">
       {data.background && row('To know first', <div className="select-text"><Markdown text={data.background} /></div>)}
-      {row(askedLabel(data), <AskedFor data={data} clamp={240} />)}
-      {hasLinkedIssues(data) && row('Linked issues', <LinkedIssues data={data} clamp={240} />)}
+      {row(askedLabel(data), <AskedFor data={data} clamp={240} plain />)}
+      {hasLinkedIssues(data) && row('Linked issues', <LinkedIssues data={data} clamp={240} plain />)}
       {data.requested.length > 0 && row('Asked vs found', <RequestedList data={data} onOpen={onOpen} />)}
       {row(
         'It also did',
         outside.length ? (
           <span className="flex flex-col items-start gap-1">
             {outside.map((s) => (
-              <button key={s.key} type="button" className="max-w-full text-left break-words text-link hover:underline" onClick={() => onOpen(s)}>
+              <TextButton key={s.key} className="max-w-full break-words" onClick={() => onOpen(s)}>
                 Step {s.index + 1}: {s.title} ({plural(s.files.length, 'file')}) →
-              </button>
+              </TextButton>
             ))}
           </span>
         ) : (
@@ -702,18 +739,18 @@ function RequestCard({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) 
 /** "You asked" for a prompt, "The PR says" for a PR description: the same words on every screen. */
 export const askedLabel = (data: Pick<ReviewData, 'prompt' | 'pr'>) => (data.prompt ? 'You asked' : data.pr ? 'The PR says' : 'The request');
 
-function Phase({ title, count, hint, meta, action, children }: { title: string; count: number; hint: string; meta: string; action?: React.ReactNode; children: React.ReactNode }) {
+function Phase({ title, count, hint, meta, action, children }: { title: string; count: number; hint?: string; meta: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex flex-col gap-2.5 border-t border-border pt-5">
       <div className="flex flex-col gap-0.5">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <SectionHeader as="h2" count={count}>
             {title}
           </SectionHeader>
-          <span className="flex-1 text-meta text-faint">{meta}</span>
+          <span className="min-w-0 flex-[1_1_200px] text-meta text-faint">{meta}</span>
           {action}
         </div>
-        <p className="text-ui text-muted">{hint}</p>
+        {hint && <p className="text-ui text-muted">{hint}</p>}
       </div>
       {children}
     </section>
@@ -729,29 +766,33 @@ function DecisionCard({ d, steps, value, onSettle, onShow, onCi }: { d: PlanDeci
   const stepOf = (key: string) => steps.find((s) => s.key === key);
   // You can only judge what you've seen: with steps to look at, the decision is made there, next to the code.
   const first = d.stepKeys.map(stepOf).find(Boolean);
-  const single = d.stepKeys.length === 1 && first;
+  const single = d.stepKeys.length === 1 && d.stepIndexes.length <= 1 && first;
+  const moreToShow = d.stepKeys.length > 1 || d.files.length > 2 || (d.kind === 'flag' && d.places.length > 1);
   return (
     <article className={`flex flex-col gap-2 rounded-xl border border-border bg-card p-4 ${value ? 'opacity-70' : ''}`}>
-      <Pill tone={d.kind === 'ci' ? 'error' : d.severity === 'high' ? 'caution' : 'default'} className="self-start" data-tooltip={d.kind === 'outside' ? OUTSIDE_HINT : undefined}>
+      <Pill tone={d.kind === 'ci' ? 'error' : 'default'} className="self-start" data-tooltip={d.kind === 'outside' ? OUTSIDE_HINT : undefined}>
         {tag(d)}
       </Pill>
-      <h3 className="m-0 text-body font-semibold break-words">{d.title}</h3>
-      <p className="text-ui break-words text-muted">{d.detail}</p>
-      {/* Without a walkthrough the step is named after its file, which the detail already says. */}
-      {single && !d.detail.includes(single.title) && (
+      <h3 className="m-0 text-title font-semibold break-words">{d.title}</h3>
+      {d.note && <p className="text-ui break-words text-muted">{d.note}</p>}
+      {d.files.length > 0 && <span className="font-mono text-ui text-muted [overflow-wrap:anywhere]">{fileNames(d.files)}</span>}
+      {/* Without a walkthrough a step is named after its file, which the line above already says. */}
+      {single && first.source !== 'skeleton' ? (
         <span className="text-ui break-words text-muted">
-          Step {single.index + 1}: {single.title}
+          Step {first.index + 1}: {first.title}
         </span>
+      ) : (
+        (d.stepIndexes.length > 0 || single) && <span className="text-ui text-muted">{stepsLabel(d.stepIndexes.length ? d.stepIndexes : [first!.index])}</span>
       )}
-      {(d.stepKeys.length > 1 || d.places.length > 1 || d.files.length > 0) && (
+      {moreToShow && (
         <div className="flex flex-col gap-1">
-          {!single &&
-            d.stepKeys.slice(0, details ? undefined : 2).map((k) => {
+          {details &&
+            d.stepKeys.map((k) => {
               const s = stepOf(k);
               return s ? (
-                <button key={k} type="button" className="text-left text-ui break-words text-link hover:underline" onClick={() => onShow(k)}>
+                <TextButton key={k} className="text-ui break-words" onClick={() => onShow(k)}>
                   Step {s.index + 1}: {s.title} →
-                </button>
+                </TextButton>
               ) : null;
             })}
           {details && d.files.length > 0 && (
@@ -772,11 +813,9 @@ function DecisionCard({ d, steps, value, onSettle, onShow, onCi }: { d: PlanDeci
               ))}
             </ul>
           )}
-          {(d.stepKeys.length > 2 || d.files.length > 0 || (d.kind === 'flag' && d.places.length > 1)) && (
-            <button type="button" className="self-start text-meta text-link hover:underline" onClick={() => setDetails(!details)}>
-              {details ? 'Show less' : d.files.length ? `Show the ${plural(d.files.length, 'file')}` : 'Show every place'}
-            </button>
-          )}
+          <TextButton className="self-start text-meta" onClick={() => setDetails(!details)}>
+            {details ? 'Show less' : d.files.length > 2 ? `Show the ${plural(d.files.length, 'file')}` : 'Show every place'}
+          </TextButton>
         </div>
       )}
       <div className="flex-1" />
@@ -793,9 +832,8 @@ function DecisionCard({ d, steps, value, onSettle, onShow, onCi }: { d: PlanDeci
           )}
         </div>
       ) : first ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => onShow(first.key)}>{single ? 'Look at the change' : `Start at step ${first.index + 1}`}</Button>
-          <span className="text-meta text-faint">You decide there, next to the code.</span>
+        <div>
+          <Button onClick={() => onShow(first.key)}>Look at the change</Button>
         </div>
       ) : (
         <div className="flex flex-wrap gap-2">

@@ -74,7 +74,7 @@ function FindingRow({ item, open, onToggle, onShow, act }: { item: PlacedFinding
         </button>
       </div>
       {open && (
-        <div className="mb-2.5 ml-8 flex flex-col gap-2.5 rounded-lg bg-border/45 px-3 py-2.5">
+        <div className="mb-2.5 ml-8 flex flex-col gap-2.5 px-2.5 py-1">
           <div className="flex flex-col gap-0.5">
             <span className="text-meta font-semibold tracking-wider text-faint uppercase">How it fails</span>
             <div className="text-body break-words select-text">
@@ -150,7 +150,7 @@ export function AiReviewCard({ data, state, act, onOpen, onSettings }: { data: R
   );
 
   return (
-    <section aria-label="AI review" className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-4">
+    <section aria-label="AI review" className="flex flex-col gap-2.5 border-t border-border pt-5">
       {!result && !running && (
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex min-w-0 flex-[1_1_360px] flex-col gap-0.5">
@@ -165,7 +165,7 @@ export function AiReviewCard({ data, state, act, onOpen, onSettings }: { data: R
               </button>
             </span>
           </div>
-          <Button size="lg" disabled={!canRun} onClick={run}>
+          <Button disabled={!canRun} onClick={run}>
             Run AI review
           </Button>
         </div>

@@ -483,6 +483,8 @@ export interface AttentionFlag {
   title: string;
   detail: string;
   stepKey: string | null;
+  /** What `detail` says in one sentence, in parts, when it's about places in the diff: every file, every step (by index), and why. */
+  where?: { files: string[]; steps: number[]; reason: string | null };
 }
 
 export interface ReviewData {

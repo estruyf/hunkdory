@@ -227,7 +227,7 @@ export function ChangeOverview({ data, onOpen }: { data: ReviewData; onOpen: (st
   const changesShown = allChanges ? changes : changes.slice(0, CHANGES_SHOWN);
   const tab = tabs.some((t) => t.value === picked) ? picked! : tabs[0].value;
   return (
-    <section aria-label="Understand the change" className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+    <section aria-label="Understand the change" className="flex flex-col gap-3 border-t border-border pt-5">
       {tabs.length > 1 ? (
         <SegmentedControl<Tab> mode="radio" label="View" size="sm" className="self-start" value={tab} onChange={setPicked} segments={tabs} />
       ) : (

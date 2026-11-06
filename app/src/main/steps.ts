@@ -178,6 +178,7 @@ export function attention(r: WtvResult, steps: Step[], source: WalkthroughSource
       title: g.label,
       detail: `${where}${stepNames(ids) ? ` in ${stepNames(ids)}` : ''}.${g.reason ? ` ${g.reason}${g.hunks.length > 1 ? ', first of them' : ''}.` : ''}`,
       stepKey: stepOf(ids[0])?.key ?? null,
+      where: { files, steps: [...new Set(ids.map((id) => stepOf(id)?.index).filter((n): n is number => n !== undefined))].sort((a, b) => a - b), reason: g.reason ? `${g.reason}${g.hunks.length > 1 ? ', first of them' : ''}.` : null },
     });
   }
 

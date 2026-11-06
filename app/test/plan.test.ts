@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDecisions, buildPlan, decisionsForComment, defaultDrops, defaultReviewEvent, openItems, planProgress, resumePoint, settleComment, skimGroups, unpushedWork, vouchesForCode } from '../src/shared/plan.ts';
+import { buildDecisions, buildPlan, decisionsForComment, defaultDrops, defaultReviewEvent, fileNames, openItems, planProgress, resumePoint, settleComment, skimGroups, stepsLabel, unpushedWork, vouchesForCode } from '../src/shared/plan.ts';
 import { addToStepComment, removeFromStepComments } from '../src/shared/comments.ts';
 import { prDescription } from '../src/main/actions.ts';
 import type { AttentionFlag, CheckItem, ReviewState, Step } from '../src/shared/types.ts';
@@ -45,6 +45,33 @@ test('flags of one kind group together, high severity and failing CI first', () 
   assert.deepEqual(d.map((x) => x.kind), ['ci', 'flag', 'flag']);
   assert.equal(d[1].title, 'Auth code changed (2 places)');
   assert.deepEqual(d[1].stepKeys, ['k0', 'k1']);
+});
+
+test('a flag about places in the diff gives its files, steps and reason apart, and every step it names', () => {
+  const where = { files: ['a/b/one.test.ts', 'c/two.test.ts'], steps: [62, 65], reason: 'Matched “assert” on line 3 of one.test.ts, first of them.' };
+  const [d] = buildDecisions([step(62), step(65)], [{ severity: 'medium', title: 'Lost 1 assertion', detail: 'a/b/one.test.ts, c/two.test.ts in steps 63, 66.', stepKey: 'k62', where }], [], true);
+  assert.deepEqual(d.files, where.files);
+  assert.deepEqual(d.stepIndexes, [62, 65]);
+  assert.equal(d.note, where.reason);
+  assert.deepEqual(d.stepKeys, ['k62'], 'where you start stays the same');
+  assert.match(d.detail, /a\/b\/one\.test\.ts/, 'comments still name the paths');
+});
+
+test('a flag without places keeps its detail as the note', () => {
+  const [d] = buildDecisions([], [{ severity: 'medium', title: 'Asked for, but not found', detail: 'Dark mode', stepKey: null }], [], true);
+  assert.equal(d.note, 'Dark mode');
+  assert.deepEqual(d.files, []);
+  assert.deepEqual(d.stepIndexes, []);
+});
+
+test('file names and steps read as a short line', () => {
+  assert.equal(fileNames(['a/b/one.ts']), 'one.ts');
+  assert.equal(fileNames(['a/one.ts', 'b/two.ts']), 'one.ts and two.ts');
+  assert.equal(fileNames(['a/one.ts', 'b/two.ts', 'c/three.ts', 'd/four.ts']), 'one.ts, two.ts and 2 more');
+  assert.equal(stepsLabel([2]), 'Step 3');
+  assert.equal(stepsLabel([62, 65]), 'Steps 63 and 66');
+  assert.equal(stepsLabel([0, 1, 2]), 'Steps 1, 2 and 3');
+  assert.equal(stepsLabel([0, 1, 2, 3, 4, 5]), 'Steps 1, 2, 3, 4 and 2 more');
 });
 
 test('risky and outside steps come first in the walkthrough, then the skim', () => {

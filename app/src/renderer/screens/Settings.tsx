@@ -176,7 +176,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
               Show the Context panel next to a step when the window is wide enough
             </Checkbox>
             <Checkbox checked={howItWorks} onChange={setHowItWorks}>
-              Show “How a review works” on the plan
+              Show “How a review works” on the next plan
             </Checkbox>
           </Card>
 
