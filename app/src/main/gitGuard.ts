@@ -6,6 +6,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
+import { gitPath } from './paths.ts';
 import { shellEnv, which } from './shellEnv.ts';
 
 const quoted = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -58,7 +59,7 @@ function guardFolder(env: NodeJS.ProcessEnv): Promise<string | null> {
     mkdirSync(dir, { recursive: true });
     const file = join(dir, 'git');
     // Git Bash reads C:/Program Files/Git/cmd/git.exe, not its backslashes.
-    writeFileSync(file, gitGuardScript(process.platform === 'win32' ? git.replaceAll('\\', '/') : git));
+    writeFileSync(file, gitGuardScript(gitPath(git)));
     chmodSync(file, 0o755);
     return dir;
   })();

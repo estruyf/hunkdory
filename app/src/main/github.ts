@@ -2,6 +2,7 @@
 // projects where you linked the GitHub remote.
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { gitPath } from './paths.ts';
 import { shellEnv, which } from './shellEnv.ts';
 import * as g from './git.ts';
 import { findRefs } from '../shared/issueRefs.ts';
@@ -238,8 +239,7 @@ async function toGitHub(root: string, repo: string, args: (to: string) => string
     const { bin } = await ghBin();
     // An empty helper first drops the ones from your config, so only gh answers. git runs it with its own sh, which
     // reads a Windows path with `/`.
-    const helper = process.platform === 'win32' ? bin.replaceAll('\\', '/') : bin;
-    await run('git', ['-c', 'credential.helper=', '-c', `credential.helper=!"${helper}" auth git-credential`, ...args(`https://github.com/${repo}.git`)], opts);
+    await run('git', ['-c', 'credential.helper=', '-c', `credential.helper=!"${gitPath(bin)}" auth git-credential`, ...args(`https://github.com/${repo}.git`)], opts);
   }
 }
 

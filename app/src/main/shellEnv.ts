@@ -4,6 +4,7 @@
 import { execFile } from 'node:child_process';
 import { access, constants } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
+import { gitPath } from './paths.ts';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -96,6 +97,6 @@ export async function which(cmd: string, env: NodeJS.ProcessEnv): Promise<string
 export async function wtvCommand(wtvBin: string, env: NodeJS.ProcessEnv, platform = process.platform): Promise<string | null> {
   if (await which('wtv', env)) return 'wtv';
   if (!(await which('node', env))) return null;
-  const bin = platform === 'win32' ? wtvBin.replaceAll('\\', '/') : wtvBin;
+  const bin = gitPath(wtvBin, platform);
   return /\s/.test(bin) ? `node "${bin}"` : `node ${bin}`;
 }
