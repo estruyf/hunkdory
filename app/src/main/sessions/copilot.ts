@@ -70,7 +70,7 @@ export function parseCopilotEvents(text: string): { firstPrompt: string | null; 
     if (ev.type === 'tool.execution_start' && ev.timestamp) {
       const name = ev.data?.toolName;
       if (name && EDIT_TOOLS.has(name)) lastEditAt = ev.timestamp;
-      const cmd = name === 'bash' && typeof ev.data?.arguments?.command === 'string' ? (ev.data.arguments.command as string) : null;
+      const cmd = (name === 'bash' || name === 'powershell') && typeof ev.data?.arguments?.command === 'string' ? (ev.data.arguments.command as string) : null;
       if (cmd && ev.data?.toolCallId && TEST_CMD.test(withoutHeredocs(cmd))) pending.set(ev.data.toolCallId, { command: shortCommand(cmd), at: ev.timestamp });
     } else if (ev.type === 'tool.execution_complete' && ev.data?.toolCallId && pending.has(ev.data.toolCallId)) {
       const content = ev.data.result?.content;

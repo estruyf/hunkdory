@@ -78,7 +78,7 @@ export function SetupChecklist({ setup }: { setup: ReturnType<typeof useSetup> }
               'Tells each change as a story, answers your questions and makes the changes you ask for.'
             ) : (
               <>
-                Tells each change as a story, answers your questions and makes the changes you ask for. Without one you get the plain changes, one step per file. Get <InstallLink id="claude-code">Claude Code</InstallLink>{currentPlatform() === 'win32' ? '' : <> or the <InstallLink id="copilot">Copilot CLI</InstallLink></>}.
+                Tells each change as a story, answers your questions and makes the changes you ask for. Without one you get the plain changes, one step per file. Get <InstallLink id="claude-code">Claude Code</InstallLink> or the <InstallLink id="copilot">Copilot CLI</InstallLink>.
               </>
             )}
           </Tool>

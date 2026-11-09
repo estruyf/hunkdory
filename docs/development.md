@@ -65,8 +65,8 @@ Without signing settings the build is unsigned, and on other PCs SmartScreen sto
 What's different on Windows:
 
 - The environment is the app's own: Windows gives an app started from the Start menu the user's whole environment, so there's no login shell to read. A program installed while Hunkdory runs is found after a restart.
-- Only programs (`.exe`) on the PATH count, so Claude Code is the native install (`claude.exe`), not npm's `claude.cmd`: a `.cmd` only starts through cmd.exe, which would read a prompt's quotes and `&` as its own.
-- The git guard (`src/main/gitGuard.ts`) is the same `sh` script, run by Git Bash, where Claude Code runs its commands. PowerShell doesn't run it, so Copilot, which runs its commands there, isn't offered on Windows.
+- Only programs (`.exe`) on the PATH count, so Claude Code is the native install (`claude.exe`), not npm's `claude.cmd`: a `.cmd` only starts through cmd.exe, which would read a prompt's quotes and `&` as its own. Copilot is found as Seshboard finds it: `copilot.exe` on the PATH, in `~\.local\bin` or WinGet's Links, or npm's install run as `node` and its script, without the `.cmd`.
+- The git guard (`src/main/gitGuard.ts`) is the same `sh` script, run by Git Bash, where Claude Code runs its commands, and a `git.ps1` twin in a folder ahead of it, for PowerShell, where Copilot runs its commands (its shell tool is `powershell` there). The agent's environment sets `PSExecutionPolicyPreference=RemoteSigned` so the script runs where scripts are off by default; a policy from Group Policy still wins, and then git fails rather than going unguarded. The Windows tests run both guards, in Windows PowerShell 5.1 and in PowerShell 7.
 - Session folders say `C:\Users\…` while git says `C:/Users/…`, so paths from sessions are read in git's form (`gitPath` in `src/main/paths.ts`).
 
 ## Keep the changelog
@@ -83,8 +83,6 @@ Every change people will notice gets a line under **Unreleased** in [`CHANGELOG.
 4. Publish it, leaving the notes empty. The files are attached once the build and its checks pass, and the notes are filled in from the changelog: this version's section, or **Unreleased** for a pre-release. The app shows them under **What's new**. With nothing in the changelog the release gets GitHub's generated notes and the run warns. Every copy of the app offers it within a few hours.
 
 To try it without publishing anything, run the workflow by hand (Actions → Release → Run workflow). The signed builds are kept as workflow artifacts for a week.
-
-To add the Windows installer to a release from before it was built (v0.1.0), run the workflow by hand from `main` with **add_windows_to** set to the release's tag. It builds the installer from `main` as it is now, with that release's version, and attaches it with `latest.yml` (none for a pre-release). The Mac files, the notes and the cask stay as they are.
 
 The workflow needs these repository secrets, the same ones Seshboard uses:
 

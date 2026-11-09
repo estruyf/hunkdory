@@ -21,11 +21,6 @@
 # notarised) and checked, with a version like 0.1.0-dryrun.42, and kept as workflow artifacts for a week. Nothing is
 # published.
 #
-# Adding Windows to a release that is out: run it by hand from main with "add_windows_to" set to its tag (v0.1.0). Only
-# the Windows installer is built, from main as it is now, with that release's version, and attached to it with
-# latest.yml (none for a pre-release). The Mac files, notes and cask stay as they are. For releases from before
-# Windows was built.
-#
 # Nothing is ever attached unsigned: without the signing settings the run fails. See docs/development.md → Releasing.
 name: Release
 
@@ -33,24 +28,17 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      add_windows_to:
-        description: Tag of a published release to add the Windows installer to (v0.1.0). Empty for a dry run.
-        required: false
-        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || inputs.add_windows_to || github.ref }}
+  group: release-${{ github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
 
 jobs:
   mac:
     name: Build, sign and notarise the Mac app
-    # Not when adding Windows to a release: its Mac files are out already.
-    if: ${{ !inputs.add_windows_to }}
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -158,9 +146,8 @@ jobs:
       run:
         shell: bash
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.add_windows_to }}
-      ADD_TO: ${{ inputs.add_windows_to }}
-      DRY_RUN: ${{ github.event_name != 'release' && !inputs.add_windows_to }}
+      TAG: ${{ github.event.release.tag_name }}
+      DRY_RUN: ${{ github.event_name != 'release' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -175,11 +162,10 @@ jobs:
       - name: Version from the tag
         env:
           PRERELEASE: ${{ github.event.release.prerelease }}
-          GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/release-version.sh
 
       - name: Check a release comes from main
-        if: env.DRY_RUN != 'true' && (env.PRERELEASE != 'true' || env.ADD_TO != '')
+        if: env.DRY_RUN != 'true' && env.PRERELEASE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
@@ -331,36 +317,6 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG" --jq .body > notes.md
           fi
           gh release edit "$TAG" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
-
-  # Adding Windows to a release that is out (the add_windows_to input): only its files, its feed last.
-  add-windows:
-    name: Attach the Windows installer to ${{ inputs.add_windows_to }}
-    needs: [windows]
-    if: github.event_name == 'workflow_dispatch' && inputs.add_windows_to != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: write
-    env:
-      TAG: ${{ inputs.add_windows_to }}
-    steps:
-      - name: Download the build
-        uses: actions/download-artifact@v7
-        with:
-          name: release-windows
-          path: dist
-
-      - name: Attach it to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cd dist
-          ls -la
-          gh release upload "$TAG" *-setup.exe *-setup.exe.blockmap --clobber --repo "$GITHUB_REPOSITORY"
-          # A pre-release gets no feed: the app only follows releases.
-          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" != "true" ]; then
-            gh release upload "$TAG" latest.yml --clobber --repo "$GITHUB_REPOSITORY"
-          fi
 
   # What makes `brew install --cask estruyf/tap/hunkdory` resolve. Its own job, so a tap failure can be re-run without
   # touching the release, and the token never sits next to the one that can write to it. Only releases: a cask carries

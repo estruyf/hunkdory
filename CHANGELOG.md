@@ -6,7 +6,7 @@ All notable changes to Hunkdory are listed here. Each release is also on the [re
 
 ### Added
 
-- **Windows.** Hunkdory runs on Windows 10 and 11, on x64 and Arm, with a signed installer that keeps itself up to date like the Mac app. Claude Code works there; Copilot isn't supported on Windows yet.
+- **Windows.** Hunkdory runs on Windows 10 and 11, on x64 and Arm, with a signed installer that keeps itself up to date like the Mac app. Claude Code and the Copilot CLI both work there.
 
 ## [0.1.0] - 2026-11-06
 

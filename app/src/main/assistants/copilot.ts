@@ -5,10 +5,10 @@
 // real thing. Structured output is asked for in the prompt, since the CLI has no `--json-schema` flag.
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { closeSync, createWriteStream, mkdirSync, openSync, realpathSync } from 'node:fs';
+import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, win32 } from 'node:path';
 import { createInterface } from 'node:readline';
 import { explainRunFailure } from '../../shared/assistantText.ts';
 import { agentEnv } from '../gitGuard.ts';
@@ -27,6 +27,9 @@ export const READ_GIT_SHELL = [
   'shell(git status:*)',
 ];
 
+/** Copilot's shell tool: `bash`, or `powershell` on Windows. `shell(…)` in `--allow-tool` covers either. */
+export const shellTool = (platform: NodeJS.Platform = process.platform) => (platform === 'win32' ? 'powershell' : 'bash');
+
 /** Isolation for runs Hunkdory starts on its own: ignore the branch's AGENTS.md and any MCP servers it defines. */
 const ISOLATED = ['--no-custom-instructions', '--disable-builtin-mcps', '--no-auto-update', '--no-ask-user'];
 
@@ -43,7 +46,7 @@ export function describeTool(name: string, input: Record<string, unknown>, cwd: 
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
   const short = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
   const rel = (p: string) => [cwd, real(cwd)].map((c) => gitPath(relative(c, p))).find((r) => r && !r.startsWith('..')) ?? p;
-  if (name === 'bash') {
+  if (name === 'bash' || name === 'powershell') {
     const cmd = str('command').trim();
     const file = cmd.match(/^git show \S+?:(\S+)/)?.[1] ?? cmd.match(/^git diff .*-- (\S+)/)?.[1];
     return file ? `Reading ${file}` : short(cmd);
@@ -57,22 +60,24 @@ export function describeTool(name: string, input: Record<string, unknown>, cwd: 
 
 /** Copilot's argument list for one run. Exported so tests can snapshot it per mode. */
 export function copilotArgs(
-  opts: Pick<RunOptions, 'access' | 'schema'> & { session?: RunOptions['session']; allowBash?: RunOptions['allowBash']; sessionId: string; prompt: string }
+  opts: Pick<RunOptions, 'access' | 'schema'> & { session?: RunOptions['session']; allowBash?: RunOptions['allowBash']; sessionId: string; prompt: string },
+  platform: NodeJS.Platform = process.platform
 ): string[] {
   const { access, session, allowBash, sessionId, prompt } = opts;
+  const shell = shellTool(platform);
   if (session?.mode === 'continue') {
     // Same as sending a review back: the session itself goes on, and may edit files. Copilot CLI can't
     // fork a session, so a 'copy' session never reaches here (see askAbility in conversations.ts); it's
     // treated as a fresh run instead, below.
-    return ['--resume', session.id, '-p', prompt, '--output-format', 'json', '--available-tools', 'bash', 'view', 'grep', 'glob', 'edit', 'create', '--allow-tool', ...READ_GIT_SHELL, 'view', 'grep', 'glob', 'write', ...(allowBash ?? []), ...ISOLATED];
+    return ['--resume', session.id, '-p', prompt, '--output-format', 'json', '--available-tools', shell, 'view', 'grep', 'glob', 'edit', 'create', '--allow-tool', ...READ_GIT_SHELL, 'view', 'grep', 'glob', 'write', ...(allowBash ?? []), ...ISOLATED];
   }
   const name = opts.schema ? 'walkthrough' : access === 'edit' ? 'change' : 'question';
   const base = ['-p', prompt, '--output-format', 'json', '--session-id', sessionId, '--name', `Hunkdory: ${name}`, ...ISOLATED];
   if (access === 'edit') {
-    return [...base, '--available-tools', 'bash', 'view', 'grep', 'glob', 'edit', 'create', '--allow-tool', ...READ_GIT_SHELL, 'view', 'grep', 'glob', 'write'];
+    return [...base, '--available-tools', shell, 'view', 'grep', 'glob', 'edit', 'create', '--allow-tool', ...READ_GIT_SHELL, 'view', 'grep', 'glob', 'write'];
   }
   const gitOnly = access === 'git-only';
-  const tools = gitOnly ? ['bash'] : ['bash', 'view', 'grep', 'glob'];
+  const tools = gitOnly ? [shell] : [shell, 'view', 'grep', 'glob'];
   const allowed = [...READ_GIT_SHELL, ...(gitOnly ? [] : ['view', 'grep', 'glob'])];
   return [...base, '--available-tools', ...tools, '--allow-tool', ...allowed];
 }
@@ -150,11 +155,11 @@ export function parseCopilotLine(line: string, cwd: string): { text?: string; ex
 }
 
 /** One `copilot -p ... --output-format json` run: streams its JSONL events and resolves with the final message. */
-function runCopilot(opts: { copilot: string; cwd: string; env: NodeJS.ProcessEnv; args: string[]; logFile: string; timeoutMs: number; onActivity?: (line: string) => void }): AssistantRun {
+function runCopilot(opts: { copilot: { bin: string; pre: string[] }; cwd: string; env: NodeJS.ProcessEnv; args: string[]; logFile: string; timeoutMs: number; onActivity?: (line: string) => void }): AssistantRun {
   const { cwd } = opts;
   mkdirSync(dirname(opts.logFile), { recursive: true });
   const log = createWriteStream(opts.logFile, { flags: 'a' });
-  const child = spawn(opts.copilot, opts.args, { cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(opts.copilot.bin, [...opts.copilot.pre, ...opts.args], { cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let killed = false;
   const timer = setTimeout(() => child.kill(), opts.timeoutMs);
 
@@ -203,21 +208,65 @@ async function forgetOwnSession(sessionId: string) {
   await rm(join(homedir(), '.copilot', 'session-state', sessionId), { recursive: true, force: true }).catch(() => {});
 }
 
+/**
+ * On Windows, npm's install (`npm install -g @github/copilot`) leaves only a `copilot.cmd`, which can't be started
+ * without cmd.exe. Its package's script runs with your own `node` instead, as the `.cmd` would: the command (`node.exe`
+ * on the PATH) and its first argument (the script). Null elsewhere, or when either isn't there. As Seshboard does it.
+ */
+export function npmCopilot(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  files: { exists(path: string): boolean; readJson(path: string): unknown }
+): { bin: string; pre: string[] } | null {
+  if (platform !== 'win32') return null;
+  const dirs = (env.PATH ?? '').split(win32.delimiter).filter(Boolean);
+  const node = dirs.map((dir) => win32.join(dir, 'node.exe')).find((path) => files.exists(path));
+  if (!node) return null;
+  for (const dir of dirs) {
+    if (!files.exists(win32.join(dir, 'copilot.cmd'))) continue;
+    // npm's global prefix keeps the package next to its `.cmd`.
+    const pkg = win32.join(dir, 'node_modules', '@github', 'copilot');
+    const json = files.readJson(win32.join(pkg, 'package.json')) as { bin?: string | Record<string, string> } | null;
+    const bin = typeof json?.bin === 'string' ? json.bin : json?.bin?.copilot;
+    if (bin && files.exists(win32.join(pkg, bin))) return { bin: node, pre: [win32.join(pkg, bin)] };
+  }
+  return null;
+}
+
+const readJson = (path: string): unknown => {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * How to start Copilot: the `copilot` on your PATH; on Windows also where its installer (`~\.local\bin`) and WinGet
+ * put `copilot.exe`, then npm's install (`npmCopilot`). `pre` goes before Copilot's own arguments. Null when it isn't
+ * installed.
+ */
+export async function copilotCommand(env: NodeJS.ProcessEnv): Promise<{ bin: string; pre: string[] } | null> {
+  const onPath = await which('copilot', env);
+  if (onPath) return { bin: onPath, pre: [] };
+  if (process.platform !== 'win32') return null;
+  const known = [join(homedir(), '.local', 'bin', 'copilot.exe'), ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', 'copilot.exe')] : [])];
+  const exe = known.find((path) => existsSync(path));
+  return exe ? { bin: exe, pre: [] } : npmCopilot(env, process.platform, { exists: existsSync, readJson });
+}
+
 export class CopilotAssistant implements Assistant {
   id = 'copilot';
   name = 'GitHub Copilot';
 
   async available() {
-    // Copilot runs its commands in PowerShell on Windows, where Hunkdory's git guard (gitGuard.ts) can't stop
-    // `git grep -O` or `git log --output` from code under review. Until it can, Copilot isn't offered there.
-    if (process.platform === 'win32') return { ok: false as const, reason: "Copilot isn't supported on Windows yet. Use Claude Code." };
-    const copilot = await which('copilot', { ...(await shellEnv()) });
+    const copilot = await copilotCommand({ ...(await shellEnv()) });
     return copilot ? { ok: true as const } : { ok: false as const, reason: 'The Copilot CLI is not installed.' };
   }
 
   async run(opts: RunOptions): Promise<AssistantRun> {
     const env = await agentEnv();
-    const copilot = await which('copilot', env);
+    const copilot = await copilotCommand(env);
     if (!copilot) throw new Error('Could not find the "copilot" command. Is the Copilot CLI installed?');
 
     // Copilot can't fork a session like Claude Code's `--resume --fork-session`: a 'copy' session is run
@@ -270,13 +319,13 @@ export class CopilotAssistant implements Assistant {
 
   async sendBack(opts: SendBackOptions): Promise<SendBackHandle> {
     const env = await agentEnv();
-    const copilot = await which('copilot', env);
+    const copilot = await copilotCommand(env);
     if (!copilot) throw new Error('Could not find the "copilot" command. Is the Copilot CLI installed?');
 
     const args = copilotArgs({ access: 'edit', session: { id: opts.session.id, mode: 'continue' }, allowBash: opts.allowBash, sessionId: opts.session.id, prompt: opts.prompt });
     mkdirSync(dirname(opts.logFile), { recursive: true });
     const fd = openSync(opts.logFile, 'a');
-    const child = spawn(copilot, args, { cwd: opts.session.cwd, env, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
+    const child = spawn(copilot.bin, [...copilot.pre, ...args], { cwd: opts.session.cwd, env, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
     closeSync(fd);
     child.unref();
     child.on('exit', (code) => opts.onExit?.(code === 0, code === 0 ? 'The agent finished working on your feedback.' : `The agent run stopped with exit code ${code}. See the log for details.`));

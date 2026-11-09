@@ -101,6 +101,38 @@ test('an agent finds the wrapper first, and Hunkdory\'s own git does not', async
   assert.match(execFileSync(git!, ['--version'], { encoding: 'utf8' }), /git version/);
 });
 
+// Copilot runs its commands in PowerShell on Windows: 7 when it's installed, else the 5.1 that comes with Windows.
+test('in PowerShell, git is the guard too, and refuses the same options', { skip: !win && 'PowerShell is where Copilot runs commands on Windows' }, async () => {
+  const env = await agentEnv();
+  const made = join(root, 'made-ps');
+  const shells = (await Promise.all(['pwsh', 'powershell'].map((name) => which(name, env)))).filter((path): path is string => !!path);
+  assert.ok(shells.length, 'a PowerShell to try');
+  for (const ps of shells) {
+    const run = (command: string) => spawnSync(ps, ['-NoProfile', '-NonInteractive', '-Command', command], { cwd: repo, env, encoding: 'utf8' });
+    assert.match(run('(Get-Command git).Source').stdout, /powershell[\\/]git\.ps1/, ps);
+    for (const command of [
+      `git diff '--output=${made}' HEAD~1`,
+      `git show '--output=${made}'`,
+      `git -c a.b=c log '--ou=${made}'`,
+      `git grep '-Otouch ${made}' Offset`,
+      `git grep -n '-Otouch ${made}' Offset`,
+      `git grep '--open-files-in-pager=touch ${made}' Offset`,
+      // An array is one argument to a script, and two to git.exe.
+      `git grep Offset a.js,'-Otouch ${made}'`,
+      `git grep Offset @('a.js', @('-Otouch ${made}'))`,
+    ]) {
+      const r = run(command);
+      assert.notEqual(r.status, 0, `${ps}: ${command}`);
+      assert.match(r.stderr, /not allowed: that option can write files or run programs/, `${ps}: ${command}`);
+    }
+    assert.equal(existsSync(made), false, ps);
+    assert.match(run('git log --oneline').stdout, /one/, ps);
+    assert.match(run('git log --format=%s -1').stdout, /two/, ps);
+    assert.match(run('git grep -n Offset').stdout, /a\.js:1/, ps);
+    assert.match(run("git log -1 --format='%s by %an'").stdout, /two by T/, `${ps}: quoted arguments reach git as one`);
+  }
+});
+
 test('an agent that may load a repo\'s own config gets your PATH, not your shell\'s tokens', { skip: win && 'Windows reads no login shell: the app has your environment already' }, async () => {
   const shell = realpathSync(mkdtempSync(join(root, 'shell-')));
   const fake = join(shell, 'zsh');

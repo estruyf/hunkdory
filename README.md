@@ -75,7 +75,7 @@ The first time you open it, Hunkdory checks your tools and shows you what's miss
 You need:
 
 - **A Mac with Apple Silicon, or a Windows 10 or 11 PC**, and git. On Windows that's [Git for Windows](https://git-scm.com/downloads/win), which Claude Code needs as well.
-- **An assistant** for the story, questions and changes: [Claude Code](https://claude.com/claude-code) or the [Copilot CLI](https://github.com/github/copilot-cli). Other agents work too, through the [Agent Client Protocol](https://agentclientprotocol.com) (experimental). Without one you still get the plain changes, one step per file. On Windows it's Claude Code for now: Copilot isn't supported there yet.
+- **An assistant** for the story, questions and changes: [Claude Code](https://claude.com/claude-code) or the [Copilot CLI](https://github.com/github/copilot-cli). Other agents work too, through the [Agent Client Protocol](https://agentclientprotocol.com) (experimental). Without one you still get the plain changes, one step per file.
 - **The [GitHub CLI](https://cli.github.com)**, signed in with `gh auth login`, for pull requests. Branches work without it.
 
 ## Your code stays yours
