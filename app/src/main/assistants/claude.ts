@@ -8,6 +8,7 @@ import { explainRunFailure } from '../../shared/assistantText.ts';
 import { DEFAULT_CONFIG_DIR } from '../sessions/claude.ts';
 import { agentEnv } from '../gitGuard.ts';
 import { shellEnv, which } from '../shellEnv.ts';
+import { gitPath } from '../paths.ts';
 import type { Assistant, AssistantResult, AssistantRun, AssistantSession, RunOptions, SendBackHandle, SendBackOptions } from './types.ts';
 
 /** Read-only git, for runs that look at a branch without changing it. */
@@ -33,7 +34,7 @@ export function describeTool(name: string, input: Record<string, unknown>, cwd: 
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
   const short = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
   // Paths can come through a symlink (/var is /private/var on macOS), so try the real folder too.
-  const rel = (p: string) => [cwd, real(cwd)].map((c) => relative(c, p)).find((r) => r && !r.startsWith('..')) ?? p;
+  const rel = (p: string) => [cwd, real(cwd)].map((c) => gitPath(relative(c, p))).find((r) => r && !r.startsWith('..')) ?? p;
   if (name === 'Bash') {
     // Claude often starts with `cd <folder> &&`; the part after it says more.
     const cmd = str('command').trim().replace(/^cd \S+ && /, '');

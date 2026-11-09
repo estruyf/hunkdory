@@ -13,6 +13,7 @@ import { createInterface } from 'node:readline';
 import { explainRunFailure } from '../../shared/assistantText.ts';
 import { agentEnv } from '../gitGuard.ts';
 import { shellEnv, which } from '../shellEnv.ts';
+import { gitPath } from '../paths.ts';
 import type { Assistant, AssistantResult, AssistantRun, RunOptions, SendBackHandle, SendBackOptions } from './types.ts';
 
 /** Read-only git, written the way Copilot's `--allow-tool` expects (`shell(git diff:*)`, not Claude's `Bash(git diff:*)`). */
@@ -41,7 +42,7 @@ const real = (p: string) => {
 export function describeTool(name: string, input: Record<string, unknown>, cwd: string): string | null {
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
   const short = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-  const rel = (p: string) => [cwd, real(cwd)].map((c) => relative(c, p)).find((r) => r && !r.startsWith('..')) ?? p;
+  const rel = (p: string) => [cwd, real(cwd)].map((c) => gitPath(relative(c, p))).find((r) => r && !r.startsWith('..')) ?? p;
   if (name === 'bash') {
     const cmd = str('command').trim();
     const file = cmd.match(/^git show \S+?:(\S+)/)?.[1] ?? cmd.match(/^git diff .*-- (\S+)/)?.[1];

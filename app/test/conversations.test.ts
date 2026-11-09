@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { askAbility, askPrompt, stepDiff, type AskInput } from '../src/main/conversations.ts';
 import type { HunkView, SessionInfo } from '../src/shared/types.ts';
+import { thisComputer } from '../src/shared/platform.ts';
 
 const hunk: HunkView = {
   id: '54b48929c1',
@@ -98,7 +99,7 @@ test('who can answer and change depends on the session and the checkout', () => 
   const none = askAbility(null, { checkout: { kind: 'none' }, pr: null });
   assert.equal(none.question.by, 'fresh');
   assert.equal(none.change.by, null);
-  assert.match((none.change as { reason: string }).reason, /isn't checked out on this Mac/);
+  assert.match((none.change as { reason: string }).reason, new RegExp(`isn't checked out on ${thisComputer(process.platform)}`));
 });
 
 test('a pull request with nowhere to change it can be checked out by Hunkdory, unless it comes from a fork', () => {

@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { Actions, actsOnCode, changedSinceSeen, sendBackPrompt } from '../src/main/actions.ts';
 import { notOnBranch } from '../src/main/git.ts';
 import { shellEnv, which } from '../src/main/shellEnv.ts';
 import type { Projects } from '../src/main/projects.ts';
 import type { Store } from '../src/main/store.ts';
 import type { FinishRequest, ReviewData, ReviewState } from '../src/shared/types.ts';
+import { thisComputer } from '../src/shared/platform.ts';
 
 // A send-back starts the agent's CLI. A stand-in `claude` that writes down what it was asked and stops comes first on the
 // PATH, for this whole file: the shell's environment is read once, so it has to be there before any test reads it.
@@ -26,7 +27,7 @@ const claudeAsked = join(fake, 'args.txt');
 writeFileSync(join(fake, 'claude'), `#!/bin/sh\nprintf '%s\\n' "$@" > "${claudeAsked}.tmp"\nmv "${claudeAsked}.tmp" "${claudeAsked}"\n`);
 chmodSync(join(fake, 'claude'), 0o755);
 process.env.SHELL = '/usr/bin/false';
-process.env.PATH = `${fake}:${process.env.PATH}`;
+process.env.PATH = `${fake}${delimiter}${process.env.PATH}`;
 
 /** What the stand-in was asked, once it has run. */
 async function asked() {
@@ -147,9 +148,9 @@ test('a PR with work only on this Mac is not merged, before anything is posted',
   const seen = { headSha: 'sha', hunkIds: ['h1'] };
   const dirty = await actions(root, { headSha: 'sha', pr, dirty: true, dirtyFiles: 2 }).finish(req({ seen }));
   assert.equal(dirty.ok, false);
-  assert.match(dirty.message, /2 uncommitted files on this Mac aren't on PR #7/);
+  assert.match(dirty.message, new RegExp(`2 uncommitted files on ${thisComputer(process.platform)} aren't on PR #7`));
   const ahead = await actions(root, { headSha: 'sha', pr, ahead: 1 }).finish(req({ seen }));
-  assert.match(ahead.message, /1 unpushed commit on this Mac isn't on PR #7/);
+  assert.match(ahead.message, new RegExp(`1 unpushed commit on ${thisComputer(process.platform)} isn't on PR #7`));
   const clean = await actions(root, { headSha: 'sha', pr }).finish(req({ seen }));
   assert.equal(clean.message, 'reached GitHub', 'a clean PR goes on to GitHub');
 });
@@ -182,7 +183,10 @@ test('sending back only asks for a walkthrough file when the agent keeps one', (
   assert.match(without, /Note: Thanks$/);
 });
 
-test('a send-back only has the agent keep a walkthrough file when it already keeps one', async () => {
+// On Windows only a claude.exe is started (shellEnv.ts → which), and the stand-in is a shell script.
+const fakeRuns = process.platform === 'win32' ? 'the stand-in claude is a shell script, which Windows does not start' : false;
+
+test('a send-back only has the agent keep a walkthrough file when it already keeps one', { skip: fakeRuns }, async () => {
   // Never the real one: this must not start an agent.
   assert.equal(await which('claude', await shellEnv()), join(fake, 'claude'));
   const { root } = repo();

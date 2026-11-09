@@ -1,6 +1,6 @@
 // A project's icon: found in the repo as Seshboard finds it, or one you picked. A repo decides what its files are and
 // what its settings point at, so nothing here reads outside it, follows a link out of it, or reads without a limit.
-import { closeSync, constants, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, isAbsolute, join, relative } from 'node:path';
 import { shrinkPng } from './pngShrink.ts';
@@ -73,11 +73,13 @@ const PACKAGE_DIRS = ['app', 'web', 'site', 'client', 'frontend'];
 /**
  * A small settings file a repo holds. A link to `/dev/zero` would never finish reading and one to a private file would
  * be read, so it must be a regular file, not a link, within the limit. Opened without following a link and without
- * waiting on a FIFO, then checked on what was opened, so it can't be swapped in between.
+ * waiting on a FIFO, then checked on what was opened, so it can't be swapped in between. Windows has no O_NOFOLLOW,
+ * so there a link is turned away before it is opened.
  */
 function readRepoFile(path: string): string | null {
   let fd: number;
   try {
+    if (process.platform === 'win32' && lstatSync(path).isSymbolicLink()) return null;
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch {
     return null;

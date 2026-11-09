@@ -20,7 +20,7 @@ import { InstallLink } from '../components/setup.tsx';
 import { CircleCheck, RefreshCw } from 'lucide-react';
 import { IconPicker } from '../components/IconPicker.tsx';
 import type { AiReviewSettings, AssistantChoice, InboxPreview, Project, ProjectIconChoice, ProjectIconInfo, RepoCheck, Watch } from '../../shared/types.ts';
-import { thisComputer, yourComputer } from '../lib/platform.ts';
+import { currentPlatform, thisComputer, yourComputer } from '../lib/platform.ts';
 
 /** Past this many open pull requests, say what watching them all means. */
 const BUSY_REPO = 30;
@@ -185,8 +185,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const chosen = assistants.find((a) => a.id === assistant);
   const noIcon: ProjectIconInfo = { icon: null, source: null, path: null };
   const detectedIcon = check?.icon ?? noIcon;
-  // What an empty Name falls back to, like the main process does.
-  const folderName = (check?.root ?? existing?.path ?? path).replace(/\/+$/, '').split('/').pop() ?? '';
+  // What an empty Name falls back to, like the main process does. A folder typed on Windows may use `\`.
+  const separators = currentPlatform() === 'win32' ? /[\\/]+/ : /\/+/;
+  const folderName = (check?.root ?? existing?.path ?? path).split(separators).filter(Boolean).pop() ?? '';
   const baseOptions = check ? [...new Set([base, check.baseBranch, ...check.branches].filter(Boolean) as string[])] : [];
 
   // Say why Connect is greyed out, instead of leaving you to guess.
@@ -236,7 +237,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
               <label htmlFor="folder" className="w-full text-ui font-semibold">
                 Folder
               </label>
-              <input id="folder" className={`${FIELD_LG} min-w-0 flex-[1_1_300px] font-mono ${existing ? 'bg-sidebar' : ''}`} value={path} readOnly={!!existing} onChange={(e) => setPath(e.target.value)} placeholder="~/dev/my-project" />
+              <input id="folder" className={`${FIELD_LG} min-w-0 flex-[1_1_300px] font-mono ${existing ? 'bg-sidebar' : ''}`} value={path} readOnly={!!existing} onChange={(e) => setPath(e.target.value)} placeholder={currentPlatform() === 'win32' ? '~\\dev\\my-project' : '~/dev/my-project'} />
               {!existing && (
                 <Button size="lg" onClick={choose}>
                   Choose…

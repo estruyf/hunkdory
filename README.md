@@ -7,7 +7,7 @@
 <h2 align="center">Understand every change before you approve it.</h2>
 
 <p align="center">
-  A Mac app that tells a branch or pull request as a story, so you can review code you didn't write.<br>
+  A Mac and Windows app that tells a branch or pull request as a story, so you can review code you didn't write.<br>
   Made for the code your coding agents hand you.
 </p>
 
@@ -60,7 +60,7 @@ Merge, open or review a pull request, send it back to the agent, or close the re
 
 ## Get started
 
-[Download the latest version](https://github.com/estruyf/hunkdory/releases/latest) (the `.dmg`), or install it with Homebrew:
+[Download the latest version](https://github.com/estruyf/hunkdory/releases/latest): the `.dmg` for a Mac, or `Hunkdory-<version>-setup.exe` for Windows. On a Mac you can also install it with Homebrew:
 
 ```bash
 brew install --cask estruyf/tap/hunkdory
@@ -74,13 +74,13 @@ The first time you open it, Hunkdory checks your tools and shows you what's miss
 
 You need:
 
-- **A Mac with Apple Silicon**, and git.
-- **An assistant** for the story, questions and changes: [Claude Code](https://claude.com/claude-code) or the [Copilot CLI](https://github.com/github/copilot-cli). Other agents work too, through the [Agent Client Protocol](https://agentclientprotocol.com) (experimental). Without one you still get the plain changes, one step per file.
+- **A Mac with Apple Silicon, or a Windows 10 or 11 PC**, and git. On Windows that's [Git for Windows](https://git-scm.com/downloads/win), which Claude Code needs as well.
+- **An assistant** for the story, questions and changes: [Claude Code](https://claude.com/claude-code) or the [Copilot CLI](https://github.com/github/copilot-cli). Other agents work too, through the [Agent Client Protocol](https://agentclientprotocol.com) (experimental). Without one you still get the plain changes, one step per file. On Windows it's Claude Code for now: Copilot isn't supported there yet.
 - **The [GitHub CLI](https://cli.github.com)**, signed in with `gh auth login`, for pull requests. Branches work without it.
 
 ## Your code stays yours
 
-Hunkdory runs on your Mac. Your code only goes to the assistant you picked for a project, and only when you let it write a walkthrough, answer a question, make a change, run an AI review, or take work back. Nothing goes on GitHub until you finish a review, push a change or share a walkthrough. Set a project to Manual and it never leaves your Mac at all.
+Hunkdory runs on your computer. Your code only goes to the assistant you picked for a project, and only when you let it write a walkthrough, answer a question, make a change, run an AI review, or take work back. Nothing goes on GitHub until you finish a review, push a change or share a walkthrough. Set a project to Manual and it never leaves your computer at all.
 
 ## Why "Hunkdory"
 
@@ -89,7 +89,7 @@ Hunkdory runs on your Mac. Your code only goes to the assistant you picked for a
 ## Documentation
 
 - [How it works under the hood](docs/how-it-works.md): what the inbox looks for, how walkthroughs are made and checked, what agents may do, and where your data lives.
-- [Development](docs/development.md): run it from source, build the Mac app, and release it.
+- [Development](docs/development.md): run it from source, build the app, and release it.
 - [`wtv`](tools/wtv/README.md): the command-line tool that checks an agent's walkthrough against the real diff.
 - [Changelog](CHANGELOG.md): what changed in each version.
 
