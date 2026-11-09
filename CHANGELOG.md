@@ -4,6 +4,10 @@ All notable changes to Hunkdory are listed here. Each release is also on the [re
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-09
+
+Hunkdory comes to Windows.
+
 ### Added
 
 - **Windows.** Hunkdory runs on Windows 10 and 11, on x64 and Arm, with a signed installer that keeps itself up to date like the Mac app. Claude Code and the Copilot CLI both work there.
@@ -24,5 +28,6 @@ The first release: a Mac app that tells a branch or pull request as a story, so 
 - **Updates from inside the app.** When there's a new version, a toast offers it, downloads it when you say so, and restarts when you're ready. **Settings › About** shows the status and can check by hand.
 - **Homebrew.** `brew install --cask estruyf/tap/hunkdory`.
 
-[Unreleased]: https://github.com/estruyf/hunkdory/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/estruyf/hunkdory/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/estruyf/hunkdory/releases/tag/v0.2.0
 [0.1.0]: https://github.com/estruyf/hunkdory/releases/tag/v0.1.0
