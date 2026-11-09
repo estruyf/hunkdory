@@ -142,7 +142,9 @@ export class ClaudeAssistant implements Assistant {
 
   async available() {
     const claude = await which('claude', { ...(await shellEnv()) });
-    return claude ? { ok: true as const } : { ok: false as const, reason: 'Claude Code is not installed.' };
+    if (claude) return { ok: true as const };
+    // npm's claude.cmd isn't started (shellEnv.ts → which), so say what is.
+    return { ok: false as const, reason: process.platform === 'win32' ? "Claude Code is not installed. Hunkdory needs its native install (claude.exe), not npm's." : 'Claude Code is not installed.' };
   }
 
   async run(opts: RunOptions): Promise<AssistantRun> {

@@ -5,7 +5,7 @@ import { cleanError } from './ui.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { INSTALL_URL } from '../../shared/assistantText.ts';
 import type { SetupStatus } from '../../shared/types.ts';
-import { thisComputer } from '../lib/platform.ts';
+import { currentPlatform, thisComputer } from '../lib/platform.ts';
 
 /** What's installed and signed in, and a way to look again after you did something about it. */
 export function useSetup() {
@@ -65,14 +65,20 @@ export function SetupChecklist({ setup }: { setup: ReturnType<typeof useSetup> }
       {status && (
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           <Tool state={status.git ? 'ok' : 'missing'} name="Git">
-            {status.git ? 'Hunkdory reads your branches with it.' : <>Hunkdory needs it to read your branches. Run <code className="font-mono">xcode-select --install</code> in a terminal.</>}
+            {status.git ? (
+              'Hunkdory reads your branches with it.'
+            ) : currentPlatform() === 'win32' ? (
+              <>Hunkdory needs it to read your branches, and Claude Code needs its Git Bash. <InstallLink id="git">Install Git for Windows</InstallLink>.</>
+            ) : (
+              <>Hunkdory needs it to read your branches. Run <code className="font-mono">xcode-select --install</code> in a terminal.</>
+            )}
           </Tool>
           <Tool state={assistants.length ? 'ok' : 'optional'} name={assistants.length ? assistants.map((a) => a.name).join(' and ') : 'An AI assistant'}>
             {assistants.length ? (
               'Tells each change as a story, answers your questions and makes the changes you ask for.'
             ) : (
               <>
-                Tells each change as a story, answers your questions and makes the changes you ask for. Without one you get the plain changes, one step per file. Get <InstallLink id="claude-code">Claude Code</InstallLink> or the <InstallLink id="copilot">Copilot CLI</InstallLink>.
+                Tells each change as a story, answers your questions and makes the changes you ask for. Without one you get the plain changes, one step per file. Get <InstallLink id="claude-code">Claude Code</InstallLink>{currentPlatform() === 'win32' ? '' : <> or the <InstallLink id="copilot">Copilot CLI</InstallLink></>}.
               </>
             )}
           </Tool>

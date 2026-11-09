@@ -27,6 +27,7 @@ export const INSTALL_URL: Record<string, string> = {
   'claude-code': 'https://claude.com/claude-code',
   copilot: 'https://github.com/github/copilot-cli',
   gh: 'https://cli.github.com',
+  git: 'https://git-scm.com/downloads/win',
 };
 
 /** A failed run in words that say what to do next, not only what the CLI printed. */

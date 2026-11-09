@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { agentEnv, gitGuardScript } from '../src/main/gitGuard.ts';
 import { gitPath } from '../src/main/paths.ts';
 import { forgetShellEnv, parseShellEnv, pathOnlyEnv, shellEnv, which, withUpperCasePath, wtvCommand } from '../src/main/shellEnv.ts';
@@ -12,9 +12,10 @@ const win = process.platform === 'win32';
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'hunkdory-guard-')));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-// On Windows the wrapper runs in Git Bash, where Claude Code runs its commands: Git's own sh, next to its git.
-const realGit = win ? (await which('git', withUpperCasePath(process.env)))! : execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
-const sh = win ? join(dirname(dirname(realGit)), 'bin', 'sh.exe') : '/bin/sh';
+// On Windows the wrapper runs in Git Bash, where Claude Code runs its commands: Git's own sh.
+const winEnv = withUpperCasePath(process.env);
+const realGit = win ? (await which('git', winEnv))! : execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+const sh = win ? ((await which('sh', winEnv)) ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'sh.exe')) : '/bin/sh';
 const guard = join(root, 'git');
 writeFileSync(guard, gitGuardScript(gitPath(realGit)));
 chmodSync(guard, 0o755);
