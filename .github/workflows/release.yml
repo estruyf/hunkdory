@@ -223,8 +223,10 @@ jobs:
         # installed copy of this release refuse all later updates.
         run: node app/scripts/checkWindowsSignatures.mjs
 
-      - name: Check the installer can unpack everything
-        # The installer skips a file it can't unpack without an error, so a broken one still reports success.
+      - name: Check the installer has everything, and can unpack it
+        # The installer skips a file it can't unpack without an error, so a broken one still reports success. Both
+        # packages must have what Hunkdory needs (the app, app.asar, the update settings, the English locale and every
+        # file of wtv), one for x64 and one for Arm64.
         run: node app/scripts/checkWindowsInstaller.mjs
 
       - name: Check the files
