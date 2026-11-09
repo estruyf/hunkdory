@@ -7,12 +7,13 @@ import { Kbd } from './ui/Kbd.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
 import { timeAgo } from '../../shared/order.ts';
+import { thisComputer } from '../lib/platform.ts';
 
 /**
  * Repos with recent Claude Code or Copilot sessions that aren't projects yet, as rows you pick with a click or ⌘1 to ⌘9
  * (the registry's `welcome.pick`). Connected repos drop out of the list.
  */
-export function FoundOnThisMac({ onPick, title = 'Found on this Mac', primary = true }: { onPick: (path: string) => void; title?: string; primary?: boolean }) {
+export function FoundOnThisMac({ onPick, title = `Found on ${thisComputer()}`, primary = true }: { onPick: (path: string) => void; title?: string; primary?: boolean }) {
   const found = useAsync(() => window.api.foundOnThisMac(), []);
   // ⌘1 to ⌘9 pick the repo on that row.
   const onScreen = useTabActive();
@@ -33,7 +34,7 @@ export function FoundOnThisMac({ onPick, title = 'Found on this Mac', primary = 
       <SectionHeader count={found.value?.length ?? null}>{title}</SectionHeader>
       {found.loading && <Loading label="Looking for repos you use an agent in…" />}
       {found.error && <Notice tone="error">{found.error}</Notice>}
-      {found.value?.length === 0 && <Notice>No repos with Claude Code or Copilot sessions on this Mac{primary ? ' yet' : ''}. Choose a folder instead: any git repo works.</Notice>}
+      {found.value?.length === 0 && <Notice>No repos with Claude Code or Copilot sessions on {thisComputer()}{primary ? ' yet' : ''}. Choose a folder instead: any git repo works.</Notice>}
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {found.value?.map((f, i) => (
           <li key={f.path}>

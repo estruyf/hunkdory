@@ -269,9 +269,9 @@ export function defaultReviewEvent(open: OpenItems, opts: { comments: number; pr
 export const vouchesForCode = (pick: Decision, event: GitHubEvent) => pick === 'merge' || (pick === 'github' && event === 'APPROVE');
 
 /** Why a pull request can't be merged yet: GitHub only merges what's on the PR, so work on this Mac would be left behind. */
-export function unpushedWork(data: Pick<ReviewData, 'pr' | 'dirtyFiles' | 'ahead'>): string | null {
+export function unpushedWork(data: Pick<ReviewData, 'pr' | 'dirtyFiles' | 'ahead'>, here = 'this Mac'): string | null {
   if (!data.pr || (!data.dirtyFiles && !data.ahead)) return null;
   const parts = [data.dirtyFiles && `${data.dirtyFiles} uncommitted file${data.dirtyFiles === 1 ? '' : 's'}`, data.ahead && `${data.ahead} unpushed commit${data.ahead === 1 ? '' : 's'}`].filter(Boolean);
   const one = data.dirtyFiles + data.ahead === 1;
-  return `${parts.join(' and ')} on this Mac ${one ? "isn't" : "aren't"} on PR #${data.pr.number}, so GitHub wouldn't merge ${one ? 'it' : 'them'}. Push ${one ? 'it' : 'them'} from the plan, or undo ${one ? 'it' : 'them'}, first.`;
+  return `${parts.join(' and ')} on ${here} ${one ? "isn't" : "aren't"} on PR #${data.pr.number}, so GitHub wouldn't merge ${one ? 'it' : 'them'}. Push ${one ? 'it' : 'them'} from the plan, or undo ${one ? 'it' : 'them'}, first.`;
 }

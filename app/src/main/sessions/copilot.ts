@@ -14,6 +14,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionInfo } from '../../shared/types.ts';
+import { gitPath } from '../paths.ts';
 import { TEST_CMD, shortCommand, testResult, withoutHeredocs } from './testcmd.ts';
 
 export const DEFAULT_SESSIONS_DIR = join(homedir(), '.copilot', 'session-state');
@@ -69,7 +70,7 @@ export function parseCopilotEvents(text: string): { firstPrompt: string | null; 
     if (ev.type === 'tool.execution_start' && ev.timestamp) {
       const name = ev.data?.toolName;
       if (name && EDIT_TOOLS.has(name)) lastEditAt = ev.timestamp;
-      const cmd = name === 'bash' && typeof ev.data?.arguments?.command === 'string' ? (ev.data.arguments.command as string) : null;
+      const cmd = (name === 'bash' || name === 'powershell') && typeof ev.data?.arguments?.command === 'string' ? (ev.data.arguments.command as string) : null;
       if (cmd && ev.data?.toolCallId && TEST_CMD.test(withoutHeredocs(cmd))) pending.set(ev.data.toolCallId, { command: shortCommand(cmd), at: ev.timestamp });
     } else if (ev.type === 'tool.execution_complete' && ev.data?.toolCallId && pending.has(ev.data.toolCallId)) {
       const content = ev.data.result?.content;
@@ -90,7 +91,7 @@ export function parseCopilotSession(id: string, workspaceYaml: string, eventsJso
     file: eventsFile,
     agent: 'copilot',
     configDir: null,
-    cwd: meta.cwd,
+    cwd: gitPath(meta.cwd),
     branches: [],
     originalBranch: null,
     worktreePath: null,

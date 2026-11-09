@@ -1,5 +1,6 @@
-// Code editors on this Mac, to open a branch's folder in. macOS only: they're found as apps and opened with `open -a`.
-import { execFile } from 'node:child_process';
+// Code editors on this computer, to open a branch's folder in. On macOS they're found as apps and opened with `open -a`;
+// on Windows by their program where their installer puts it, which is started with the folder.
+import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -21,8 +22,26 @@ const KNOWN: EditorChoice[] = [
   { id: 'nova', name: 'Nova', app: 'Nova' },
 ];
 
-/** The known editors that are installed, in /Applications or your own Applications folder. */
+/** Each editor's program on Windows, under %LOCALAPPDATA%\Programs (an install for you) or Program Files. */
+const WINDOWS: Record<string, string> = {
+  vscode: 'Microsoft VS Code\\Code.exe',
+  cursor: 'cursor\\Cursor.exe',
+  windsurf: 'Windsurf\\Windsurf.exe',
+  zed: 'Zed\\Zed.exe',
+  'vscode-insiders': 'Microsoft VS Code Insiders\\Code - Insiders.exe',
+  vscodium: 'VSCodium\\VSCodium.exe',
+  sublime: 'Sublime Text\\sublime_text.exe',
+};
+
+function windowsProgram(id: string, env = process.env): string | null {
+  const roots = [env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Programs'), env.ProgramFiles, env['ProgramFiles(x86)']];
+  const file = WINDOWS[id];
+  return (file && roots.map((root) => root && join(root, file)).find((path) => path && existsSync(path))) || null;
+}
+
+/** The known editors that are installed, in /Applications or your own Applications folder (on Windows, where they install). */
 export function installedEditors(): EditorChoice[] {
+  if (process.platform === 'win32') return KNOWN.filter((e) => windowsProgram(e.id));
   const dirs = ['/Applications', join(homedir(), 'Applications')];
   return KNOWN.filter((e) => dirs.some((d) => existsSync(join(d, `${e.app}.app`))));
 }
@@ -35,5 +54,18 @@ export function pickEditor(chosen: string | null): EditorChoice | null {
 
 /** Opens a folder in the editor. */
 export async function openInEditor(editor: EditorChoice, path: string): Promise<void> {
-  await run('open', ['-a', editor.app, path]);
+  if (process.platform !== 'win32') {
+    await run('open', ['-a', editor.app, path]);
+    return;
+  }
+  const program = windowsProgram(editor.id);
+  if (!program) throw new Error(`${editor.name} isn't installed anymore.`);
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(program, [path], { detached: true, stdio: 'ignore' });
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
 }

@@ -1,4 +1,4 @@
-# macOS packaging. Run from the repo root: npm run build:mac (see ../package.json).
+# Packaging for macOS and Windows. Run from the repo root: npm run build:mac, or npm run build:win on Windows (see ../package.json).
 appId: dev.hunkdory.app
 productName: Hunkdory
 copyright: Copyright © 2026 Elio Struyf
@@ -13,9 +13,13 @@ files:
   - resources/icon.png
   - '!node_modules/**/*'
 
-# Electron ships hundreds of locale .lproj folders, each signed separately; keep only English.
+# Electron ships hundreds of locales; keep only English. A name keeps the files called that or a prefix of it: `en` is
+# macOS's en.lproj (each signed separately), while Windows needs en-US.pak and en-GB.pak. Without a locale file there,
+# app.getLocale() is '' and Intl throws on it (scripts/dist-win.mjs checks they are there).
 electronLanguages:
   - en
+  - en-US
+  - en-GB
 
 # wtv runs as `node <Resources>/tools/wtv/bin/wtv.mjs` from the agent prompts (wtvBin in src/main/index.ts).
 extraResources:
@@ -47,7 +51,26 @@ mac:
 dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}
 
-# The update feed: packaged apps get app-update.yml pointing here, and the build writes latest-mac.yml.
+win:
+  # electron-builder makes the .ico from it.
+  icon: resources/icon.png
+  # One installer for both: it installs the build that matches the PC.
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+  # Signing: scripts/dist-win.mjs passes Azure Trusted Signing's settings (azureSignOptions), or electron-builder takes
+  # a certificate file from WIN_CSC_LINK; without either the build is unsigned (docs/development.md → Windows).
+
+# Installs for the current user, without asking for an administrator, in %LOCALAPPDATA%\Programs\hunkdory, and the
+# in-app updater installs updates the same way (latest.yml).
+nsis:
+  oneClick: true
+  perMachine: false
+  shortcutName: Hunkdory
+  # No spaces: GitHub turns them into dots in release assets, and latest.yml has to name the file as uploaded.
+  artifactName: ${productName}-${version}-setup.${ext}
+
+# The update feed: packaged apps get app-update.yml pointing here, and the build writes latest-mac.yml (latest.yml on Windows).
 # Nothing is uploaded by electron-builder (--publish never); the release workflow attaches the files.
 publish:
   provider: github

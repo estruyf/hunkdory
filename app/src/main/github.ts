@@ -2,6 +2,7 @@
 // projects where you linked the GitHub remote.
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { gitPath } from './paths.ts';
 import { shellEnv, which } from './shellEnv.ts';
 import * as g from './git.ts';
 import { findRefs } from '../shared/issueRefs.ts';
@@ -29,7 +30,7 @@ function ghError(stderr: string): Error {
 async function gh(args: string[], cwd: string): Promise<string> {
   const { bin, env } = await ghBin();
   try {
-    const { stdout } = await run(bin, args, { cwd, env, maxBuffer: 64 * 1024 * 1024, timeout: 30_000 });
+    const { stdout } = await run(bin, args, { cwd, env, maxBuffer: 64 * 1024 * 1024, timeout: 30_000, windowsHide: true });
     return stdout;
   } catch (e) {
     throw ghError(String((e as { stderr?: string }).stderr ?? (e as Error).message));
@@ -41,7 +42,7 @@ async function ghApi(method: string, path: string, cwd: string, body?: unknown):
   const { bin, env } = await ghBin();
   const args = ['api', '-X', method, path, ...(body === undefined ? [] : ['--input', '-'])];
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let out = '';
     let err = '';
     child.stdout.on('data', (b: Buffer) => (out += b));
@@ -100,12 +101,12 @@ export async function ghStatus(): Promise<{ installed: boolean; signedIn: boolea
   const bin = await which('gh', env);
   if (!bin) return { installed: false, signedIn: false, login: null };
   try {
-    await run(bin, ['auth', 'token'], { env, timeout: 10_000 });
+    await run(bin, ['auth', 'token'], { env, timeout: 10_000, windowsHide: true });
   } catch {
     me = null;
     return { installed: true, signedIn: false, login: null };
   }
-  const login = await run(bin, ['api', 'user', '--jq', '.login'], { env, timeout: 15_000 }).then((r) => r.stdout.trim() || null, () => null);
+  const login = await run(bin, ['api', 'user', '--jq', '.login'], { env, timeout: 15_000, windowsHide: true }).then((r) => r.stdout.trim() || null, () => null);
   return { installed: true, signedIn: true, login };
 }
 
@@ -230,14 +231,15 @@ export const signInFailed = (stderr: string) => /Permission denied \(publickey\)
  */
 async function toGitHub(root: string, repo: string, args: (to: string) => string[]): Promise<void> {
   const env = await shellEnv();
-  const opts = { cwd: root, env, maxBuffer: 64 * 1024 * 1024, timeout: 120_000 };
+  const opts = { cwd: root, env, maxBuffer: 64 * 1024 * 1024, timeout: 120_000, windowsHide: true };
   try {
     await run('git', args(await remoteFor(root, repo)), opts);
   } catch (e) {
     if (!signInFailed(String((e as { stderr?: string }).stderr ?? ''))) throw e;
     const { bin } = await ghBin();
-    // An empty helper first drops the ones from your config, so only gh answers.
-    await run('git', ['-c', 'credential.helper=', '-c', `credential.helper=!"${bin}" auth git-credential`, ...args(`https://github.com/${repo}.git`)], opts);
+    // An empty helper first drops the ones from your config, so only gh answers. git runs it with its own sh, which
+    // reads a Windows path with `/`.
+    await run('git', ['-c', 'credential.helper=', '-c', `credential.helper=!"${gitPath(bin)}" auth git-credential`, ...args(`https://github.com/${repo}.git`)], opts);
   }
 }
 

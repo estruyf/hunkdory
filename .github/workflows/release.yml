@@ -3,20 +3,25 @@
 # Runs when a release is published on GitHub (for a tag like v0.1.0):
 # - mac: builds the app on an Apple Silicon runner, signs and notarises it, and checks both, giving the .dmg, the
 #   .zip and what the in-app updater reads (latest-mac.yml) (arm64 only, like electron-builder.yml);
-# - publish: only once the build passed its checks, attaches its files to the release, the feed last. When the
-#   build fails, nothing is attached. Re-run the failed job to retry.
+# - windows: builds the installer (x64 and Arm64 in one), signs it with Azure Trusted Signing (or a .pfx), and checks
+#   it, giving the -setup.exe, its .blockmap and the update feed (latest.yml);
+# - publish: only once both builds passed their checks, attaches their files to the release, the feeds last. When a
+#   build fails, nothing is attached, so a release never offers one platform without the other. Re-run the failed job
+#   to retry.
 # - homebrew: for a release, stamps the cask with this version and pushes it to the tap.
-# The version comes from the tag: the app's About panel and the file names say what the release says.
+# The version comes from the tag: the app's About panel and the file names say what the release says
+# (.github/scripts/release-version.sh).
 #
 # Releases and pre-releases: a release (v1.2.3) must be tagged on main, and goes out to everyone: the app offers it
-# through the update feed, and Homebrew installs it. A pre-release (v0.1.0-beta.1, or any version marked as one) may
-# come from any branch. It gets no feed and no cask, so nobody is updated to it: people download it from the releases
+# through the update feeds, and Homebrew installs it. A pre-release (v0.1.0-beta.1, or any version marked as one) may
+# come from any branch. It gets no feeds and no cask, so nobody is updated to it: people download it from the releases
 # page.
 #
-# Dry run: run this workflow by hand (Actions → Release → Run workflow). The app is built, signed, notarised and
-# checked, with a version like 0.1.0-dryrun.42, and kept as a workflow artifact for a week. Nothing is published.
+# Dry run: run this workflow by hand (Actions → Release → Run workflow). Both apps are built, signed (the Mac one
+# notarised) and checked, with a version like 0.1.0-dryrun.42, and kept as workflow artifacts for a week. Nothing is
+# published.
 #
-# Nothing is ever attached unsigned: without the signing secrets the run fails. See docs/development.md → Releasing.
+# Nothing is ever attached unsigned: without the signing settings the run fails. See docs/development.md → Releasing.
 name: Release
 
 on:
@@ -53,36 +58,14 @@ jobs:
       - name: Version from the tag
         env:
           PRERELEASE: ${{ github.event.release.prerelease }}
-        run: |
-          if [ "$DRY_RUN" == "true" ]; then
-            # A suffix no release carries, so a dry run's build is never mistaken for a release.
-            version="$(node -p "require('./app/package.json').version")-dryrun.$GITHUB_RUN_NUMBER"
-            echo "::notice::Dry run: building $version. Nothing is published."
-          else
-            version="${TAG#v}"
-            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-              echo "::error::The release tag '$TAG' is not a version like v1.2.3."
-              exit 1
-            fi
-            if [[ "$version" == *-* ]] && [ "$PRERELEASE" != "true" ]; then
-              echo "::error::$TAG has a pre-release version; publish it as a pre-release."
-              exit 1
-            fi
-          fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
+        run: bash .github/scripts/release-version.sh
 
       - name: Check a release comes from main
-        if: env.DRY_RUN != 'true' && !github.event.release.prerelease
+        if: env.DRY_RUN != 'true' && env.PRERELEASE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
-        run: |
-          # "behind" or "identical": the tagged commit is in main's history. Asked of the API, since the checkout is shallow.
-          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$SHA" --jq .status 2>/dev/null || echo missing)
-          if [ "$status" != "behind" ] && [ "$status" != "identical" ]; then
-            echo "::error::$TAG must come from main, but its commit $SHA is not on main ($status). Tag a commit on main, or publish it as a pre-release."
-            exit 1
-          fi
+        run: bash .github/scripts/release-from-main.sh
 
       # The root has no dependencies of its own; everything is in app/, and wtv has none.
       - name: Install
@@ -148,13 +131,130 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  windows:
+    name: Build and sign the Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    # The Azure login has no stored secret: GitHub's OpenID Connect token is exchanged for one, and the app
+    # registration's federated credential only accepts it from this environment
+    # (repo:estruyf@2900833/hunkdory@1438218663:environment:windows-signing).
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      DRY_RUN: ${{ github.event_name != 'release' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Version from the tag
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: bash .github/scripts/release-version.sh
+
+      - name: Check a release comes from main
+        if: env.DRY_RUN != 'true' && env.PRERELEASE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: bash .github/scripts/release-from-main.sh
+
+      - name: Install
+        run: npm ci --prefix app
+
+      - name: Git identity for the tests
+        run: |
+          git config --global user.name "Hunkdory CI"
+          git config --global user.email "ci@hunkdory.invalid"
+
+      - name: Typecheck and unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Azure login
+        if: vars.AZURE_SIGNING_ENDPOINT != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and sign
+        env:
+          # Azure Trusted Signing: the account's settings are repository variables (scripts/dist-win.mjs passes them
+          # to electron-builder). Its TrustedSigning module signs with the Azure CLI login above.
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_SIGNING_PUBLISHER: ${{ vars.AZURE_SIGNING_PUBLISHER }}
+          # Or a code signing certificate exported as .pfx, base64-encoded, and its password.
+          WIN_CSC_LINK: ${{ secrets.WIN_CERTIFICATE_PFX_BASE64 }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$AZURE_SIGNING_ENDPOINT" ]; then
+            echo "Signing with Azure Trusted Signing."
+            unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD
+          elif [ -n "$WIN_CSC_LINK" ]; then
+            echo "Signing with the certificate in WIN_CERTIFICATE_PFX_BASE64."
+          else
+            echo "::error::Windows signing isn't set up, and nothing is attached unsigned. See docs/development.md → Releasing."
+            exit 1
+          fi
+          # The app's version (About panel, the installer's name) is the release's.
+          (cd app && npm pkg set version="$VERSION")
+          npm --prefix app run dist:win -- --publish never
+
+      - name: Check the signatures and the publisher
+        # The installer and both apps are validly signed (electron-builder signs the uninstaller with the same
+        # settings), by the publisher the apps check updates against: one that doesn't match would make every
+        # installed copy of this release refuse all later updates.
+        run: node app/scripts/checkWindowsSignatures.mjs
+
+      - name: Check the installer can unpack everything
+        # The installer skips a file it can't unpack without an error, so a broken one still reports success.
+        run: node app/scripts/checkWindowsInstaller.mjs
+
+      - name: Check the files
+        run: |
+          cd app/dist
+          ls -la
+          ls "Hunkdory-$VERSION-setup.exe" "Hunkdory-$VERSION-setup.exe.blockmap" latest.yml >/dev/null
+          # The feed offers this build, and the app knows where to look for the next one.
+          grep -q "^version: $VERSION$" latest.yml
+          grep -q "^path: Hunkdory-$VERSION-setup.exe$" latest.yml
+          grep -q "repo: hunkdory" win-unpacked/resources/app-update.yml
+
+      - name: Keep the build for the publish job
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: |
+            app/dist/Hunkdory-*-setup.exe
+            app/dist/Hunkdory-*-setup.exe.blockmap
+            app/dist/latest.yml
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
-    name: Attach the build to the release
-    needs: [mac]
+    name: Attach the builds to the release
+    needs: [mac, windows]
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Only this job can write to the release; the build job, which runs the repo's code and dependencies, can't.
+    # Only this job can write to the release; the build jobs, which run the repo's code and dependencies, can't.
     permissions:
       contents: write
     env:
@@ -166,24 +266,25 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
 
-      - name: Download the build
+      - name: Download the builds
         uses: actions/download-artifact@v7
         with:
-          name: release-mac
+          pattern: release-*
           path: dist
+          merge-multiple: true
 
-      - name: Attach it to the release
+      - name: Attach them to the release
         env:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           cd dist
           ls -la
-          gh release upload "$TAG" *.dmg *.zip *.zip.blockmap --clobber --repo "$GITHUB_REPOSITORY"
-          # The feed last, so it never points at a file that isn't there yet. A pre-release gets none: the app only
+          gh release upload "$TAG" *.dmg *.zip *.zip.blockmap *-setup.exe *-setup.exe.blockmap --clobber --repo "$GITHUB_REPOSITORY"
+          # The feeds last, so they never point at a file that isn't there yet. A pre-release gets none: the app only
           # follows releases.
           if [ "$PRERELEASE" != "true" ]; then
-            gh release upload "$TAG" latest-mac.yml --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" latest-mac.yml latest.yml --clobber --repo "$GITHUB_REPOSITORY"
           fi
 
       - name: Fill in empty release notes from the changelog

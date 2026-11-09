@@ -8,6 +8,7 @@ import { Notice } from './ui/Notice.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
 import { timeAgo } from '../../shared/order.ts';
 import type { RunLog, RunLogEntry, StepTrace } from '../../shared/types.ts';
+import { thisComputer } from '../lib/platform.ts';
 
 /** How often the log is read again while the agent works. */
 const POLL_MS = 2000;
@@ -122,7 +123,7 @@ export function StepTraceDialog({ projectId, branch, title, files, onClose }: { 
         {error && <Notice tone="error">{error}</Notice>}
         {!trace && !error && <p className="text-body text-muted">Reading the agent’s session…</p>}
         {trace?.probable && <Notice tone="caution">This session is a best guess: the agent doesn’t record which branch it ran on.</Notice>}
-        {trace?.turns.length === 0 && <p className="text-body text-muted">The session has no edits to these files on this branch. The agent may have made them through a shell command, or in a session that isn’t on this Mac.</p>}
+        {trace?.turns.length === 0 && <p className="text-body text-muted">The session has no edits to these files on this branch. The agent may have made them through a shell command, or in a session that isn’t on {thisComputer()}.</p>}
         {trace?.turns.map((turn, i) => (
           <section key={i} className="flex flex-col gap-2">
             <SectionHeader as="h3">

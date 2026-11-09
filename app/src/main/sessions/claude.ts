@@ -15,6 +15,7 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { SessionInfo, TestRun } from '../../shared/types.ts';
+import { expandHome, gitPath } from '../paths.ts';
 import { TEST_CMD, shortCommand, testResult, withoutHeredocs } from './testcmd.ts';
 
 export { testResult } from './testcmd.ts';
@@ -32,7 +33,7 @@ const isDir = (p: string) => {
 /** Claude Code config dirs that hold sessions: ~/.claude, $CLAUDE_CONFIG_DIR, and any ~/.claude-* or ~/.claude.* folder. */
 export function claudeConfigDirs(home = homedir(), env: NodeJS.ProcessEnv = process.env): string[] {
   const dirs = new Set<string>([join(home, '.claude')]);
-  if (env.CLAUDE_CONFIG_DIR) dirs.add(resolve(env.CLAUDE_CONFIG_DIR.replace(/^~(?=\/|$)/, home)));
+  if (env.CLAUDE_CONFIG_DIR) dirs.add(resolve(expandHome(env.CLAUDE_CONFIG_DIR, home)));
   let names: string[] = [];
   try {
     names = readdirSync(home);
@@ -187,11 +188,11 @@ export function parseTranscript(text: string, file: string, id: string, configDi
     if (rec.type === 'custom-title' && rec.customTitle) customTitle = rec.customTitle;
     if (rec.type === 'worktree-state' && rec.worktreeSession) {
       originalBranch = rec.worktreeSession.originalBranch ?? originalBranch;
-      worktreePath = rec.worktreeSession.worktreePath ?? worktreePath;
+      worktreePath = rec.worktreeSession.worktreePath != null ? gitPath(rec.worktreeSession.worktreePath) : worktreePath;
     }
     work.add(rec);
     if (rec.isSidechain) continue;
-    if (rec.cwd) cwd = rec.cwd;
+    if (rec.cwd) cwd = gitPath(rec.cwd);
     if (rec.timestamp && (rec.type === 'user' || rec.type === 'assistant')) {
       startedAt ??= rec.timestamp;
       endedAt = rec.timestamp;
@@ -333,5 +334,5 @@ function firstCwd(file: string): string | null {
   }
   const head = buf.subarray(0, n).toString('utf8');
   const m = head.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
-  return m ? JSON.parse(`"${m[1]}"`) : null;
+  return m ? gitPath(JSON.parse(`"${m[1]}"`)) : null;
 }

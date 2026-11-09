@@ -7,6 +7,7 @@ import { assistantFor } from './assistants/index.ts';
 import type { AssistantRun } from './assistants/types.ts';
 import { notOnBranch } from './git.ts';
 import { shellEnv, wtvCommand } from './shellEnv.ts';
+import { thisComputer } from '../shared/platform.ts';
 import type { Projects } from './projects.ts';
 import type { Store } from './store.ts';
 import { clip, whereSection } from './writer.ts';
@@ -116,8 +117,8 @@ export function askAbility(session: SessionInfo | null, branch: Pick<BranchInfo,
   return {
     question: { by: 'fresh' },
     change: branch.pr && !branch.pr.fork
-      ? { by: null, reason: "The pull request's branch isn't checked out on this Mac, so there is nowhere to change it yet. Hunkdory can check it out in a separate folder.", checkout: true }
-      : { by: null, reason: `${branch.pr ? "The pull request's branch comes from a fork and" : 'This branch'} isn't checked out on this Mac, so there is nowhere to change it. Check it out in a folder first.` },
+      ? { by: null, reason: `The pull request's branch isn't checked out on ${thisComputer(process.platform)}, so there is nowhere to change it yet. Hunkdory can check it out in a separate folder.`, checkout: true }
+      : { by: null, reason: `${branch.pr ? "The pull request's branch comes from a fork and" : 'This branch'} isn't checked out on ${thisComputer(process.platform)}, so there is nowhere to change it. Check it out in a folder first.` },
   };
 }
 

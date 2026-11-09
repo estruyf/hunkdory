@@ -3,8 +3,14 @@ import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
-/** `~` at the start means your home folder. */
-export const expandHome = (p: string, home = homedir()) => p.replace(/^~(?=\/|$)/, home);
+/** `~` at the start means your home folder: `~/dev`, or on Windows `~\\dev` too. */
+export const expandHome = (p: string, home = homedir(), platform = process.platform) => p.replace(platform === 'win32' ? /^~(?=[/\\]|$)/ : /^~(?=\/|$)/, home);
+
+/**
+ * A path the way git writes it, so it compares with what git says as a string: on Windows git uses `/`, while sessions
+ * record `C:\\Users\\…`. Unchanged elsewhere.
+ */
+export const gitPath = (p: string, platform = process.platform) => (platform === 'win32' ? p.replaceAll('\\', '/') : p);
 
 /**
  * One key per folder: home expanded, `.`/`..` and trailing slashes gone, and symlinks followed when the

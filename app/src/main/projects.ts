@@ -7,7 +7,8 @@ import { Worker } from 'node:worker_threads';
 import createWtvWorker from './wtv-worker.ts?nodeWorker';
 import type { WtvJob, WtvOutput } from './wtv-worker.ts';
 import * as g from './git.ts';
-import { pathKey } from './paths.ts';
+import { expandHome, pathKey } from './paths.ts';
+import { thisComputer } from '../shared/platform.ts';
 import { detectedIcon, forgetIconFile, projectIconInfo, storeIconChoice } from './projectIcons.ts';
 import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './sessions/claude.ts';
 import { belongsTo as copilotBelongsTo, readCopilotSessions } from './sessions/copilot.ts';
@@ -83,7 +84,7 @@ export class Projects {
   }
 
   async checkFolder(path: string): Promise<RepoCheck> {
-    const full = path.replace(/^~(?=\/|$)/, homedir());
+    const full = expandHome(path);
     const empty: RepoCheck = { path: full, isRepo: false, root: null, baseBranch: null, branches: [], remote: null, sessionSources: [], sessionCount: 0, icon: { icon: null, source: null, path: null } };
     if (!existsSync(full)) return { ...empty, error: 'Folder not found' };
     const root = await g.repoRoot(full);
@@ -116,7 +117,7 @@ export class Projects {
     const copilot = readCopilotSessions().map((s) => ({ cwd: s.cwd, sessions: 1, lastActive: Date.parse(s.endedAt ?? '') || 0 }));
     for (const f of [...scanSessionFolders(), ...copilot]) {
       // Worktree sessions count towards their repo.
-      const path = f.cwd.replace(/\/\.claude\/worktrees\/[^/]+.*$/, '');
+      const path = f.cwd.replace(/[/\\]\.claude[/\\]worktrees[/\\].+$/, '');
       const key = pathKey(path);
       if (known.has(key) || !existsSync(join(path, '.git'))) continue;
       const prev = byPath.get(key);
@@ -156,7 +157,7 @@ export class Projects {
   }
 
   async checkGitHub(path: string): Promise<string> {
-    const root = await g.repoRoot(path.replace(/^~(?=\/|$)/, homedir()));
+    const root = await g.repoRoot(expandHome(path));
     if (!root) throw new Error('Not a git repository');
     return gh.checkRepo(root);
   }
@@ -740,7 +741,7 @@ export class Projects {
     const { project, d } = await this.find(projectId, branch);
     const pr = d.branch.pr;
     if (!pr || !project.github) throw new Error('This branch has no pull request on GitHub.');
-    if (d.branch.checkout.kind === 'none') throw new Error(`PR #${pr.number} isn't checked out on this Mac, or it's behind the PR there.`);
+    if (d.branch.checkout.kind === 'none') throw new Error(`PR #${pr.number} isn't checked out on ${thisComputer(process.platform)}, or it's behind the PR there.`);
     const wt = d.branch.checkout.path;
     if ((await g.currentBranch(wt)) !== pr.headRefName) throw new Error(`The folder with these changes is no longer on ${pr.headRefName}. Reload the review.`);
     // The PR was rebased under the checkout: its branch goes onto the PR's head, so the push isn't a forced one.
@@ -765,7 +766,7 @@ export class Projects {
       await new Promise((r) => setTimeout(r, 1000));
     }
     this.cache.delete(`${project.id}::${pr.headRefName}`);
-    return files ? `Committed ${files} file${files === 1 ? '' : 's'} and pushed to PR #${pr.number}.` : `Pushed the commits on this Mac to PR #${pr.number}.`;
+    return files ? `Committed ${files} file${files === 1 ? '' : 's'} and pushed to PR #${pr.number}.` : `Pushed the commits on ${thisComputer(process.platform)} to PR #${pr.number}.`;
   }
 
   /** The PR stack this branch is in, with the branch name Hunkdory opens each PR's review by. */

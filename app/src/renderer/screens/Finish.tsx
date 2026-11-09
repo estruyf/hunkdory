@@ -21,6 +21,7 @@ import { isReviewed } from '../../shared/order.ts';
 import { buildPlan, defaultDrops, defaultReviewEvent, openItems, unpushedWork, vouchesForCode } from '../../shared/plan.ts';
 import { commentParts, reviewedNote, sendableComments } from '../../shared/comments.ts';
 import type { Comment, Decision, GitHubEvent, ReviewData, ReviewState } from '../../shared/types.ts';
+import { thisComputer } from '../lib/platform.ts';
 
 const EVENTS: { id: GitHubEvent; title: string }[] = [
   { id: 'COMMENT', title: 'Comment' },
@@ -129,7 +130,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
               ? `Pushes ${data.branch} and opens a pull request into ${base}, with your comments in the description. Nothing is merged yet.`
               : `Merge into ${base} as it is. Your comments stay in Hunkdory.`,
       submit: data.uncommitted ? 'Approve & commit' : data.prByYou ? 'Merge' : data.pr ? 'Approve & merge' : canOpenPr && openPr ? 'Approve & open PR' : 'Approve & merge',
-      disabled: unpushedWork(data) ?? undefined,
+      disabled: unpushedWork(data, thisComputer()) ?? undefined,
     },
     ...(data.pr
       ? [
@@ -153,7 +154,7 @@ function FinishForm({ go, data, state: initialState }: { go: Go; data: ReviewDat
         title: 'Send back to the agent',
         detail: `Resumes the agent's session with ${comments.length ? `your ${plural(commentCount, 'comment')}` : 'your note'}${dropping.length ? ` and asks it to drop ${dropping.map((s) => `step ${s.index + 1}`).join(', ')}` : ''}. It runs in the background and can edit files on the branch.`,
         submit: 'Send back',
-        disabled: agent ? undefined : !data.assistant ? "This project is set to Manual, so there's no assistant to send it back to." : 'No session on this Mac worked on this branch, so there is no agent to send it back to.',
+        disabled: agent ? undefined : !data.assistant ? "This project is set to Manual, so there's no assistant to send it back to." : `No session on ${thisComputer()} worked on this branch, so there is no agent to send it back to.`,
       },
     {
       id: 'discard',

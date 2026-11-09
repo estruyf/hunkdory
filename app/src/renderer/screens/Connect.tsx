@@ -20,6 +20,7 @@ import { InstallLink } from '../components/setup.tsx';
 import { CircleCheck, RefreshCw } from 'lucide-react';
 import { IconPicker } from '../components/IconPicker.tsx';
 import type { AiReviewSettings, AssistantChoice, InboxPreview, Project, ProjectIconChoice, ProjectIconInfo, RepoCheck, Watch } from '../../shared/types.ts';
+import { currentPlatform, thisComputer, yourComputer } from '../lib/platform.ts';
 
 /** Past this many open pull requests, say what watching them all means. */
 const BUSY_REPO = 30;
@@ -184,8 +185,9 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
   const chosen = assistants.find((a) => a.id === assistant);
   const noIcon: ProjectIconInfo = { icon: null, source: null, path: null };
   const detectedIcon = check?.icon ?? noIcon;
-  // What an empty Name falls back to, like the main process does.
-  const folderName = (check?.root ?? existing?.path ?? path).replace(/\/+$/, '').split('/').pop() ?? '';
+  // What an empty Name falls back to, like the main process does. A folder typed on Windows may use `\`.
+  const separators = currentPlatform() === 'win32' ? /[\\/]+/ : /\/+/;
+  const folderName = (check?.root ?? existing?.path ?? path).split(separators).filter(Boolean).pop() ?? '';
   const baseOptions = check ? [...new Set([base, check.baseBranch, ...check.branches].filter(Boolean) as string[])] : [];
 
   // Say why Connect is greyed out, instead of leaving you to guess.
@@ -224,7 +226,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 pt-7 pb-14">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-hero font-semibold">{existing ? `${existing.name} settings` : 'Connect a project'}</h1>
-            <p className="text-body text-muted">{existing ? 'What this project shows in your inbox, and who explains its changes.' : 'A project is one git repo on your Mac. Check what shows up in your inbox, choose who explains the changes, and connect.'}</p>
+            <p className="text-body text-muted">{existing ? 'What this project shows in your inbox, and who explains its changes.' : `A project is one git repo on ${yourComputer()}. Check what shows up in your inbox, choose who explains the changes, and connect.`}</p>
           </div>
 
           {/* Adding a project: the repos you work in with Claude Code, one click from filling in the folder. */}
@@ -235,7 +237,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
               <label htmlFor="folder" className="w-full text-ui font-semibold">
                 Folder
               </label>
-              <input id="folder" className={`${FIELD_LG} min-w-0 flex-[1_1_300px] font-mono ${existing ? 'bg-sidebar' : ''}`} value={path} readOnly={!!existing} onChange={(e) => setPath(e.target.value)} placeholder="~/dev/my-project" />
+              <input id="folder" className={`${FIELD_LG} min-w-0 flex-[1_1_300px] font-mono ${existing ? 'bg-sidebar' : ''}`} value={path} readOnly={!!existing} onChange={(e) => setPath(e.target.value)} placeholder={currentPlatform() === 'win32' ? '~\\dev\\my-project' : '~/dev/my-project'} />
               {!existing && (
                 <Button size="lg" onClick={choose}>
                   Choose…
@@ -272,7 +274,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
               <Checkbox checked={anyBranch} onChange={setAnyBranch}>
                 Local branches{ok && preview ? <span className="text-muted"> · {plural(preview.branches, 'branch', 'branches')} with changes now</span> : null}
               </Checkbox>
-              <span className="pl-6 text-meta text-muted">Every branch on this Mac with commits on top of {base ? <span className="font-mono">{base}</span> : 'the base'}, from an agent or a person.</span>
+              <span className="pl-6 text-meta text-muted">Every branch on {thisComputer()} with commits on top of {base ? <span className="font-mono">{base}</span> : 'the base'}, from an agent or a person.</span>
               {!anyBranch && (
                 <>
                   <Checkbox checked={usePattern} onChange={setUsePattern}>
@@ -388,7 +390,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                   </Button>
                 }
               >
-                <strong className="font-semibold">No AI assistant found on this Mac.</strong> You can connect this project as Manual, but the story, questions and changes need Claude Code or the Copilot CLI. Install one, then check again.
+                <strong className="font-semibold">No AI assistant found on {thisComputer()}.</strong> You can connect this project as Manual, but the story, questions and changes need Claude Code or the Copilot CLI. Install one, then check again.
               </Notice>
             )}
             {assistants.length > 0 && assistant && !assistants.some((a) => a.id === assistant) && <Notice tone="error">The agent this project used isn't in Settings any more. Pick another one, or add it again in Settings.</Notice>}
@@ -465,7 +467,7 @@ export function Connect({ go, initialPath, projectId, back }: { go: Go; initialP
                       onChange={(e) => setAiReview({ ...aiReview, instructions: e.target.value })}
                       placeholder="e.g. We target WCAG 2.2 AA. Money is always in cents. Ignore files in src/legacy."
                     />
-                    <span className="text-meta font-normal text-muted">Saved in Hunkdory on this Mac, not in the repo, so a branch can't change the rules of its own review.</span>
+                    <span className="text-meta font-normal text-muted">Saved in Hunkdory on {thisComputer()}, not in the repo, so a branch can't change the rules of its own review.</span>
                   </label>
                   <div className="flex flex-col gap-1.5">
                     <SectionHeader as="h3">How deep</SectionHeader>

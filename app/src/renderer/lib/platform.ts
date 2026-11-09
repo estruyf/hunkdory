@@ -1,3 +1,5 @@
+import { thisComputer as thisComputerIn, yourComputer as yourComputerIn } from '../../shared/platform.ts';
+
 /**
  * The platform Hunkdory runs on, from the preload (`process.platform`). macOS when there is no window, as in
  * unit tests, so what they check stays the macOS wording. Read when called, never at load.
@@ -14,6 +16,10 @@ export const trashName = (platform = currentPlatform()) => (platform === 'win32'
 
 /** How to get a file back from there: from Finder on macOS, from the Recycle Bin itself on Windows. */
 export const restoreFrom = (platform = currentPlatform()) => (platform === 'darwin' ? 'from Finder' : 'from there');
+
+/** "this Mac" or "this PC", and "your Mac" or "your PC", inside a sentence. */
+export const thisComputer = (platform = currentPlatform()) => thisComputerIn(platform);
+export const yourComputer = (platform = currentPlatform()) => yourComputerIn(platform);
 
 /** This computer, next to the paired ones (the Computers strip, Run on): "This Mac", or "This PC" on Windows. */
 export const thisComputerName = (platform = currentPlatform()) => (platform === 'darwin' ? 'This Mac' : 'This PC');

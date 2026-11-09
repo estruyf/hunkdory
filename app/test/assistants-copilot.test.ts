@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { copilotArgs, describeTool, parseCopilotLine, parseStructured, READ_GIT_SHELL } from '../src/main/assistants/copilot.ts';
+import { copilotArgs, describeTool, npmCopilot, parseCopilotLine, parseStructured, READ_GIT_SHELL } from '../src/main/assistants/copilot.ts';
 
 // Slice 3 of docs/plans/2026-11-02-assistants.md: `copilot -p … --output-format json` events, recorded live
 // (see the probe notes in the plan) and saved under test/fixtures/copilot-*.jsonl. Every event line here
@@ -12,7 +12,7 @@ import { copilotArgs, describeTool, parseCopilotLine, parseStructured, READ_GIT_
 const fixture = (name: string) => readFileSync(join(import.meta.dirname, 'fixtures', `${name}.jsonl`), 'utf8').trim().split('\n');
 
 test('copilotArgs: git-only allows read-only git over bash, nothing else', () => {
-  assert.deepEqual(copilotArgs({ access: 'git-only', sessionId: 's1', prompt: 'p' }), [
+  assert.deepEqual(copilotArgs({ access: 'git-only', sessionId: 's1', prompt: 'p' }, 'darwin'), [
     '-p', 'p', '--output-format', 'json', '--session-id', 's1', '--name', 'Hunkdory: question',
     '--no-custom-instructions', '--disable-builtin-mcps', '--no-auto-update', '--no-ask-user',
     '--available-tools', 'bash', '--allow-tool', ...READ_GIT_SHELL,
@@ -20,7 +20,7 @@ test('copilotArgs: git-only allows read-only git over bash, nothing else', () =>
 });
 
 test('copilotArgs: read adds view, grep and glob', () => {
-  assert.deepEqual(copilotArgs({ access: 'read', sessionId: 's1', prompt: 'p' }), [
+  assert.deepEqual(copilotArgs({ access: 'read', sessionId: 's1', prompt: 'p' }, 'darwin'), [
     '-p', 'p', '--output-format', 'json', '--session-id', 's1', '--name', 'Hunkdory: question',
     '--no-custom-instructions', '--disable-builtin-mcps', '--no-auto-update', '--no-ask-user',
     '--available-tools', 'bash', 'view', 'grep', 'glob', '--allow-tool', ...READ_GIT_SHELL, 'view', 'grep', 'glob',
@@ -28,7 +28,7 @@ test('copilotArgs: read adds view, grep and glob', () => {
 });
 
 test('copilotArgs: edit adds edit and create tools, allows writing, and names the run "change"', () => {
-  assert.deepEqual(copilotArgs({ access: 'edit', sessionId: 's1', prompt: 'p' }), [
+  assert.deepEqual(copilotArgs({ access: 'edit', sessionId: 's1', prompt: 'p' }, 'darwin'), [
     '-p', 'p', '--output-format', 'json', '--session-id', 's1', '--name', 'Hunkdory: change',
     '--no-custom-instructions', '--disable-builtin-mcps', '--no-auto-update', '--no-ask-user',
     '--available-tools', 'bash', 'view', 'grep', 'glob', 'edit', 'create', '--allow-tool', ...READ_GIT_SHELL, 'view', 'grep', 'glob', 'write',
@@ -41,7 +41,7 @@ test('copilotArgs: a schema (walkthroughs only) names the run "walkthrough"', ()
 });
 
 test('copilotArgs: resuming a linked session continues it with --resume, no --session-id, and allows writing', () => {
-  assert.deepEqual(copilotArgs({ access: 'edit', sessionId: 'unused', prompt: 'keep going', session: { mode: 'continue', id: 'real-session-id' }, allowBash: ['shell(wtv *)'] }), [
+  assert.deepEqual(copilotArgs({ access: 'edit', sessionId: 'unused', prompt: 'keep going', session: { mode: 'continue', id: 'real-session-id' }, allowBash: ['shell(wtv *)'] }, 'darwin'), [
     '--resume', 'real-session-id', '-p', 'keep going', '--output-format', 'json',
     '--available-tools', 'bash', 'view', 'grep', 'glob', 'edit', 'create',
     '--allow-tool', ...READ_GIT_SHELL, 'view', 'grep', 'glob', 'write', 'shell(wtv *)',
@@ -49,9 +49,27 @@ test('copilotArgs: resuming a linked session continues it with --resume, no --se
   ]);
 });
 
+test('copilotArgs: on Windows the shell is PowerShell, with the same git it may run', () => {
+  const args = copilotArgs({ access: 'git-only', sessionId: 's1', prompt: 'p' }, 'win32');
+  assert.deepEqual(args.slice(args.indexOf('--available-tools')), ['--available-tools', 'powershell', '--allow-tool', ...READ_GIT_SHELL]);
+  const edit = copilotArgs({ access: 'edit', sessionId: 's1', prompt: 'p' }, 'win32');
+  assert.ok(edit.includes('powershell') && !edit.includes('bash'));
+});
+
+test("on Windows, npm's Copilot runs as node and its script, never through copilot.cmd", () => {
+  const PATH = 'C:\\nodejs;C:\\Users\\me\\AppData\\Roaming\\npm';
+  const pkg = 'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@github\\copilot';
+  const all = ['C:\\nodejs\\node.exe', 'C:\\Users\\me\\AppData\\Roaming\\npm\\copilot.cmd', `${pkg}\\npm-loader.js`];
+  const files = (present: string[]) => ({ exists: (path: string) => present.includes(path), readJson: () => ({ bin: { copilot: 'npm-loader.js' } }) });
+  assert.deepEqual(npmCopilot({ PATH }, 'win32', files(all)), { bin: all[0], pre: [all[2]] });
+  for (const missing of all) assert.equal(npmCopilot({ PATH }, 'win32', files(all.filter((f) => f !== missing))), null, missing);
+  assert.equal(npmCopilot({ PATH }, 'darwin', files(all)), null, 'elsewhere the copilot on the PATH runs as it is');
+});
+
 test("describeTool: Copilot's own tool names, same wording as Claude's", () => {
   assert.equal(describeTool('bash', { command: 'git show refs/reviewer/pr/1:src/a.ts' }, '/r'), 'Reading src/a.ts');
   assert.equal(describeTool('bash', { command: 'git log --oneline' }, '/r'), 'git log --oneline');
+  assert.equal(describeTool('powershell', { command: 'git log --oneline' }, '/r'), 'git log --oneline');
   assert.equal(describeTool('view', { path: '/r/src/c.ts' }, '/r'), 'Reading src/c.ts');
   assert.equal(describeTool('grep', { pattern: 'register' }, '/r'), 'Searching for "register"');
   assert.equal(describeTool('glob', { pattern: '**/*.ts' }, '/r'), 'Looking for **/*.ts');

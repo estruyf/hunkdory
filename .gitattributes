@@ -1,0 +1,8 @@
+# Text files are checked out with LF everywhere, also on Windows, so the release scripts run in bash and the tests read
+# their fixtures byte for byte as they are in the repository.
+* text=auto eol=lf
+
+*.png binary
+*.gif binary
+*.icns binary
+*.ico binary

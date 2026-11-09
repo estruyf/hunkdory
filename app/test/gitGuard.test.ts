@@ -1,23 +1,28 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { agentEnv, gitGuardScript } from '../src/main/gitGuard.ts';
-import { forgetShellEnv, parseShellEnv, pathOnlyEnv, shellEnv, which, wtvCommand } from '../src/main/shellEnv.ts';
+import { gitPath } from '../src/main/paths.ts';
+import { forgetShellEnv, parseShellEnv, pathOnlyEnv, shellEnv, which, withUpperCasePath, wtvCommand } from '../src/main/shellEnv.ts';
 
+const win = process.platform === 'win32';
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'hunkdory-guard-')));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-const realGit = execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+// On Windows the wrapper runs in Git Bash, where Claude Code runs its commands: Git's own sh.
+const winEnv = withUpperCasePath(process.env);
+const realGit = win ? (await which('git', winEnv))! : execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+const sh = win ? ((await which('sh', winEnv)) ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'sh.exe')) : '/bin/sh';
 const guard = join(root, 'git');
-writeFileSync(guard, gitGuardScript(realGit));
+writeFileSync(guard, gitGuardScript(gitPath(realGit)));
 chmodSync(guard, 0o755);
 
 const repo = join(root, 'repo');
 const plain = (...args: string[]) => execFileSync(realGit, ['-c', 'commit.gpgsign=false', '-c', 'user.name=T', '-c', 'user.email=t@t.invalid', ...args], { cwd: repo, encoding: 'utf8' });
-execFileSync('mkdir', [repo]);
+mkdirSync(repo);
 plain('init', '-q', '-b', 'main');
 writeFileSync(join(repo, 'a.js'), 'const Offset = 1;\n');
 plain('add', '.');
@@ -26,7 +31,7 @@ writeFileSync(join(repo, 'a.js'), 'const Offset = 2;\n');
 plain('add', '.');
 plain('commit', '-q', '-m', 'two');
 
-const run = (...args: string[]) => spawnSync(guard, args, { cwd: repo, encoding: 'utf8' });
+const run = (...args: string[]) => (win ? spawnSync(sh, [guard, ...args], { cwd: repo, encoding: 'utf8' }) : spawnSync(guard, args, { cwd: repo, encoding: 'utf8' }));
 
 test('git options that write files or run programs are refused, however they are written', () => {
   const made = join(root, 'made');
@@ -81,13 +86,54 @@ test('commands an agent has to be allowed anyway keep their options', () => {
 
 test('an agent finds the wrapper first, and Hunkdory\'s own git does not', async () => {
   const env = await agentEnv();
+  const first = (await shellEnv()).PATH?.split(delimiter)[0] ?? '';
+  assert.ok(env.PATH!.includes(`${delimiter}${first}`), 'your PATH follows the wrapper');
+  if (win) {
+    // Git Bash finds the wrapper; Hunkdory itself only starts git.exe, so it gets the real one.
+    const found = execFileSync(sh, ['-c', 'command -v git'], { env, encoding: 'utf8' }).trim();
+    assert.equal(found.split('/').pop(), 'git');
+    assert.match(execFileSync(sh, ['-c', 'git --version'], { env, encoding: 'utf8' }), /git version/);
+    assert.equal(await which('git', env), realGit);
+    return;
+  }
   const git = await which('git', env);
   assert.notEqual(git, realGit);
   assert.match(execFileSync(git!, ['--version'], { encoding: 'utf8' }), /git version/);
-  assert.match(env.PATH!, new RegExp(`:${process.env.PATH?.split(':')[0]?.replace(/[/.+-]/g, '\\$&')}`));
 });
 
-test('an agent that may load a repo\'s own config gets your PATH, not your shell\'s tokens', async () => {
+// Copilot runs its commands in PowerShell on Windows: 7 when it's installed, else the 5.1 that comes with Windows.
+test('in PowerShell, git is the guard too, and refuses the same options', { skip: !win && 'PowerShell is where Copilot runs commands on Windows' }, async () => {
+  const env = await agentEnv();
+  const made = join(root, 'made-ps');
+  const shells = (await Promise.all(['pwsh', 'powershell'].map((name) => which(name, env)))).filter((path): path is string => !!path);
+  assert.ok(shells.length, 'a PowerShell to try');
+  for (const ps of shells) {
+    const run = (command: string) => spawnSync(ps, ['-NoProfile', '-NonInteractive', '-Command', command], { cwd: repo, env, encoding: 'utf8' });
+    assert.match(run('(Get-Command git).Source').stdout, /powershell[\\/]git\.ps1/, ps);
+    for (const command of [
+      `git diff '--output=${made}' HEAD~1`,
+      `git show '--output=${made}'`,
+      `git -c a.b=c log '--ou=${made}'`,
+      `git grep '-Otouch ${made}' Offset`,
+      `git grep -n '-Otouch ${made}' Offset`,
+      `git grep '--open-files-in-pager=touch ${made}' Offset`,
+      // An array is one argument to a script, and two to git.exe.
+      `git grep Offset a.js,'-Otouch ${made}'`,
+      `git grep Offset @('a.js', @('-Otouch ${made}'))`,
+    ]) {
+      const r = run(command);
+      assert.notEqual(r.status, 0, `${ps}: ${command}`);
+      assert.match(r.stderr, /not allowed: that option can write files or run programs/, `${ps}: ${command}`);
+    }
+    assert.equal(existsSync(made), false, ps);
+    assert.match(run('git log --oneline').stdout, /one/, ps);
+    assert.match(run('git log --format=%s -1').stdout, /two/, ps);
+    assert.match(run('git grep -n Offset').stdout, /a\.js:1/, ps);
+    assert.match(run("git log -1 --format='%s by %an'").stdout, /two by T/, `${ps}: quoted arguments reach git as one`);
+  }
+});
+
+test('an agent that may load a repo\'s own config gets your PATH, not your shell\'s tokens', { skip: win && 'Windows reads no login shell: the app has your environment already' }, async () => {
   const shell = realpathSync(mkdtempSync(join(root, 'shell-')));
   const fake = join(shell, 'zsh');
   writeFileSync(fake, `#!/bin/sh\nprintf '__HUNKDORY_ENV__PATH=/from/shell:/usr/bin:/bin\\0GH_TOKEN=secret\\0__HUNKDORY_END__'\n`);
@@ -110,10 +156,11 @@ test('an agent that may load a repo\'s own config gets your PATH, not your shell
 
 test('the walkthrough check is only offered when it can run', async () => {
   const dir = join(root, 'tools');
-  execFileSync('mkdir', [dir]);
+  mkdirSync(dir);
   const tool = (name: string) => {
-    writeFileSync(join(dir, name), '#!/bin/sh\n');
-    chmodSync(join(dir, name), 0o755);
+    const file = join(dir, win ? `${name}.exe` : name);
+    writeFileSync(file, '#!/bin/sh\n');
+    chmodSync(file, 0o755);
   };
   const env = { PATH: dir };
   assert.equal(await wtvCommand('/Applications/Hunkdory.app/wtv.mjs', env), null, 'neither wtv nor node: the app checks it itself');

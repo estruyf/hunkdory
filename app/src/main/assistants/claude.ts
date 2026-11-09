@@ -8,6 +8,7 @@ import { explainRunFailure } from '../../shared/assistantText.ts';
 import { DEFAULT_CONFIG_DIR } from '../sessions/claude.ts';
 import { agentEnv } from '../gitGuard.ts';
 import { shellEnv, which } from '../shellEnv.ts';
+import { gitPath } from '../paths.ts';
 import type { Assistant, AssistantResult, AssistantRun, AssistantSession, RunOptions, SendBackHandle, SendBackOptions } from './types.ts';
 
 /** Read-only git, for runs that look at a branch without changing it. */
@@ -33,7 +34,7 @@ export function describeTool(name: string, input: Record<string, unknown>, cwd: 
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
   const short = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
   // Paths can come through a symlink (/var is /private/var on macOS), so try the real folder too.
-  const rel = (p: string) => [cwd, real(cwd)].map((c) => relative(c, p)).find((r) => r && !r.startsWith('..')) ?? p;
+  const rel = (p: string) => [cwd, real(cwd)].map((c) => gitPath(relative(c, p))).find((r) => r && !r.startsWith('..')) ?? p;
   if (name === 'Bash') {
     // Claude often starts with `cd <folder> &&`; the part after it says more.
     const cmd = str('command').trim().replace(/^cd \S+ && /, '');
@@ -83,7 +84,7 @@ function runClaude(opts: { claude: string; cwd: string; env: NodeJS.ProcessEnv; 
   const { cwd } = opts;
   mkdirSync(dirname(opts.logFile), { recursive: true });
   const log = createWriteStream(opts.logFile);
-  const child = spawn(opts.claude, ['--output-format', 'stream-json', '--verbose', ...opts.args], { cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(opts.claude, ['--output-format', 'stream-json', '--verbose', ...opts.args], { cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let killed = false;
   const timer = setTimeout(() => child.kill(), opts.timeoutMs);
 
@@ -141,7 +142,9 @@ export class ClaudeAssistant implements Assistant {
 
   async available() {
     const claude = await which('claude', { ...(await shellEnv()) });
-    return claude ? { ok: true as const } : { ok: false as const, reason: 'Claude Code is not installed.' };
+    if (claude) return { ok: true as const };
+    // npm's claude.cmd isn't started (shellEnv.ts → which), so say what is.
+    return { ok: false as const, reason: process.platform === 'win32' ? "Claude Code is not installed. Hunkdory needs its native install (claude.exe), not npm's." : 'Claude Code is not installed.' };
   }
 
   async run(opts: RunOptions): Promise<AssistantRun> {
@@ -163,7 +166,7 @@ export class ClaudeAssistant implements Assistant {
     ];
     mkdirSync(dirname(opts.logFile), { recursive: true });
     const fd = openSync(opts.logFile, 'a');
-    const child = spawn(claude, args, { cwd: opts.session.cwd, env, detached: true, stdio: ['ignore', fd, fd] });
+    const child = spawn(claude, args, { cwd: opts.session.cwd, env, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
     closeSync(fd);
     child.unref();
     child.on('exit', (code) => opts.onExit?.(code === 0, code === 0 ? 'The agent finished working on your feedback.' : `The agent run stopped with exit code ${code}. See the log for details.`));
