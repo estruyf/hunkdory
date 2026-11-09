@@ -1,9 +1,11 @@
 // Agents may run read-only git without asking, but that permission only looks at how a command starts: `git grep -O<program>`
 // runs a program and `git diff --output=<file>` writes a file, and both Claude Code and Copilot let them through. Code under
 // review can ask for exactly that, so an agent's `git` is this wrapper, which sees the arguments after the shell parsed them.
+// On Windows it guards what runs in Git Bash, where Claude Code runs its commands. PowerShell doesn't run it, which is why
+// Copilot, whose commands run there, isn't offered on Windows (assistants/copilot.ts).
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { shellEnv, which } from './shellEnv.ts';
 
 const quoted = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -55,7 +57,8 @@ function guardFolder(env: NodeJS.ProcessEnv): Promise<string | null> {
     const dir = folder ?? mkdtempSync(join(tmpdir(), 'hunkdory-git-'));
     mkdirSync(dir, { recursive: true });
     const file = join(dir, 'git');
-    writeFileSync(file, gitGuardScript(git));
+    // Git Bash reads C:/Program Files/Git/cmd/git.exe, not its backslashes.
+    writeFileSync(file, gitGuardScript(process.platform === 'win32' ? git.replaceAll('\\', '/') : git));
     chmodSync(file, 0o755);
     return dir;
   })();
@@ -66,5 +69,5 @@ function guardFolder(env: NodeJS.ProcessEnv): Promise<string | null> {
 export async function agentEnv(from: Promise<NodeJS.ProcessEnv> = shellEnv()): Promise<NodeJS.ProcessEnv> {
   const env = await from;
   const dir = await guardFolder(env);
-  return dir ? { ...env, PATH: `${dir}:${env.PATH ?? ''}` } : { ...env };
+  return dir ? { ...env, PATH: `${dir}${delimiter}${env.PATH ?? ''}` } : { ...env };
 }

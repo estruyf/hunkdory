@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, screen, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, Tray } from 'electron';
 import { release } from 'node:os';
 import { join, resolve } from 'node:path';
 import { existsSync, renameSync } from 'node:fs';
@@ -17,6 +17,7 @@ import { forgetShellEnv, shellEnv, which } from './shellEnv.ts';
 import { useGuardFolder } from './gitGuard.ts';
 import { ICON_EXTENSIONS, previewIconFile, useIconFolder } from './projectIcons.ts';
 import { trayIcon } from './trayIcon.ts';
+import { thisComputer } from '../shared/platform.ts';
 import { restoredBounds } from './windowPlace.ts';
 import { installedEditors, openInEditor, pickEditor } from './editors.ts';
 import { Updater } from './updater.ts';
@@ -366,9 +367,9 @@ const api: ReviewerApi = {
   setEditor: async (id) => store.updateSettings({ editor: id }),
   openInEditor: async (projectId, branch) => {
     const { d } = await projects.find(projectId, branch);
-    if (d.branch.checkout.kind === 'none') throw new Error(`${branch} isn't checked out on this Mac.`);
+    if (d.branch.checkout.kind === 'none') throw new Error(`${branch} isn't checked out on ${thisComputer(process.platform)}.`);
     const editor = pickEditor(store.settings().editor);
-    // No editor found: Finder at least shows the folder.
+    // No editor found: Finder (File Explorer) at least shows the folder.
     if (editor) await openInEditor(editor, d.branch.checkout.path);
     else shell.showItemInFolder(d.branch.checkout.path);
   },
@@ -424,6 +425,8 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  // Windows would show Electron's own File, Edit and View menus above the app, with Reload on Ctrl+R.
+  if (process.platform === 'win32') win.removeMenu();
   win.once('ready-to-show', () => {
     if (place?.maximized) win?.maximize();
     win?.show();
@@ -457,7 +460,7 @@ function createWindow() {
     e.preventDefault();
     win?.webContents.send('close-tab');
   });
-  // Closing the window keeps Hunkdory in the menu bar. Quit from the tray or with Cmd+Q.
+  // Closing the window keeps Hunkdory in the menu bar (the notification area on Windows). Quit from there or with Cmd+Q.
   win.on('close', (e) => {
     rememberPlace();
     if (quitting) return;
@@ -491,7 +494,9 @@ function openBranch(projectId: string, branch: string) {
 }
 
 function createTray() {
-  tray = new Tray(trayIcon());
+  // A template image is black, which Windows doesn't recolour for a dark taskbar: there it's the app icon, and a click opens the window.
+  tray = new Tray(process.platform === 'win32' ? nativeImage.createFromPath(ICON).resize({ width: 32, height: 32 }) : trayIcon());
+  if (process.platform === 'win32') tray.on('click', showWindow);
   tray.setToolTip('Hunkdory');
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -514,6 +519,8 @@ app.on('before-quit', () => {
 
 app.whenReady().then(() => {
   if (process.platform === 'darwin') app.dock?.setIcon(ICON);
+  // Windows names notifications after the installer's shortcut, which carries the appId (electron-builder.yml).
+  if (process.platform === 'win32') app.setAppUserModelId('dev.hunkdory.app');
   // Before the window opens, so a dark theme never flashes white first.
   nativeTheme.themeSource = store.settings().theme;
   nativeTheme.on('updated', () => win?.setBackgroundColor(windowBackground()));

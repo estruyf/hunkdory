@@ -5,6 +5,7 @@ import type { ReviewData } from '../../shared/types.ts';
 import { cleanError, useAsync } from './ui.tsx';
 import { Button } from './ui/Button.tsx';
 import type { ButtonSize } from './ui/buttonStyles.ts';
+import { currentPlatform, fileManagerName } from '../lib/platform.ts';
 
 /** Opens the branch's folder in your editor; Finder when no editor is installed. Only for a branch that's checked out. */
 export function OpenInEditor({ data, size = 'sm' }: { data: ReviewData; size?: ButtonSize }) {
@@ -21,8 +22,8 @@ export function OpenInEditor({ data, size = 'sm' }: { data: ReviewData; size?: B
   };
   return (
     <>
-      <Button size={size} variant="quiet" icon={<SquareArrowOutUpRight size={13} aria-hidden />} onClick={open} data-tooltip={name ? 'Opens the folder the assistant works in. Pick the editor in Settings.' : 'No editor found in Applications: opens the folder in Finder.'}>
-        {name ? `Open in ${name}` : 'Show in Finder'}
+      <Button size={size} variant="quiet" icon={<SquareArrowOutUpRight size={13} aria-hidden />} onClick={open} data-tooltip={name ? 'Opens the folder the assistant works in. Pick the editor in Settings.' : `No editor found${currentPlatform() === 'win32' ? '' : ' in Applications'}: opens the folder in ${fileManagerName()}.`}>
+        {name ? `Open in ${name}` : `Show in ${fileManagerName()}`}
       </Button>
       {/* Said next to the button: a click that does nothing reads as broken. */}
       {error && (

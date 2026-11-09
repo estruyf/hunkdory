@@ -83,7 +83,7 @@ function runClaude(opts: { claude: string; cwd: string; env: NodeJS.ProcessEnv; 
   const { cwd } = opts;
   mkdirSync(dirname(opts.logFile), { recursive: true });
   const log = createWriteStream(opts.logFile);
-  const child = spawn(opts.claude, ['--output-format', 'stream-json', '--verbose', ...opts.args], { cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(opts.claude, ['--output-format', 'stream-json', '--verbose', ...opts.args], { cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let killed = false;
   const timer = setTimeout(() => child.kill(), opts.timeoutMs);
 
@@ -163,7 +163,7 @@ export class ClaudeAssistant implements Assistant {
     ];
     mkdirSync(dirname(opts.logFile), { recursive: true });
     const fd = openSync(opts.logFile, 'a');
-    const child = spawn(claude, args, { cwd: opts.session.cwd, env, detached: true, stdio: ['ignore', fd, fd] });
+    const child = spawn(claude, args, { cwd: opts.session.cwd, env, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
     closeSync(fd);
     child.unref();
     child.on('exit', (code) => opts.onExit?.(code === 0, code === 0 ? 'The agent finished working on your feedback.' : `The agent run stopped with exit code ${code}. See the log for details.`));

@@ -7,7 +7,7 @@ const run = promisify(execFile);
 
 // Your shell's PATH, as in a terminal: hooks a commit or push runs (husky, lint-staged) need node and the like.
 export async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await run('git', ['-c', 'core.quotePath=false', ...args], { cwd, env: await shellEnv(), maxBuffer: 256 * 1024 * 1024 });
+  const { stdout } = await run('git', ['-c', 'core.quotePath=false', ...args], { cwd, env: await shellEnv(), maxBuffer: 256 * 1024 * 1024, windowsHide: true });
   return stdout;
 }
 

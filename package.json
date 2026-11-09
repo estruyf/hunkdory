@@ -11,6 +11,7 @@
     "test": "npm --prefix app test && npm --prefix tools/wtv test",
     "pack:mac": "npm --prefix app run pack:mac",
     "build:mac": "npm --prefix app run dist:mac",
-    "open:mac": "open app/dist/mac-arm64/Hunkdory.app"
+    "open:mac": "open app/dist/mac-arm64/Hunkdory.app",
+    "build:win": "npm --prefix app run dist:win"
   }
 }

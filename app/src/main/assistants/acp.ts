@@ -260,7 +260,7 @@ export class AcpAssistant implements Assistant {
     const env = await agentEnv(pathOnlyEnv());
     const bin = await which(this.command, env);
     if (!bin) throw new Error(`Could not find "${this.command}". Is ${this.name} installed?`);
-    const child = spawn(bin, this.args, { cwd: opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(bin, this.args, { cwd: opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const timer = setTimeout(() => child.kill(), opts.timeoutMs);
     const client = new AcpClient(child.stdout, child.stdin, opts.logFile);
     const run = runAcpTurn(client, opts, this.name);

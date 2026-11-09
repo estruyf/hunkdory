@@ -5,6 +5,7 @@ import { cleanError } from './ui.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { INSTALL_URL } from '../../shared/assistantText.ts';
 import type { SetupStatus } from '../../shared/types.ts';
+import { thisComputer } from '../lib/platform.ts';
 
 /** What's installed and signed in, and a way to look again after you did something about it. */
 export function useSetup() {
@@ -60,7 +61,7 @@ export function SetupChecklist({ setup }: { setup: ReturnType<typeof useSetup> }
         </Button>
       </div>
       {error && <Notice tone="error">{error}</Notice>}
-      {!status && !error && <p className="text-ui text-muted">Looking at what's on this Mac…</p>}
+      {!status && !error && <p className="text-ui text-muted">Looking at what's on {thisComputer()}…</p>}
       {status && (
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           <Tool state={status.git ? 'ok' : 'missing'} name="Git">
@@ -93,7 +94,7 @@ export function SetupChecklist({ setup }: { setup: ReturnType<typeof useSetup> }
 /** The three kinds of work Hunkdory reviews, said once, up front, so you know they're all here. */
 export function WhatYouCanReview() {
   const kinds = [
-    { icon: GitBranch, title: 'Branches', detail: 'What your coding agents or a colleague made, on this Mac.' },
+    { icon: GitBranch, title: 'Branches', detail: `What your coding agents or a colleague made, on ${thisComputer()}.` },
     { icon: GitPullRequest, title: 'Pull requests', detail: 'Every open PR on GitHub, including the ones Copilot opens.' },
     { icon: Pencil, title: 'Uncommitted changes', detail: 'Edits an agent left in your folder, before they’re committed.' },
   ];

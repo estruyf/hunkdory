@@ -20,6 +20,7 @@ import { feedbackUrl, versionText } from '../../shared/feedback.ts';
 import { olderThan } from '../../shared/order.ts';
 import { updateStatusText, updateToast } from '../../shared/update.ts';
 import type { AcpAgentConfig, SavedWalkthrough, Theme } from '../../shared/types.ts';
+import { currentPlatform, fileManagerName } from '../lib/platform.ts';
 
 const THEMES: { value: Theme; label: string; hint: string }[] = [
   { value: 'light', label: 'Light', hint: 'Always light' },
@@ -138,7 +139,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
                   className={`${FIELD} w-48`}
                 />
               ) : (
-                <span className="text-meta text-muted">No editor found in Applications. Folders open in Finder.</span>
+                <span className="text-meta text-muted">{currentPlatform() === 'win32' ? 'No editor found.' : 'No editor found in Applications.'} Folders open in {fileManagerName()}.</span>
               )}
             </Row>
           </Card>

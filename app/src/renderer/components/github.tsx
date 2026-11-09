@@ -10,6 +10,7 @@ import { Notice } from './ui/Notice.tsx';
 import { Pill } from './ui/Pill.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
 import type { PillTone } from './ui/buttonStyles.ts';
+import { thisComputer } from '../lib/platform.ts';
 
 export function checkCounts(checks: CheckItem[]) {
   const n = { pass: 0, fail: 0, pending: 0, skipped: 0 };
@@ -210,7 +211,7 @@ export function PushToPrNotice({ data, onPushed }: { data: ReviewData; onPushed:
     // The commit row sits under the message: a field and two buttons don't fit a notice's actions column.
     <Notice tone="info" role="note">
       <strong className="font-semibold">
-        {what} on this Mac {one ? "isn't" : "aren't"} on PR #{data.pr.number} yet.
+        {what} on {thisComputer()} {one ? "isn't" : "aren't"} on PR #{data.pr.number} yet.
       </strong>{' '}
       {one ? "It's" : "They're"} part of this review. {data.dirty ? 'Commit and push' : 'Push'} to make {one ? 'it' : 'them'} part of the PR on GitHub.
       <span className="mt-2 flex flex-wrap items-center gap-2">

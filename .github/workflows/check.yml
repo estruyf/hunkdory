@@ -1,0 +1,50 @@
+# Typechecks and runs the unit tests on macOS and Windows, for every pull request and push to main, so a change made for
+# one platform can't break the other. The release workflow runs the same before it builds.
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: npm ci --prefix app
+
+      # The tests make real git repositories and commits.
+      - name: Git identity for the tests
+        run: |
+          git config --global user.name "Hunkdory CI"
+          git config --global user.email "ci@hunkdory.invalid"
+
+      - name: Typecheck and unit tests
+        run: |
+          npm run typecheck
+          npm test

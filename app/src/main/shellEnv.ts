@@ -1,8 +1,9 @@
 // Apps started from Finder get a minimal environment. Borrow the user's login shell's, so `claude`, `gh` and
 // `wtv` resolve and sign in the same way they do in a terminal (an API key or GH_TOKEN set in .zshrc, say).
+// On Windows an app started from the Start menu already has the user's whole environment, so it is used as it is.
 import { execFile } from 'node:child_process';
 import { access, constants } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -27,7 +28,22 @@ export function parseShellEnv(stdout: string): NodeJS.ProcessEnv | null {
   return out.PATH ? out : null;
 }
 
+/**
+ * Windows spells it `Path`, and only process.env itself ignores the case: in a copy, `env.PATH` would be missing, and a
+ * child given both would see either. So a copy has it once, as PATH. Pure.
+ */
+export function withUpperCasePath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out = { ...env };
+  const key = Object.keys(out).find((k) => k !== 'PATH' && k.toUpperCase() === 'PATH');
+  if (key) {
+    out.PATH ??= out[key];
+    delete out[key];
+  }
+  return out;
+}
+
 export function shellEnv(): Promise<NodeJS.ProcessEnv> {
+  if (process.platform === 'win32') return (cached ??= Promise.resolve(withUpperCasePath(process.env)));
   if (failedAt !== null && Date.now() - failedAt > RETRY_FAILED_MS) forgetShellEnv();
   cached ??= (async () => {
     const shell = process.env.SHELL || '/bin/zsh';
@@ -56,9 +72,14 @@ export function forgetShellEnv() {
   failedAt = null;
 }
 
+/**
+ * Where a command is on the PATH. On Windows only a program (`.exe`) counts: npm's `.cmd` shims only start through
+ * cmd.exe, which would read the quotes and `&` in a prompt as its own.
+ */
 export async function which(cmd: string, env: NodeJS.ProcessEnv): Promise<string | null> {
-  for (const dir of (env.PATH ?? '').split(':').filter(Boolean)) {
-    const full = join(dir, cmd);
+  const name = process.platform === 'win32' ? `${cmd}.exe` : cmd;
+  for (const dir of (env.PATH ?? '').split(delimiter).filter(Boolean)) {
+    const full = join(dir.replace(/^"(.*)"$/, '$1'), name);
     try {
       await access(full, constants.X_OK);
       return full;
@@ -68,11 +89,13 @@ export async function which(cmd: string, env: NodeJS.ProcessEnv): Promise<string
 }
 
 /**
- * How an agent runs the walkthrough check on this Mac, or null when it can't: `wtv` itself, or the copy inside the app,
- * which needs `node`. The app doesn't: it has the same check built in, and runs it on whatever the agent leaves behind.
+ * How an agent runs the walkthrough check on this computer, or null when it can't: `wtv` itself, or the copy inside the
+ * app, which needs `node`. The app doesn't: it has the same check built in, and runs it on whatever the agent leaves
+ * behind. On Windows the path is written with `/`, which Git Bash, where Claude Code runs commands, reads as it is.
  */
-export async function wtvCommand(wtvBin: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+export async function wtvCommand(wtvBin: string, env: NodeJS.ProcessEnv, platform = process.platform): Promise<string | null> {
   if (await which('wtv', env)) return 'wtv';
   if (!(await which('node', env))) return null;
-  return /\s/.test(wtvBin) ? `node "${wtvBin}"` : `node ${wtvBin}`;
+  const bin = platform === 'win32' ? wtvBin.replaceAll('\\', '/') : wtvBin;
+  return /\s/.test(bin) ? `node "${bin}"` : `node ${bin}`;
 }

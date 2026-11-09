@@ -1,4 +1,5 @@
 // Finishing a review: merge locally, send back to the agent, or discard.
+import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as g from './git.ts';
@@ -9,6 +10,7 @@ import { shellEnv, wtvCommand } from './shellEnv.ts';
 import { assistantFor } from './assistants/index.ts';
 import { reviewedNote, sendableComments } from '../shared/comments.ts';
 import { unpushedWork } from '../shared/plan.ts';
+import { thisComputer } from '../shared/platform.ts';
 import type { Comment, DecisionRecord, FinishRequest, FinishResult, HunkView, ReviewData, ReviewState, Step } from '../shared/types.ts';
 
 const where = (c: Comment) => (c.path && c.line ? ` at ${c.path}:${c.line}${c.side === 'LEFT' ? ' (removed line)' : ''}` : '');
@@ -208,7 +210,7 @@ export class Actions {
 
   /** Approves the pull request on GitHub, with your comments, then merges it there. */
   private async mergePr(req: FinishRequest, data: ReviewData, state: ReviewState, summary: ReviewState['summary']): Promise<FinishResult> {
-    const unpushed = unpushedWork(data);
+    const unpushed = unpushedWork(data, thisComputer(process.platform));
     if (unpushed) throw new Error(unpushed);
     const { project, pr, repo } = await this.projects.pullRequest(req.projectId, req.branch);
     if (data.headSha !== pr.headRefOid) throw new Error(`PR #${pr.number} changed since you opened this review. Reload it and look at what's new first.`);
@@ -264,7 +266,7 @@ export class Actions {
   /** Uncommitted work on a base branch has nothing to merge: approving it commits it where it is. */
   private async commit(req: FinishRequest, data: ReviewData, summary: ReviewState['summary']): Promise<FinishResult> {
     const { d } = await this.projects.find(req.projectId, req.branch);
-    if (d.branch.checkout.kind === 'none') throw new Error(`${req.branch} isn't checked out on this Mac anymore.`);
+    if (d.branch.checkout.kind === 'none') throw new Error(`${req.branch} isn't checked out on ${thisComputer(process.platform)} anymore.`);
     const path = d.branch.checkout.path;
     if ((await g.currentBranch(path)) !== req.branch) throw new Error(`The folder with these changes is no longer on ${req.branch}. Reload the review.`);
     await g.git(['add', '-A', '--', '.', ':(exclude).review'], path);
@@ -346,7 +348,10 @@ export class Actions {
     return { ok: true, message: review.decision!.message, review };
   }
 
-  /** Stops a send-back that's still going. It runs detached, as its own process group: the agent's tools stop with it. */
+  /**
+   * Stops a send-back that's still going. It runs detached, as its own process group: the agent's tools stop with it.
+   * Windows has no process groups, so there taskkill ends the agent and everything it started.
+   */
   cancelSendBack(projectId: string, branch: string) {
     const pid = this.store.review(projectId, branch)?.decision;
     if (pid?.kind !== 'send-back' || pid.result !== 'running') return;
@@ -354,7 +359,10 @@ export class Actions {
       r.decision!.result = 'failed';
       r.decision!.message = 'You stopped the agent. What it already changed is still on the branch.';
     });
-    if (pid.pid) {
+    if (pid.pid && process.platform === 'win32') {
+      // An error means it had already ended.
+      execFile('taskkill', ['/pid', String(pid.pid), '/t', '/f'], { windowsHide: true }, () => {});
+    } else if (pid.pid) {
       try {
         process.kill(-pid.pid);
       } catch {

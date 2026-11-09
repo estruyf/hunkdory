@@ -5,7 +5,7 @@ import { VersionLine } from '../components/feedback.tsx';
 import { FoundOnThisMac } from '../components/found.tsx';
 import { SetupChecklist, WhatYouCanReview, useSetup } from '../components/setup.tsx';
 import { Button } from '../components/ui/Button.tsx';
-import { currentPlatform } from '../lib/platform.ts';
+import { currentPlatform, yourComputer } from '../lib/platform.ts';
 
 /** First run: what this is, what it can review, whether your tools are ready, and the repos you already work in. */
 export function Welcome({ go }: { go: Go }) {
@@ -38,7 +38,7 @@ export function Welcome({ go }: { go: Go }) {
 
           <p className="flex items-center gap-2 text-meta text-faint">
             <Lock size={13} aria-hidden />
-            Hunkdory runs on your Mac. Your code only goes to your assistant when you let it write a walkthrough, answer a question, make a change, run an AI review, or take work back.
+            Hunkdory runs on {yourComputer()}. Your code only goes to your assistant when you let it write a walkthrough, answer a question, make a change, run an AI review, or take work back.
           </p>
           <VersionLine />
         </div>

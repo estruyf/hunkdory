@@ -9,6 +9,8 @@ export function git(args, cwd) {
     encoding: 'utf8',
     maxBuffer: 512 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
+    // Run from the app on Windows, git would otherwise open a console window each time.
+    windowsHide: true,
   });
 }
 

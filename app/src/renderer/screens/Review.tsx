@@ -15,6 +15,7 @@ import { timeAgo } from '../../shared/order.ts';
 import { promptPreview } from '../../shared/promptText.ts';
 import { Walkthrough } from './Walkthrough.tsx';
 import type { LineRef } from '../components/diff.tsx';
+import { thisComputer } from '../lib/platform.ts';
 
 type At = { stepKey?: string; decision?: string; group?: string; focus?: LineRef };
 
@@ -53,7 +54,7 @@ export function AskedFor({ data, clamp, plain }: { data: ReviewData; clamp?: num
   if (data.pr?.body.trim()) return <Prompt text={data.pr.body.trim()} clamp={clamp} plain={plain} />;
   return (
     <p className="text-body text-muted">
-      {data.pr ? 'The pull request has no description, and no agent session on this Mac worked on its branch.' : 'No agent session ran on this branch, so there is no prompt to show.'}
+      {data.pr ? `The pull request has no description, and no agent session on ${thisComputer()} worked on its branch.` : 'No agent session ran on this branch, so there is no prompt to show.'}
     </p>
   );
 }

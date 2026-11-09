@@ -14,6 +14,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionInfo } from '../../shared/types.ts';
+import { gitPath } from '../paths.ts';
 import { TEST_CMD, shortCommand, testResult, withoutHeredocs } from './testcmd.ts';
 
 export const DEFAULT_SESSIONS_DIR = join(homedir(), '.copilot', 'session-state');
@@ -90,7 +91,7 @@ export function parseCopilotSession(id: string, workspaceYaml: string, eventsJso
     file: eventsFile,
     agent: 'copilot',
     configDir: null,
-    cwd: meta.cwd,
+    cwd: gitPath(meta.cwd),
     branches: [],
     originalBranch: null,
     worktreePath: null,

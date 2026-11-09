@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { EDIT_TOOLS as CLAUDE_EDITS, promptText, subagentFiles } from './claude.ts';
 import { EDIT_TOOLS as COPILOT_EDITS } from './copilot.ts';
 import type { RunLogEntry, SessionInfo, StepTraceTurn } from '../../shared/types.ts';
+import { gitPath } from '../paths.ts';
 
 export type TraceEvent =
   | { kind: 'prompt'; text: string; at: string | null }
@@ -105,7 +106,7 @@ export function copilotEvents(raw: string): TraceEvent[] {
 }
 
 /** The step file this absolute path is, if any. By ending, since a session can run in any worktree of the repo. */
-const stepFile = (path: string, files: string[]) => files.find((f) => path === f || path.endsWith(`/${f}`));
+const stepFile = (path: string, files: string[]) => files.find((f) => gitPath(path) === f || gitPath(path).endsWith(`/${f}`));
 
 /** The parts of a session where the agent edited these files. An edit that failed doesn't count. Pure. */
 export function stepTurns(events: TraceEvent[], files: string[], subagent = false): StepTraceTurn[] {

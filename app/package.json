@@ -14,7 +14,8 @@
     "dist:mac": "electron-vite build && electron-builder --mac",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/*.test.ts"
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/*.test.ts",
+    "dist:win": "electron-vite build && node scripts/dist-win.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",

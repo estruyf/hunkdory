@@ -153,7 +153,7 @@ function runCopilot(opts: { copilot: string; cwd: string; env: NodeJS.ProcessEnv
   const { cwd } = opts;
   mkdirSync(dirname(opts.logFile), { recursive: true });
   const log = createWriteStream(opts.logFile, { flags: 'a' });
-  const child = spawn(opts.copilot, opts.args, { cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(opts.copilot, opts.args, { cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let killed = false;
   const timer = setTimeout(() => child.kill(), opts.timeoutMs);
 
@@ -207,6 +207,9 @@ export class CopilotAssistant implements Assistant {
   name = 'GitHub Copilot';
 
   async available() {
+    // Copilot runs its commands in PowerShell on Windows, where Hunkdory's git guard (gitGuard.ts) can't stop
+    // `git grep -O` or `git log --output` from code under review. Until it can, Copilot isn't offered there.
+    if (process.platform === 'win32') return { ok: false as const, reason: "Copilot isn't supported on Windows yet. Use Claude Code." };
     const copilot = await which('copilot', { ...(await shellEnv()) });
     return copilot ? { ok: true as const } : { ok: false as const, reason: 'The Copilot CLI is not installed.' };
   }
@@ -272,7 +275,7 @@ export class CopilotAssistant implements Assistant {
     const args = copilotArgs({ access: 'edit', session: { id: opts.session.id, mode: 'continue' }, allowBash: opts.allowBash, sessionId: opts.session.id, prompt: opts.prompt });
     mkdirSync(dirname(opts.logFile), { recursive: true });
     const fd = openSync(opts.logFile, 'a');
-    const child = spawn(copilot, args, { cwd: opts.session.cwd, env, detached: true, stdio: ['ignore', fd, fd] });
+    const child = spawn(copilot, args, { cwd: opts.session.cwd, env, detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
     closeSync(fd);
     child.unref();
     child.on('exit', (code) => opts.onExit?.(code === 0, code === 0 ? 'The agent finished working on your feedback.' : `The agent run stopped with exit code ${code}. See the log for details.`));
