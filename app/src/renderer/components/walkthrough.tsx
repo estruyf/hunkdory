@@ -8,6 +8,7 @@ import { Button } from './ui/Button.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { TextButton } from './ui/TextButton.tsx';
 import { jobKey, useWalkthroughJobFor, useWalkthroughs } from '../state/walkthroughs.ts';
+import { openedByLink } from '../state/links.ts';
 
 const PLAIN = 'flex flex-wrap items-start gap-x-4 gap-y-2 border-t border-border pt-5 text-ui text-muted';
 
@@ -247,7 +248,9 @@ export function WalkthroughLine({ data, w }: { data: ReviewData; w: ReturnType<t
         ? 'You stopped Hunkdory writing one.'
         : data.writeWalkthroughs && tooBig({ minutes: data.minutes, steps: data.steps.length })
           ? 'The branch is big, so Hunkdory didn’t start one on its own.'
-          : null;
+          : data.writeWalkthroughs && openedByLink(data.projectId, data.branch)
+            ? 'A link opened this branch, so Hunkdory didn’t start one on its own.'
+            : null;
   return (
     <p className="m-0">
       <strong className="font-semibold">No walkthrough yet</strong>, so the steps are one per file, without reasons. {why}

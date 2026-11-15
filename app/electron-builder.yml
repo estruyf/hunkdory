@@ -30,6 +30,12 @@ extraResources:
       - src/**/*
       - package.json
 
+# hunkdory:// links open a review (src/main/links.ts): in Info.plist on a Mac, and registered by the installer on Windows.
+# The app also claims the scheme at launch with app.setAsDefaultProtocolClient (src/main/index.ts).
+protocols:
+  - name: Hunkdory
+    schemes: [hunkdory]
+
 mac:
   icon: resources/icon.icns
   category: public.app-category.developer-tools

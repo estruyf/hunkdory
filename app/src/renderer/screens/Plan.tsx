@@ -5,6 +5,8 @@ import type { Go } from '../App.tsx';
 import { Crumbs, cleanError, isPlainKey, plural, reviewCrumbs, sizeText, useAsync, usePref } from '../components/ui.tsx';
 import { LoadingPage } from '../components/LoadingPage.tsx';
 import { lastRead, readReview } from '../state/reviewReads.ts';
+import { openedByLink } from '../state/links.ts';
+import { OpenInSeshboard } from '../components/OpenInSeshboard.tsx';
 import { ViewHeader } from '../components/ViewHeader.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { buttonClass } from '../components/ui/buttonStyles.ts';
@@ -216,7 +218,8 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
   );
   const openThreadsIn = (steps: Step[]) => steps.flatMap((s) => s.hunkIds.flatMap((id) => placed.byHunk.get(id) ?? [])).filter((t) => !t.resolved).length;
   // Opening a branch without a walkthrough has Hunkdory write one; the steps update when it's ready.
-  const w = useWalkthroughJob(data, { auto: true, onDone: onReload });
+  // Not when a hunkdory:// link opened it: any website can open one, so it waits for you to ask.
+  const w = useWalkthroughJob(data, { auto: !openedByLink(data.projectId, data.branch), onDone: onReload });
   // The cards the running pills in the top bar scroll to. Only the page moves: scrollIntoView also shifts the panes around it, top bar included.
   const scroller = useRef<HTMLDivElement>(null);
   const walkthroughCard = useRef<HTMLDivElement>(null);
@@ -394,6 +397,7 @@ function PlanView({ go, data, initialState, onReload }: { go: Go; data: ReviewDa
                   Not this session? Unlink
                 </TextButton>
               )}
+              {data.session && <OpenInSeshboard session={data.session} />}
               {data.pr && data.pr.checks.length > 0 && <Pill tone={checksTone(data.pr.checks)}>CI: {checksText(data.pr.checks)}</Pill>}
             </span>
             {/* The story first: what this change is, in words, before how much of it there is. */}

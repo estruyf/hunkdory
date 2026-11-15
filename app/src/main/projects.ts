@@ -8,6 +8,7 @@ import createWtvWorker from './wtv-worker.ts?nodeWorker';
 import type { WtvJob, WtvOutput } from './wtv-worker.ts';
 import * as g from './git.ts';
 import { expandHome, pathKey } from './paths.ts';
+import { checkLink, parseLink, projectFor } from './links.ts';
 import { thisComputer } from '../shared/platform.ts';
 import { detectedIcon, forgetIconFile, projectIconInfo, storeIconChoice } from './projectIcons.ts';
 import { belongsTo, readSessions, scanSessionFolders, sessionDirsFor } from './sessions/claude.ts';
@@ -21,7 +22,7 @@ import type { GeneratedWalkthroughs } from './writer.ts';
 import { asOfNow, type Summaries, type Summary } from './summaries.ts';
 import { askAbility } from './conversations.ts';
 import { assistantFor } from './assistants/index.ts';
-import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, InboxPreview, ProjectIconInfo, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
+import type { BaseChoice, BranchChoice, UncommittedChoice, BranchInfo, CodeSearchResult, FoundFolder, InboxPreview, LinkTarget, ProjectIconInfo, GitHubFeedback, HunkView, IssueRefs, InboxItem, Project, ProjectInput, ProjectScan, PullRequest, RepoCheck, ReviewData, SessionInfo, WalkthroughSource } from '../shared/types.ts';
 
 class WtvRunner {
   private worker: Worker | null = null;
@@ -634,6 +635,34 @@ export class Projects {
       }
     }
     return h.digest('hex');
+  }
+
+  /**
+   * Where a hunkdory:// link goes: the review of `branch` in the project whose folder or worktree `repo` is. A branch
+   * outside the inbox gets picked, as Review another branch does. Nothing else: a link only opens a screen.
+   */
+  async linkTarget(url: string): Promise<LinkTarget> {
+    const parsed = parseLink(url);
+    if (!parsed.ok) return { kind: 'refused', reason: parsed.reason };
+    const { repo, branch } = parsed.link;
+    const reason = await checkLink(parsed.link, { isFolder: (p) => statSync(p, { throwIfNoEntry: false })?.isDirectory() ?? false, branchName: (b) => g.isBranchName(b) });
+    if (reason) return { kind: 'refused', reason };
+    const folders = await Promise.all(
+      this.store.projects().map(async (p) => ({ id: p.id, folders: [p.path, ...(await g.worktrees(p.path).catch(() => [])).map((t) => t.path)].map((f) => pathKey(f)) }))
+    );
+    const projectId = projectFor(pathKey(repo), folders);
+    if (!projectId) return { kind: 'not-a-project', path: repo };
+    const project = this.store.project(projectId);
+    const inInbox = !project.ignored?.includes(branch) && (await this.discover(project, branch)).items.some((d) => d.branch.name === branch);
+    if (inInbox) return { kind: 'review', projectId, branch };
+    // Only on origin, as a colleague's branch you never checked out: the list in Review another branch calls it origin/<name>.
+    const name = (await g.refExists(project.path, branch)) || !(await g.refExists(project.path, `origin/${branch}`)) ? branch : `origin/${branch}`;
+    try {
+      await this.trackBranch(projectId, name);
+    } catch {
+      return { kind: 'refused', reason: `${project.name} has no branch called ${branch}.` };
+    }
+    return { kind: 'review', projectId, branch: name };
   }
 
   async find(projectId: string, branch: string): Promise<{ project: Project; d: Discovered }> {

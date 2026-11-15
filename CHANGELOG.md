@@ -4,6 +4,11 @@ All notable changes to Hunkdory are listed here. Each release is also on the [re
 
 ## [Unreleased]
 
+### Added
+
+- **Open a review from a link.** `hunkdory://review?repo=<folder>&branch=<branch>` opens that branch's review, from a script, a runbook or another app, whether Hunkdory is running or not. A folder that isn't a project yet offers to add it. A link only opens the review: nothing runs until you say so. See [How it works](docs/how-it-works.md#links).
+- **Open in Seshboard.** When a review's agent session is a Claude Code one and Seshboard is installed, one click opens that session in Seshboard.
+
 ## [0.2.0] - 2026-11-09
 
 Hunkdory comes to Windows.

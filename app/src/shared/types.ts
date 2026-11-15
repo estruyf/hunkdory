@@ -861,6 +861,13 @@ export interface AssistantChoice {
   reason?: string;
 }
 
+/** Where a hunkdory:// link goes, now that Hunkdory has looked. It only ever opens a screen. */
+export type LinkTarget =
+  | { kind: 'review'; projectId: string; branch: string }
+  /** The folder isn't one of your projects: offer to add it. */
+  | { kind: 'not-a-project'; path: string }
+  | { kind: 'refused'; reason: string };
+
 export interface ReviewerApi {
   listProjects(): Promise<Project[]>;
   checkFolder(path: string): Promise<RepoCheck>;
@@ -898,7 +905,12 @@ export interface ReviewerApi {
   setBase(projectId: string, branch: string, base: string | null): Promise<void>;
   /** Closes the window the way its close button does: Hunkdory stays in the menu bar. */
   closeWindow(): Promise<void>;
+  /** A link Hunkdory shows itself, like a pull request on GitHub, or a Claude Code session in Seshboard. */
   openExternal(url: string): Promise<void>;
+  /** Whether Seshboard is installed to open `seshboard://` links. */
+  seshboardInstalled(): Promise<boolean>;
+  /** The hunkdory:// link waiting to be opened, once: where it goes, or why it doesn't. Null with none waiting. */
+  takeLink(): Promise<LinkTarget | null>;
   /**
    * `me` is who gh is signed in as, null without GitHub. `projectId` reads that project again and keeps the others
    * as last read; `refetch` asks GitHub for its pull requests rather than use the ones read in the last minute.

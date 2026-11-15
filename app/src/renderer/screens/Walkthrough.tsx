@@ -33,6 +33,7 @@ import { StepTraceDialog } from '../components/runLog.tsx';
 import { useOnReturn, useTabActive } from '../state/tabPane.ts';
 import { AgentChoices, AgentTests, AskedFor, CommentBox, LinkedIssues, NO_TEST_HINT, RiskNote, hasLinkedIssues, whyFallback } from './Review.tsx';
 import { askedLabel } from './Plan.tsx';
+import { OpenInSeshboard } from '../components/OpenInSeshboard.tsx';
 
 export function Walkthrough({ go, data, initialState, stepKey, decision, group, story, focus }: { story?: boolean; go: Go; data: ReviewData; initialState: ReviewState; stepKey?: string; decision?: string; group?: string; focus?: LineRef }) {
   const [state, setState] = useState(initialState);
@@ -622,6 +623,7 @@ export function Walkthrough({ go, data, initialState, stepKey, decision, group, 
             Open the agent session
           </button>
         )}
+        {data.session && <OpenInSeshboard session={data.session} className="self-start text-ui" />}
       </section>
       {hasLinkedIssues(data) && (
         <section className="flex flex-col gap-1.5">
