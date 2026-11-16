@@ -12,4 +12,17 @@ if (window.frame?.platform === 'darwin') {
 window.addEventListener('keydown', (e) => e.key === 'Tab' && document.documentElement.setAttribute('data-keyboard-nav', ''), true);
 window.addEventListener('pointerdown', () => document.documentElement.removeAttribute('data-keyboard-nav'), true);
 
+// The keys next to buttons, unless turned off in Settings. The shortcuts work either way.
+const hints = () => {
+  try {
+    document.documentElement.toggleAttribute('data-no-shortcut-hints', localStorage.getItem('pref:shortcut-hints') === 'false');
+  } catch {
+    // Storage blocked: they show.
+  }
+};
+hints();
+window.addEventListener('pref-changed', (e) => (e as CustomEvent<string>).detail === 'shortcut-hints' && hints());
+// Changed in another window.
+window.addEventListener('storage', (e) => e.key === 'pref:shortcut-hints' && hints());
+
 createRoot(document.getElementById('root')!).render(<App />);

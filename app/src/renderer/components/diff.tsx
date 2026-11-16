@@ -17,6 +17,7 @@ const STEP = 20;
 
 export type DiffMode = 'unified' | 'split';
 export type Anchor = { side: 'LEFT' | 'RIGHT'; line: number };
+type AskKind = 'question' | 'change';
 /** A place to land in a review, as search sends you there: a file, or a line of it (the new version, or with LEFT a removed line). */
 export type LineRef = { path: string; line?: number; side?: Anchor['side'] };
 /** Whether a row is that line: its new number, or for LEFT the old number of a removed line, as GitHub counts. */
@@ -57,6 +58,8 @@ interface Props {
   comments?: Comment[];
   /** Saves a line comment; an empty body removes it. Without it, lines can't be commented on. */
   onComment?: (anchor: Anchor, body: string, id?: string) => void;
+  /** Asks the assistant about a line, or to change it, with what you wrote there. Without it, a line comment only saves. */
+  onAsk?: (anchor: Anchor, body: string, kind: AskKind) => void;
   /** Reads more of the file, for showing context around the change. */
   loadLines?: (side: 'old' | 'new', from: number, to: number) => Promise<{ lines: string[]; total: number }>;
   /** Shown instead of the diff until opened, e.g. for a change you already reviewed. */
@@ -96,7 +99,7 @@ function PathLabel({ path }: { path: string }) {
   );
 }
 
-export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace = false, wrap = false, comments = [], onComment, loadLines, collapsed, badge, noteBy = 'agent', extraAt, focus, reviewed = false, onReviewed, startOpen = false, threads = 0 }: Props) {
+export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace = false, wrap = false, comments = [], onComment, onAsk, loadLines, collapsed, badge, noteBy = 'agent', extraAt, focus, reviewed = false, onReviewed, startOpen = false, threads = 0 }: Props) {
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState(!collapsed);
   const [wantShut, setShut] = useState(reviewed && !startOpen);
@@ -178,7 +181,7 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
       <div key={key} className="diff-thread">
         {more}
         {list.map((c) => (
-          <LineComment key={c.id} comment={c} onSave={(body) => onComment?.(a!, body, c.id)} />
+          <LineComment key={c.id} comment={c} onSave={(body) => onComment?.(a!, body, c.id)} onAsk={onAsk && ((kind) => onAsk(a!, c.body, kind))} />
         ))}
         {isEditing && (
           <LineComposer
@@ -187,6 +190,13 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
               onComment?.(a!, body);
               setEditing(null);
             }}
+            onAsk={
+              onAsk &&
+              ((body, kind) => {
+                onAsk(a!, body, kind);
+                setEditing(null);
+              })
+            }
           />
         )}
       </div>
@@ -344,7 +354,8 @@ export function DiffHunk({ hunk, showNote = true, mode = 'unified', ignoreSpace 
   );
 }
 
-function LineComposer({ initial = '', onSave, onCancel }: { initial?: string; onSave: (body: string) => void; onCancel: () => void }) {
+/** `onAsk` sends what you wrote to the assistant instead of keeping it as a comment. */
+function LineComposer({ initial = '', onSave, onCancel, onAsk }: { initial?: string; onSave: (body: string) => void; onCancel: () => void; onAsk?: (body: string, kind: AskKind) => void }) {
   const [body, setBody] = useState(initial);
   return (
     <div className="flex flex-col gap-2">
@@ -368,6 +379,16 @@ function LineComposer({ initial = '', onSave, onCancel }: { initial?: string; on
         <Button variant="primary" kbd="mod+enter" disabled={!body.trim() && !initial} onClick={() => onSave(body)}>
           {initial ? 'Save' : 'Comment'}
         </Button>
+        {onAsk && (
+          <>
+            <Button disabled={!body.trim()} onClick={() => onAsk(body, 'question')}>
+              Ask
+            </Button>
+            <Button variant="side" disabled={!body.trim()} onClick={() => onAsk(body, 'change')}>
+              Ask for this change
+            </Button>
+          </>
+        )}
         <Button kbd="Esc" onClick={onCancel}>
           Cancel
         </Button>
@@ -376,7 +397,7 @@ function LineComposer({ initial = '', onSave, onCancel }: { initial?: string; on
   );
 }
 
-function LineComment({ comment, onSave }: { comment: Comment; onSave: (body: string) => void }) {
+function LineComment({ comment, onSave, onAsk }: { comment: Comment; onSave: (body: string) => void; onAsk?: (kind: AskKind) => void }) {
   const [edit, setEdit] = useState(false);
   if (edit)
     return (
@@ -394,6 +415,16 @@ function LineComment({ comment, onSave }: { comment: Comment; onSave: (body: str
       <div className="min-w-0 flex-1 break-words select-text">
         <Markdown text={comment.body} />
       </div>
+      {onAsk && (
+        <>
+          <Button variant="quiet" size="sm" onClick={() => onAsk('question')}>
+            Ask
+          </Button>
+          <Button variant="quiet" size="sm" onClick={() => onAsk('change')}>
+            Ask for this change
+          </Button>
+        </>
+      )}
       <Button variant="quiet" size="sm" onClick={() => setEdit(true)}>
         Edit
       </Button>

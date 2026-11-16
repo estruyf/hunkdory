@@ -222,6 +222,8 @@ export interface ShortcutContext {
   decision: boolean;
   /** A skim folder is open on one page. */
   group: boolean;
+  /** One of the pages about the change as a whole is open. */
+  understand: boolean;
   /** Where keyboard focus was. */
   focus: 'list' | 'field' | 'other';
 }
@@ -300,6 +302,8 @@ export const SHORTCUTS = [
   { id: 'review.finish', keys: ['mod+shift+enter'], action: 'Finish', section: 'plan', context: 'In the plan and in a review', when: reviewing },
 
   // In a review
+  { id: 'review.understand', keys: ['u'], action: 'What to know about the change', section: 'review', context: 'In the plan and in a review', note: 'Its first page: what reviewers said, what you asked', when: reviewing },
+  { id: 'review.understandNext', keys: ['arrowright'], action: 'Next page about the change', section: 'review', note: 'J works too', when: (ctx) => inReview(ctx) && ctx.understand },
   { id: 'review.next', keys: ['j'], action: 'Next step or decision', section: 'review', when: inReview },
   { id: 'review.previous', keys: ['k'], action: 'Previous step or decision', section: 'review', when: inReview },
   { id: 'review.good', keys: ['r'], action: 'Looks good, next', section: 'review', context: 'On a decision: its main answer', when: inReview },

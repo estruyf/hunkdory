@@ -282,6 +282,7 @@ export function AskPanel({
   onShowChanges,
   loadedAt,
   draft,
+  sendDraft,
   onCheckout,
 }: {
   data: ReviewData;
@@ -293,6 +294,8 @@ export function AskPanel({
   loadedAt: string;
   /** What the box starts with, such as a GitHub comment to ask about. */
   draft?: string;
+  /** Sends the draft as this as soon as the box opens, for what you already wrote on a line of the diff. */
+  sendDraft?: Exchange['kind'];
   /** Checks the pull request out in a worktree, for a change when it has nowhere to happen yet. */
   onCheckout?: () => Promise<void>;
 }) {
@@ -308,6 +311,9 @@ export function AskPanel({
     setText('');
     if (!(await ask(kind, sent))) setText(sent);
   };
+  useEffect(() => {
+    if (sendDraft && draft?.trim()) send(sendDraft);
+  }, []);
 
   // Manual: no assistant to ask, so there's no box, not just a disabled one.
   if (!data.ask.question.by) return null;

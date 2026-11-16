@@ -20,12 +20,13 @@ import { trayIcon } from './trayIcon.ts';
 import { thisComputer } from '../shared/platform.ts';
 import { restoredBounds } from './windowPlace.ts';
 import { installedEditors, openInEditor, pickEditor } from './editors.ts';
+import { isSeshboardLink, linkInArgv, SCHEME } from './links.ts';
 import { Updater } from './updater.ts';
 import { updatesDisabledReason } from './updateState.ts';
 import { actOnFinding } from '../shared/aiReview.ts';
 import { addToStepComment, answerLine, removeFromStepComments, setAnswerLine } from '../shared/comments.ts';
 import { carryReviewed, markHunk } from '../shared/order.ts';
-import type { ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/types.ts';
+import type { LinkTarget, ReviewerApi, ReviewPatch, ReviewState, Theme } from '../shared/types.ts';
 
 // The app icon. Packaged builds take icon.icns from resources/; this covers the dock and window in dev.
 const ICON = join(__dirname, '../../resources/icon.png');
@@ -56,6 +57,8 @@ if (!process.env.REVIEWER_USER_DATA) {
 if (process.env.REVIEWER_USER_DATA) app.setPath('userData', process.env.REVIEWER_USER_DATA);
 const firstInstance = app.requestSingleInstanceLock();
 if (!firstInstance) app.quit();
+// hunkdory:// links open a review (links.ts). Packaged builds only: in development the bare Electron app would take them.
+if (firstInstance && app.isPackaged) app.setAsDefaultProtocolClient(SCHEME);
 
 // HUNKDORY_MOCK_UPDATES_URL points the updater at a local feed (scripts/mock-update-server.ts).
 const mockFeedUrl = process.env.HUNKDORY_MOCK_UPDATES_URL || undefined;
@@ -180,6 +183,8 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
     const seen = markHunk(r.reviewed[patch.stepKey], patch.hunkIds, patch.hunkId, patch.on);
     if (seen.length) r.reviewed[patch.stepKey] = seen;
     else delete r.reviewed[patch.stepKey];
+  } else if (patch.type === 'understood') {
+    if (!r.understood?.includes(patch.page)) r.understood = [...(r.understood ?? []), patch.page];
   } else if (patch.type === 'line-comment') {
     const body = patch.body.trim();
     const existing = patch.id ? r.comments.find((c) => c.id === patch.id) : null;
@@ -301,8 +306,18 @@ const api: ReviewerApi = {
   },
   closeWindow: async () => win?.close(),
   openExternal: async (url) => {
-    // Only links Hunkdory shows itself, like a pull request on GitHub.
-    if (/^https:\/\//.test(url)) await shell.openExternal(url);
+    // Only links Hunkdory shows itself: a pull request on GitHub, or a Claude Code session in Seshboard.
+    if (/^https:\/\//.test(url) || isSeshboardLink(url)) await shell.openExternal(url);
+  },
+  seshboardInstalled: async () => app.getApplicationNameForProtocol('seshboard://') !== '',
+  takeLink: async () => {
+    const url = waitingLink;
+    waitingLink = null;
+    if (!url) return null;
+    const target = await projects.linkTarget(url).catch((e): LinkTarget => ({ kind: 'refused', reason: e instanceof Error ? e.message : String(e) }));
+    // A branch the link picked is in the inbox now.
+    if (target.kind === 'review') win?.webContents.send('reviews-changed');
+    return target;
   },
   inboxCached: async () => {
     const cached = projects.cachedInbox();
@@ -507,7 +522,27 @@ function createTray() {
   );
 }
 
-app.on('second-instance', showWindow);
+// The newest hunkdory:// link, until the page takes it (takeLink). On a Mac one can come before the app is ready;
+// on Windows it's an argument to the first launch, or to a second copy, which hands it over here and quits.
+let waitingLink: string | null = linkInArgv(process.argv);
+
+function receiveLink(url: string) {
+  waitingLink = url;
+  if (!app.isReady()) return;
+  showWindow();
+  // A page that's still loading takes it once it's up.
+  win?.webContents.send('link-waiting');
+}
+
+app.on('open-url', (e, url) => {
+  e.preventDefault();
+  receiveLink(url);
+});
+app.on('second-instance', (_e, argv) => {
+  const link = linkInArgv(argv);
+  if (link) receiveLink(link);
+  else showWindow();
+});
 app.on('activate', showWindow);
 app.on('before-quit', () => {
   quitting = true;

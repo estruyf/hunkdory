@@ -1,24 +1,24 @@
 // What people said on the pull request on GitHub: their reviews, and the threads on lines of the diff.
 import { ChevronDown, ChevronRight, MessageSquare } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { GitHubFeedback, GitHubReview, GitHubThread, ReviewData, Step } from '../../shared/types.ts';
 import { timeAgo } from '../../shared/order.ts';
-import { openThreads } from '../../shared/threads.ts';
+import { openThreads, placeThreads } from '../../shared/threads.ts';
 import { Markdown } from './markdown.tsx';
 import { cleanError, plural } from './ui.tsx';
 import { Button } from './ui/Button.tsx';
 import { Notice } from './ui/Notice.tsx';
 import { Pill } from './ui/Pill.tsx';
 import { SectionHeader } from './ui/SectionHeader.tsx';
+import { TextButton } from './ui/TextButton.tsx';
 import { TEXTAREA } from './ui/field.ts';
 import { modKey } from '../lib/shortcuts.ts';
-import type { PillTone } from './ui/buttonStyles.ts';
 
-const VERDICT: Record<GitHubReview['state'], { label: string; tone: PillTone }> = {
-  APPROVED: { label: 'Approved', tone: 'ok' },
-  CHANGES_REQUESTED: { label: 'Changes requested', tone: 'caution' },
-  COMMENTED: { label: 'Commented', tone: 'link' },
-  DISMISSED: { label: 'Dismissed', tone: 'muted' },
+const VERDICT: Record<GitHubReview['state'], { label: string; text: string }> = {
+  APPROVED: { label: 'Approved', text: 'text-ok' },
+  CHANGES_REQUESTED: { label: 'Changes requested', text: 'text-caution' },
+  COMMENTED: { label: 'Commented', text: 'text-muted' },
+  DISMISSED: { label: 'Dismissed', text: 'text-faint' },
 };
 
 /** The thread as text for the assistant: where it is, and every comment in it, quoted. */
@@ -160,89 +160,98 @@ export function GitHubThreadCard({
   );
 }
 
+/** A review's first lines as plain text: the page shows two of them, so the markup would only get in the way. */
+const plainText = (md: string) => md.replace(/\*\*|__|`/g, '').replace(/^[#>\s]+/gm, '').trim();
+
 /**
- * The plan's view of the PR on GitHub: who reviewed it and what they said, the threads in this diff with a way to
- * the step and line each is on, and the threads no step shows, on code that changed since or that this diff leaves out.
+ * "What reviewers said": who reviewed the PR and what they wrote, which steps have open threads, and the open threads
+ * no step shows, on code that changed since or that this diff leaves out. The threads on lines also show in their steps.
  */
-export function GitHubReviews({
+export function ReviewersSaid({
   data,
   feedback,
-  inDiff,
-  elsewhere,
   onFeedback,
   onOpen,
 }: {
   data: ReviewData;
   feedback: GitHubFeedback;
-  /** Threads on lines of this diff, with the step each is in: open ones first. */
-  inDiff: { thread: GitHubThread; step: Step }[];
-  elsewhere: GitHubThread[];
   onFeedback(f: GitHubFeedback | null): void;
   /** Opens the step at the thread's line. */
   onOpen(step: Step, thread: GitHubThread): void;
 }) {
-  const open = openThreads(feedback.threads).length;
-  if (!feedback.reviews.length && !feedback.threads.length) return null;
+  const [replying, setReplying] = useState<string | null>(null);
+  const placed = useMemo(() => placeThreads(openThreads(feedback.threads), data.hunks), [feedback, data.hunks]);
+  const byStep = data.steps.flatMap((step) => {
+    const threads = step.hunkIds.flatMap((id) => placed.byHunk.get(id) ?? []);
+    return threads.length ? [{ step, threads }] : [];
+  });
   return (
-    <section className="flex flex-col gap-2.5 border-t border-border pt-5" aria-label="Reviews on GitHub">
-      <SectionHeader as="h2" count={feedback.reviews.length || null} action={feedback.threads.length ? <span className="text-meta text-faint">{open ? plural(open, 'open thread') : 'Every thread resolved'}</span> : undefined}>
-        Reviews on GitHub
-      </SectionHeader>
+    <>
       {feedback.reviews.length > 0 && (
-        <ul className="m-0 flex list-none flex-col divide-y divide-border p-0">
+        <ul className="m-0 flex list-none flex-col p-0 text-body" aria-label="Reviews on GitHub">
           {feedback.reviews.map((r) => (
-            <li key={r.url} className="flex flex-col gap-1 py-2.5">
-              <span className="flex flex-wrap items-center gap-2 text-meta text-faint">
-                <span className="font-semibold text-text">@{r.author}</span>
-                <Pill tone={VERDICT[r.state].tone}>{VERDICT[r.state].label}</Pill>
-                {timeAgo(r.at)}
-                <span className="flex-1" />
-                <Button size="sm" variant="quiet" onClick={() => window.api.openExternal(r.url)}>
-                  Open on GitHub ↗
-                </Button>
+            <li key={r.url} className="grid grid-cols-[132px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-0.5 border-t border-border py-2.5">
+              <span className={`text-meta font-semibold ${VERDICT[r.state].text}`}>{VERDICT[r.state].label}</span>
+              <span className="flex min-w-0 flex-col">
+                <span>
+                  <strong className="font-semibold">@{r.author}</strong> <span className="text-ui text-faint">· {timeAgo(r.at)} ·</span>{' '}
+                  <TextButton className="text-ui" onClick={() => window.api.openExternal(r.url)}>
+                    Open on GitHub ↗
+                  </TextButton>
+                </span>
+                {r.body.trim() && <span className="line-clamp-2 text-ui break-words whitespace-pre-line text-muted select-text">{plainText(r.body)}</span>}
               </span>
-              {r.body.trim() && (
-                <div className="min-w-0 break-words text-body select-text">
-                  <Markdown text={r.body} />
-                </div>
-              )}
             </li>
           ))}
         </ul>
       )}
-      {inDiff.length > 0 && (
-        <ul className="m-0 flex list-none flex-col divide-y divide-border p-0" aria-label="Threads on this diff">
-          {inDiff.map(({ thread: t, step }) => {
-            const first = t.comments[0]!;
-            return (
-              <li key={t.id}>
-                <button type="button" onClick={() => onOpen(step, t)} className={`group flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg px-2.5 py-2 text-left hover:bg-border/45 ${t.resolved ? 'text-muted' : ''}`}>
-                  <MessageSquare size={13} className={`shrink-0 ${t.resolved ? 'text-faint' : 'text-link'}`} aria-hidden />
-                  <span className="min-w-0 flex-[1_1_280px] truncate text-body">
-                    <span className="font-semibold">@{first.author}</span>: {first.body.split('\n')[0]}
+      {byStep.length > 0 && (
+        <section className="flex flex-col gap-1.5">
+          <SectionHeader as="h2">Open threads, by step</SectionHeader>
+          <ul className="m-0 flex list-none flex-col p-0 text-body">
+            {byStep.map(({ step, threads }) => (
+              <li key={step.key} className="border-t border-border">
+                <button type="button" onClick={() => onOpen(step, threads[0]!)} className="group flex w-full items-baseline gap-3 py-1.5 text-left">
+                  <span className="min-w-0 flex-1 break-words">
+                    Step {step.index + 1} · {step.title}
                   </span>
-                  {t.comments.length > 1 && <span className="shrink-0 text-meta text-faint">{plural(t.comments.length - 1, 'reply', 'replies')}</span>}
-                  {t.resolved && <Pill tone="ok">Resolved</Pill>}
-                  <span className="shrink-0 font-mono text-meta text-faint" data-tooltip={t.path}>
-                    {t.path.split('/').pop()}:{t.line}
-                  </span>
-                  <span className="shrink-0 text-ui text-link group-hover:underline" data-tooltip={`Step ${step.index + 1}: ${step.title}`}>
-                    Step {step.index + 1} →
-                  </span>
+                  <span className="shrink-0 text-ui text-link group-hover:underline">{plural(threads.length, 'thread')} →</span>
                 </button>
               </li>
-            );
-          })}
-        </ul>
+            ))}
+          </ul>
+          <span className="text-meta text-faint">They also show at their lines when you get there, and you can reply from the step.</span>
+        </section>
       )}
-      {elsewhere.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <span className="text-meta text-muted">Not in this diff: on code that changed since, or that this review leaves out.</span>
-          {elsewhere.map((t) => (
-            <GitHubThreadCard key={t.id} data={data} thread={t} onFeedback={onFeedback} showPath />
-          ))}
-        </div>
+      {placed.elsewhere.length > 0 && (
+        <section className="flex flex-col gap-1.5">
+          <SectionHeader as="h2">Not on a line in this review</SectionHeader>
+          <ul className="m-0 flex list-none flex-col p-0 text-body">
+            {placed.elsewhere.map((t) => {
+              const first = t.comments[0]!;
+              return (
+                <li key={t.id} className="flex flex-col gap-2 border-t border-border py-1.5">
+                  <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                    <span className="min-w-0 flex-[1_1_300px] break-words">
+                      <strong className="font-semibold">@{first.author}</strong>{' '}
+                      <span className="text-muted">
+                        {t.outdated ? 'on an older commit' : <>on <span className="font-mono text-ui">{t.path.split('/').pop()}</span></>}: {first.body.split('\n')[0]}
+                      </span>
+                    </span>
+                    <TextButton className="text-ui" aria-expanded={replying === t.id} onClick={() => setReplying(replying === t.id ? null : t.id)}>
+                      {replying === t.id ? 'Close' : t.comments.length > 1 ? `Read ${plural(t.comments.length - 1, 'reply', 'replies')} or reply` : 'Reply'}
+                    </TextButton>
+                    <TextButton className="text-ui" onClick={() => window.api.openExternal(first.url)}>
+                      Open on GitHub ↗
+                    </TextButton>
+                  </span>
+                  {replying === t.id && <GitHubThreadCard data={data} thread={t} onFeedback={onFeedback} showPath />}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
-    </section>
+    </>
   );
 }

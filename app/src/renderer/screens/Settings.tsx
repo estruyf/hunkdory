@@ -60,7 +60,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
   const [wrap, setWrap] = usePref<boolean>('diff-wrap', false);
   const [showContext, setShowContext] = usePref<boolean>('walkthrough-context', true);
   const [order, setOrder] = usePref<'suggested' | 'newest'>('inbox-order', 'suggested');
-  const [howItWorks, setHowItWorks] = usePref<boolean>('plan-how-it-works', true);
+  const [shortcutHints, setShortcutHints] = usePref<boolean>('shortcut-hints', true);
   const [theme, setTheme] = useState<Theme | null>(null);
   const editors = useAsync(() => window.api.editors(), []);
   const [editor, setEditor] = useState<string | null>(null);
@@ -122,6 +122,9 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
             <Row label="Theme" detail="Light, dark, or follow macOS.">
               <SegmentedControl<Theme> mode="radio" label="Theme" value={theme ?? 'system'} onChange={pick} segments={THEMES.map((t) => ({ value: t.value, label: t.label, tooltip: t.hint }))} />
             </Row>
+            <Checkbox checked={shortcutHints} onChange={setShortcutHints}>
+              Show keyboard shortcuts next to buttons
+            </Checkbox>
             {settings.error && <Notice tone="error">{settings.error}</Notice>}
           </Card>
 
@@ -180,9 +183,6 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
             </Checkbox>
             <Checkbox checked={showContext} onChange={setShowContext}>
               Show the Context panel next to a step when the window is wide enough
-            </Checkbox>
-            <Checkbox checked={howItWorks} onChange={setHowItWorks}>
-              Show “How a review works” on the next plan
             </Checkbox>
           </Card>
 
@@ -293,7 +293,7 @@ export function Settings({ go, onClose }: { go: Go; onClose(): void }) {
             )}
           </Card>
           <p className="flex items-center gap-1.5 text-meta text-faint">
-            <Kbd shortcut="shortcuts" /> every keyboard shortcut
+            <Kbd shortcut="shortcuts" always /> every keyboard shortcut
           </p>
         </div>
       </div>

@@ -283,7 +283,7 @@ export function Home({ go, data, initialProject }: { go: Go; data: InboxData; in
               </ul>
             )}
           </section>
-          <p className="flex flex-wrap items-center gap-1.5 text-meta text-faint">
+          <p className="shortcut-hint flex flex-wrap items-center gap-1.5 text-meta text-faint">
             <Kbd shortcut="branch.goto" /> search · <Kbd keys="↑↓" /> move · <Kbd shortcut="inbox.ignore" /> ignore · <Kbd shortcut="shortcuts" /> every shortcut
           </p>
           <VersionLine />

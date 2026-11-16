@@ -57,6 +57,28 @@ Merging or approving with decisions or steps still open takes a second click.
 
 A manual second opinion: the project's assistant looks for the kinds of problems the project asks for, such as bugs or accessibility issues, and puts its findings next to the lines. It only runs when you press its button, and its rules live in Hunkdory on your Mac, not in the repo, so a branch can't change the rules of its own review.
 
+## Links
+
+Other apps, scripts and web pages can open a review in Hunkdory with a link:
+
+```
+hunkdory://review?repo=<absolute path>&branch=<branch name>
+```
+
+Percent-encode both values, for example with `encodeURIComponent`. On a Mac, try one with `open "hunkdory://review?repo=%2FUsers%2Fyou%2Fdev%2Fweb&branch=claude%2Ffix-login"`.
+
+- **`repo`** is a project's folder or one of its worktrees, or a folder inside them, matched the way the inbox matches an agent's folder. A folder that isn't a project shows its path with an **Add project** button.
+- **`branch`** opens that branch's review. A branch that isn't in the inbox is picked as **Review another branch** does, which puts it in the inbox. A branch that's only on `origin` opens as `origin/<name>`.
+- Hunkdory refuses a relative path, a folder that isn't there, and a branch name `git check-ref-format --branch` rejects, and says why. On Windows the path needs a drive letter: a network path (`\\server\share`) is refused, since looking it up would sign you in to that server.
+
+Any app or website can open a link, so a link only ever opens a screen. It never runs an assistant, writes a walkthrough, merges or pushes, even in a project that writes walkthroughs by itself: the plan waits for you to press **Write a walkthrough**.
+
+The scheme is registered by the installed app, on macOS and Windows. A development build doesn't claim it.
+
+### Seshboard
+
+When a review's agent session is a Claude Code one and [Seshboard](https://seshboard.app/) is installed, **Open in Seshboard** next to the session opens it there with `seshboard://session/<id>`, as if you picked it in Seshboard's sidebar. That's the only link to another app Hunkdory opens: anything else that isn't `https://` is ignored.
+
 ## Project icons
 
 A project shows its own icon, found in this order:

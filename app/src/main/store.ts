@@ -168,7 +168,7 @@ export class Store {
     const r = this.data.reviews[reviewId(projectId, branch)];
     if (!r?.decision || r.decision.result === 'running') return;
     r.rounds = [...(r.rounds ?? []), { decision: r.decision, comments: r.comments, reviewed: r.reviewed }];
-    Object.assign(r, { decision: null, comments: [], reviewed: {}, status: 'open', startedAt: null });
+    Object.assign(r, { decision: null, comments: [], reviewed: {}, understood: [], status: 'open', startedAt: null });
     this.save();
   }
 

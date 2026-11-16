@@ -93,9 +93,5 @@ export function UpdateToast() {
     if (toast.close === 'dismiss') void window.api.runUpdate('dismiss');
     else setHidden((keys) => new Set(keys).add(toast.key));
   };
-  return (
-    <div className="fixed right-4 bottom-4 z-70">
-      <Card key={toast.key} toast={toast} onClose={close} />
-    </div>
-  );
+  return <Card key={toast.key} toast={toast} onClose={close} />;
 }

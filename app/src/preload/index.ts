@@ -26,6 +26,8 @@ const methods: (keyof ReviewerApi)[] = [
   'listBases',
   'setBase',
   'openExternal',
+  'seshboardInstalled',
+  'takeLink',
   'closeWindow',
   'inbox',
   'inboxCached',
@@ -102,6 +104,11 @@ contextBridge.exposeInMainWorld('events', {
     const listener = (_e: unknown, to: { projectId: string; branch: string }) => fn(to);
     ipcRenderer.on('open-branch', listener);
     return () => ipcRenderer.removeListener('open-branch', listener);
+  },
+  onLinkWaiting(fn: () => void) {
+    const listener = () => fn();
+    ipcRenderer.on('link-waiting', listener);
+    return () => ipcRenderer.removeListener('link-waiting', listener);
   },
   onWalkthroughChanged(fn: (job: WalkthroughJob) => void) {
     const listener = (_e: unknown, job: WalkthroughJob) => fn(job);

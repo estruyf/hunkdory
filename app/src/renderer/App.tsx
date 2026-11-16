@@ -3,6 +3,7 @@ import { useInboxData, type InboxData } from './components/inbox/useInboxData.ts
 import { ShortcutsSheet } from './components/shortcuts/ShortcutsSheet.tsx';
 import { TabStrip } from './components/TabStrip.tsx';
 import { TooltipLayer } from './components/ui/Tooltip.tsx';
+import { LinkToast } from './components/LinkToast.tsx';
 import { UpdateToast } from './components/UpdateToast.tsx';
 import { matches, type ShortcutContext } from './lib/shortcuts.ts';
 import { stepBranch, useBranches } from './state/branches.ts';
@@ -11,6 +12,7 @@ import { loadProjectIcons } from './state/projectIcons.ts';
 import { TabPane } from './state/tabPane.ts';
 import { activate, activeRoute, closeTab, INBOX, move, navigate, reopenTab, restoreTabs, routeOf, savedTabs, startTabs, stepTab, tabAt, withoutProjectsGone, type Tabs } from './state/tabs.ts';
 import { watchUpdate } from './state/update.ts';
+import { takeLink } from './state/links.ts';
 import { jobKey, useWalkthroughs, watchWalkthroughs } from './state/walkthroughs.ts';
 import { rememberReadState } from './state/reviewReads.ts';
 import { Welcome } from './screens/Welcome.tsx';
@@ -35,7 +37,8 @@ export type Route =
   | { name: 'plan'; projectId: string; branch: string; preloaded?: { data: ReviewData; state: ReviewState } }
   // `decision` is set while you go through the decisions: the step shown is the one the decision is about.
   // `group` shows a whole skim folder on one page. `story` goes through every step in the walkthrough's order.
-  | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; group?: string; story?: boolean; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number; focus?: LineRef }
+  // `understand` is one of the pages about the change as a whole, before the steps.
+  | { name: 'review'; projectId: string; branch: string; stepKey?: string; decision?: string; group?: string; understand?: string; story?: boolean; preloaded?: { data: ReviewData; state: ReviewState }; reload?: number; focus?: LineRef }
   | { name: 'finish'; projectId: string; branch: string }
   | { name: 'done'; projectId: string; branch: string; result: FinishResult; stack?: ReviewData['stack'] };
 
@@ -70,11 +73,16 @@ export function App() {
   const latest = useRef(new Map<string, ReviewState>());
   // Read here rather than in Home, so the order branches step through stays current on every screen.
   const inbox = useInboxData();
+  // A hunkdory:// link waits until the tabs are up: opening it before would have them replace its screen.
+  const tabsUp = useRef(false);
 
   useEffect(() => {
     window.api.listProjects().then((ps) => {
       setHasProjects(ps.length > 0);
       setNav(ps.length ? restoreTabs(readSavedTabs(), new Set(ps.map((p) => p.id))) : startTabs({ name: 'welcome' }));
+      tabsUp.current = true;
+      // The link that launched Hunkdory.
+      void takeLink(go);
     });
     return window.events.onReviewStateChanged((r) => {
       latest.current.set(`${r.projectId}::${r.branch}`, r);
@@ -153,6 +161,14 @@ export function App() {
 
   useEffect(() => watchUpdate(), []);
 
+  useEffect(
+    () =>
+      window.events.onLinkWaiting(() => {
+        if (tabsUp.current) void takeLink(go);
+      }),
+    []
+  );
+
   // The app's own shortcuts, from the registry: the same keys as Switchboard where they mean the same thing.
   useEffect(() => {
     const onMouse = (e: MouseEvent) => {
@@ -205,7 +221,10 @@ export function App() {
   const overlays = (
     <>
       <TooltipLayer />
-      <UpdateToast />
+      <div className="fixed right-4 bottom-4 z-70 flex flex-col items-end gap-2">
+        <LinkToast />
+        <UpdateToast />
+      </div>
       {sheet && <ShortcutsSheet ctx={sheet} onClose={() => setSheet(null)} />}
     </>
   );
@@ -253,7 +272,7 @@ function sheetContext(route: Route | null): ShortcutContext {
   const el = document.activeElement;
   const focus = el?.closest('[data-inbox-list]') ? 'list' : el?.closest('input, textarea, [contenteditable]') ? 'field' : 'other';
   const view: ShortcutContext['view'] = useNav.getState().settings ? 'settings' : !route ? 'home' : route.name;
-  return { view, decision: route?.name === 'review' && !!route.decision, group: route?.name === 'review' && !!route.group, focus };
+  return { view, decision: route?.name === 'review' && !!route.decision, group: route?.name === 'review' && !!route.group, understand: route?.name === 'review' && !!route.understand, focus };
 }
 
 function view(route: Route, go: Go, hasProjects: boolean, inbox: InboxData) {
@@ -261,7 +280,7 @@ function view(route: Route, go: Go, hasProjects: boolean, inbox: InboxData) {
     case 'welcome':
       return <Welcome go={go} />;
     case 'connect':
-      return <Connect key={route.projectId ?? 'new'} go={go} initialPath={route.path} projectId={route.projectId} back={hasProjects ? { name: 'home' } : { name: 'welcome' }} />;
+      return <Connect key={route.projectId ?? `new:${route.path ?? ''}`} go={go} initialPath={route.path} projectId={route.projectId} back={hasProjects ? { name: 'home' } : { name: 'welcome' }} />;
     case 'pick':
       return <PickBranch go={go} initialProject={route.projectId} />;
     case 'home':
@@ -270,7 +289,7 @@ function view(route: Route, go: Go, hasProjects: boolean, inbox: InboxData) {
       return <PlanScreen key={`${route.projectId}:${route.branch}`} go={go} projectId={route.projectId} branch={route.branch} preloaded={route.preloaded} />;
     case 'review':
       // A new `reload` remounts the review, so it reads the branch again.
-      return <Review key={`${route.projectId}:${route.branch}:${route.reload ?? ''}`} go={go} projectId={route.projectId} branch={route.branch} stepKey={route.stepKey} decision={route.decision} group={route.group} story={route.story} focus={route.focus} preloaded={route.preloaded} />;
+      return <Review key={`${route.projectId}:${route.branch}:${route.reload ?? ''}`} go={go} projectId={route.projectId} branch={route.branch} stepKey={route.stepKey} decision={route.decision} group={route.group} understand={route.understand} story={route.story} focus={route.focus} preloaded={route.preloaded} />;
     case 'finish':
       return <Finish go={go} projectId={route.projectId} branch={route.branch} />;
     case 'done':

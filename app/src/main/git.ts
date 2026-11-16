@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { shellEnv } from './shellEnv.ts';
 import type { BranchInfo, ReviewData } from '../shared/types.ts';
@@ -21,6 +22,11 @@ export async function tryGit(args: string[], cwd: string): Promise<string | null
 
 export async function repoRoot(path: string): Promise<string | null> {
   return (await tryGit(['rev-parse', '--show-toplevel'], path))?.trim() || null;
+}
+
+/** Whether git takes `name` as a branch name. Run outside any repo, so `@{-1}` can't stand for a branch you were on. */
+export async function isBranchName(name: string, cwd = tmpdir()): Promise<boolean> {
+  return (await tryGit(['check-ref-format', '--branch', name], cwd)) !== null;
 }
 
 /** origin/HEAD first, then the usual names. Returned as a ref that exists. */

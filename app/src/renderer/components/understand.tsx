@@ -3,11 +3,11 @@ import { useId, useMemo, useState } from 'react';
 import { RiskPill, plural } from './ui.tsx';
 import { Markdown } from './markdown.tsx';
 import { Button } from './ui/Button.tsx';
-import { Pill } from './ui/Pill.tsx';
-import type { PillTone } from './ui/buttonStyles.ts';
 import { SectionHeader } from './ui/SectionHeader.tsx';
-import { SegmentedControl } from './ui/SegmentedControl.tsx';
+import { TextButton } from './ui/TextButton.tsx';
 import { BOX, layoutDiagram } from '../../shared/diagram.ts';
+import { OUTSIDE_HINT } from '../../shared/order.ts';
+import { fileNames, stepsLabel } from '../../shared/plan.ts';
 import type { BehaviourChange, ChangeDiagram, Dependent, RequestedItem, ReviewData, Step, TryItStep } from '../../shared/types.ts';
 
 const writtenBy = (data: Pick<ReviewData, 'walkthrough'>) => (data.walkthrough === 'reviewer' ? 'Hunkdory’s reading of the change' : 'The agent’s account of the change');
@@ -69,34 +69,55 @@ function Dependents({ dependents }: { dependents: Dependent[] }) {
   );
 }
 
-const STATUS: Record<RequestedItem['status'], { label: string; tone: PillTone; hint: string }> = {
-  done: { label: 'Code found', tone: 'muted', hint: 'The walkthrough found code for this. That doesn’t mean it works: check it in the step.' },
-  partly: { label: 'Partly', tone: 'default', hint: 'The walkthrough found code for some of this.' },
-  missing: { label: 'Not found', tone: 'caution', hint: 'The walkthrough found no code for this. It may have looked in the wrong place.' },
+const STATUS: Record<RequestedItem['status'], { label: string; tone: string; hint: string }> = {
+  done: { label: 'Code found', tone: 'text-ok', hint: 'The walkthrough found code for this. That doesn’t mean it works: check it in the step.' },
+  partly: { label: 'Partly', tone: 'text-caution', hint: 'The walkthrough found code for some of this.' },
+  missing: { label: 'Not found', tone: 'text-caution', hint: 'The walkthrough found no code for this. It may have looked in the wrong place.' },
 };
 
-/** Each thing the request asked for, and where the change has code for it. */
-export function RequestedList({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) => void }) {
+/** "You asked" for a prompt, "The PR says" for a PR description: the same words on every screen. */
+export const askedLabel = (data: Pick<ReviewData, 'prompt' | 'pr'>) => (data.prompt ? 'You asked' : data.pr ? 'The PR says' : 'The request');
+
+/** One row of a list of things with a status: the status in colour, what it's about, and a way to the steps. */
+function StatusRow({ status, tone, hint, children, note, steps, onOpen }: { status: string; tone: string; hint?: string; children: React.ReactNode; note?: React.ReactNode; steps: Step[]; onOpen: (step: Step) => void }) {
   return (
-    <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+    <li className="grid grid-cols-[84px_minmax(0,1fr)_max-content] items-baseline gap-x-3 gap-y-0.5 border-t border-border py-2.5">
+      <span className={`text-meta font-semibold ${tone}`} data-tooltip={hint}>
+        {status}
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="break-words select-text">{children}</span>
+        {note && <span className="text-ui break-words text-muted select-text">{note}</span>}
+      </span>
+      {steps.length ? (
+        <TextButton className="text-ui" onClick={() => onOpen(steps[0])}>
+          {stepsLabel(steps.map((s) => s.index))} →
+        </TextButton>
+      ) : (
+        <span />
+      )}
+    </li>
+  );
+}
+
+/** Each thing the request asked for and where the change has code for it, then what it did that nobody asked for. */
+export function RequestedList({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) => void }) {
+  const outside = data.steps.filter((s) => s.outsideTask);
+  return (
+    <ul className="m-0 flex list-none flex-col p-0 text-body">
       {data.requested.map((r, i) => {
-        const steps = r.stepKeys.flatMap((k) => data.steps.find((s) => s.key === k) ?? []);
         const status = STATUS[r.status];
         return (
-          <li key={i} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <Pill tone={status.tone} data-tooltip={status.hint}>
-              {status.label}
-            </Pill>
-            <span className="min-w-0 break-words select-text">{r.item}</span>
-            {steps.map((s) => (
-              <button key={s.key} type="button" className="text-ui text-link hover:underline" onClick={() => onOpen(s)}>
-                Step {s.index + 1} →
-              </button>
-            ))}
-            {r.note && <span className="w-full text-ui text-muted select-text">{r.note}</span>}
-          </li>
+          <StatusRow key={i} status={status.label} tone={status.tone} hint={status.hint} note={r.note} steps={r.stepKeys.flatMap((k) => data.steps.find((s) => s.key === k) ?? [])} onOpen={onOpen}>
+            {r.item}
+          </StatusRow>
         );
       })}
+      {outside.map((s) => (
+        <StatusRow key={s.key} status="Not asked" tone="text-muted" hint={OUTSIDE_HINT} note={fileNames(s.files) === s.title ? null : fileNames(s.files)} steps={[s]} onOpen={onOpen}>
+          {s.title}
+        </StatusRow>
+      ))}
     </ul>
   );
 }
@@ -119,7 +140,7 @@ function BoxText({ node, steps }: { node: ChangeDiagram['nodes'][number]; steps:
 }
 
 /** How the parts of the change connect. A box opens the first step that changes it. */
-export function DiagramView({ diagram, steps, onOpen }: { diagram: ChangeDiagram; steps: Step[]; onOpen: (step: Step) => void }) {
+export function DiagramView({ diagram, steps, onOpen, summary = true }: { diagram: ChangeDiagram; steps: Step[]; onOpen: (step: Step) => void; summary?: boolean }) {
   const layout = useMemo(() => layoutDiagram(diagram), [diagram]);
   // Its own per diagram: a tab in the background can hold the same one, and an arrowhead defined in a hidden tab doesn't draw.
   const arrowId = `diagram-arrow-${useId().replace(/\W/g, '')}`;
@@ -127,7 +148,7 @@ export function DiagramView({ diagram, steps, onOpen }: { diagram: ChangeDiagram
   const stepsOf = (keys: string[]) => keys.flatMap((k) => steps.find((s) => s.key === k) ?? []);
   return (
     <div className="flex flex-col gap-2">
-      {diagram.summary && <p className="m-0 text-body select-text">{diagram.summary}</p>}
+      {summary && diagram.summary && <p className="m-0 text-body select-text">{diagram.summary}</p>}
       <div className="overflow-x-auto py-1">
         <div className="relative mx-auto" style={{ width: layout.width, height: layout.height }}>
           <svg aria-hidden className="absolute inset-0 text-faint" width={layout.width} height={layout.height}>
@@ -210,51 +231,85 @@ function TryItList({ steps }: { steps: TryItStep[] }) {
   );
 }
 
-type Tab = 'map' | 'behaviour' | 'try';
 const CHANGES_SHOWN = 5;
 
-/** The change as a whole, one view at a time so the plan stays short. Nothing when the walkthrough has none of it. */
-export function ChangeOverview({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) => void }) {
-  const changes = data.steps.filter((s) => s.behaviour);
-  const tabs: { value: Tab; label: string }[] = [
-    ...(data.diagram ? [{ value: 'map' as const, label: 'How it fits together' }] : []),
-    ...(changes.length ? [{ value: 'behaviour' as const, label: 'What behaves differently' }] : []),
-    ...(data.tryIt.length ? [{ value: 'try' as const, label: 'How to try it' }] : []),
-  ];
-  const [picked, setPicked] = useState<Tab | null>(null);
-  const [allChanges, setAllChanges] = useState(false);
-  if (!tabs.length) return null;
-  const changesShown = allChanges ? changes : changes.slice(0, CHANGES_SHOWN);
-  const tab = tabs.some((t) => t.value === picked) ? picked! : tabs[0].value;
+/** The top of an "Understand" page: where you are, what it's about, and in one sentence what's on it. */
+export function UnderstandHeader({ title, summary }: { title: string; summary: string | null }) {
   return (
-    <section aria-label="Understand the change" className="flex flex-col gap-3 border-t border-border pt-5">
-      {tabs.length > 1 ? (
-        <SegmentedControl<Tab> mode="radio" label="View" size="sm" className="self-start" value={tab} onChange={setPicked} segments={tabs} />
-      ) : (
-        <SectionHeader as="h2">{tabs[0].label}</SectionHeader>
+    <div className="flex flex-col gap-1.5">
+      <span className="text-meta font-semibold tracking-wider text-faint uppercase">Before you read</span>
+      <h1 className="text-hero font-semibold break-words">{title}</h1>
+      {summary && <p className="text-body text-muted select-text">{summary}</p>}
+    </div>
+  );
+}
+
+/** What was asked, item by item, and what the change did besides. */
+export function AskedPage({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) => void }) {
+  return (
+    <>
+      <RequestedList data={data} onOpen={onOpen} />
+      {data.requested.length > 0 && <span className="text-meta text-faint">The walkthrough matched each ask to code. Check that the code works in its step.</span>}
+    </>
+  );
+}
+
+/** What to know first, and how the parts of the change connect. */
+export function FitsPage({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) => void }) {
+  return (
+    <>
+      {data.background && (
+        <div className="flex flex-col gap-1.5 border-t border-border pt-4">
+          <SectionHeader as="h2">To know first</SectionHeader>
+          <div className="text-body select-text">
+            <Markdown text={data.background} />
+          </div>
+        </div>
       )}
-      {tab === 'map' && data.diagram && <DiagramView diagram={data.diagram} steps={data.steps} onOpen={onOpen} />}
-      {tab === 'behaviour' && (
-        <>
+      {data.diagram && (
+        <div className="border-t border-border pt-4">
+          <DiagramView diagram={data.diagram} steps={data.steps} onOpen={onOpen} summary={false} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** What each step changes for the app or its callers, then how to see it working. */
+export function TryPage({ data, onOpen }: { data: ReviewData; onOpen: (step: Step) => void }) {
+  const [all, setAll] = useState(false);
+  const changes = data.steps.filter((s) => s.behaviour);
+  const shown = all ? changes : changes.slice(0, CHANGES_SHOWN);
+  const both = changes.length > 0 && data.tryIt.length > 0;
+  return (
+    <>
+      {changes.length > 0 && (
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
+          {both && <SectionHeader as="h2">What behaves differently</SectionHeader>}
           <ul className="m-0 flex list-none flex-col gap-3 p-0">
-            {changesShown.map((s) => (
+            {shown.map((s) => (
               <li key={s.key} className="flex flex-col gap-1">
-                <button type="button" className="self-start text-left text-ui font-semibold break-words text-link hover:underline" onClick={() => onOpen(s)}>
+                <TextButton className="self-start text-ui font-semibold break-words" onClick={() => onOpen(s)}>
                   Step {s.index + 1}: {s.title} →
-                </button>
+                </TextButton>
                 <BehaviourNote behaviour={s.behaviour!} brief />
               </li>
             ))}
           </ul>
-          {changes.length > changesShown.length && (
-            <Button variant="quiet" className="self-start" onClick={() => setAllChanges(true)}>
-              Show {changes.length - changesShown.length} more
+          {changes.length > shown.length && (
+            <Button variant="quiet" className="self-start" onClick={() => setAll(true)}>
+              Show {changes.length - shown.length} more
             </Button>
           )}
-        </>
+        </div>
       )}
-      {tab === 'try' && <TryItList steps={data.tryIt} />}
-      {tab !== 'map' && <span className="text-meta text-faint">{writtenBy(data)}, not run or checked against the running app.</span>}
-    </section>
+      {data.tryIt.length > 0 && (
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
+          {both && <SectionHeader as="h2">How to try it</SectionHeader>}
+          <TryItList steps={data.tryIt} />
+        </div>
+      )}
+      <span className="text-meta text-faint">{writtenBy(data)}, not run or checked against the running app.</span>
+    </>
   );
 }
