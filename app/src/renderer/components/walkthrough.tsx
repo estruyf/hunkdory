@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type HTMLAttributes } from 'react';
 import type { ReviewData, WalkthroughJob } from '../../shared/types.ts';
 import { CircleCheck, Loader2 } from 'lucide-react';
 import { cleanError, plural } from './ui.tsx';
@@ -6,11 +6,10 @@ import { usageNote, whereCodeGoes } from '../../shared/assistantText.ts';
 import { tooBig } from '../../shared/order.ts';
 import { Button } from './ui/Button.tsx';
 import { Notice } from './ui/Notice.tsx';
+import { StatusLine } from './ui/StatusLine.tsx';
 import { TextButton } from './ui/TextButton.tsx';
 import { jobKey, useWalkthroughJobFor, useWalkthroughs } from '../state/walkthroughs.ts';
 import { openedByLink } from '../state/links.ts';
-
-const PLAIN = 'flex flex-wrap items-start gap-x-4 gap-y-2 border-t border-border pt-5 text-ui text-muted';
 
 /**
  * Follows Hunkdory writing a walkthrough for one branch. With `auto`, starts it as soon as a branch
@@ -216,78 +215,62 @@ function useTick(on: boolean) {
   }, [on]);
 }
 
-/** A branch without a walkthrough, in the plan's "Before you start": why there's none, and Hunkdory writing one. */
-export function WalkthroughLine({ data, w }: { data: ReviewData; w: ReturnType<typeof useWalkthroughJob> }) {
-  const { job, failed } = w;
-  const running = job?.status === 'running';
-  useTick(running);
-  if (running) {
-    return (
-      <p role="status" className="m-0">
-        <Loader2 size={13} className="mr-1.5 inline-block animate-spin align-[-2px] text-accent-ink" aria-hidden />
-        <strong className="font-semibold">Hunkdory is writing a walkthrough.</strong> {job.attempt > 1 ? 'Covering the changes the first pass missed. ' : ''}Big changes take a few minutes. You can wait here, or start now with one step per file. <TextButton onClick={w.cancel}>Stop</TextButton>
-        <span className="block text-meta text-muted">
-          {job.activity ?? 'Working…'} · {since(job.startedAt)}
-        </span>
-      </p>
-    );
-  }
-  if (w.asking) {
-    return (
-      <p className="m-0">
-        <strong className="font-semibold">No walkthrough yet</strong>, so the steps are one per file, without reasons. {data.assistant!.name} can write one: it reads the diff, the commits and the agent session. {whereCodeGoes(data.assistant!)} {usageNote(data.assistant!)} Should Hunkdory do that for every branch in {data.projectName} that opens without one? <TextButton onClick={() => w.answer(true)}>Yes, for this project</TextButton> · <TextButton onClick={() => w.answer(false)}>Only when I ask</TextButton>
-      </p>
-    );
-  }
-  // Manual projects have no assistant to write a walkthrough with.
-  const why = !data.assistant
-    ? 'This project is set to Manual, so Hunkdory won’t write one.'
-    : failed
-      ? `Hunkdory couldn’t write one: ${failed}`
-      : job?.status === 'cancelled'
-        ? 'You stopped Hunkdory writing one.'
-        : data.writeWalkthroughs && tooBig({ minutes: data.minutes, steps: data.steps.length })
-          ? 'The branch is big, so Hunkdory didn’t start one on its own.'
-          : data.writeWalkthroughs && openedByLink(data.projectId, data.branch)
-            ? 'A link opened this branch, so Hunkdory didn’t start one on its own.'
-            : null;
-  return (
-    <p className="m-0">
-      <strong className="font-semibold">No walkthrough yet</strong>, so the steps are one per file, without reasons. {why}
-    </p>
-  );
-}
-
-/** Where the walkthrough on this page came from, and rewriting it. Nothing for an agent's own, and for a branch without one see `WalkthroughLine`. */
-export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType<typeof useWalkthroughJob> }) {
+/**
+ * The walkthrough in one line on the plan: being written, missing and why, or who wrote it and whether it still
+ * covers the diff, with updating, rewriting and sharing it.
+ */
+export function WalkthroughStatus({ data, w, ...rest }: { data: ReviewData; w: ReturnType<typeof useWalkthroughJob> } & HTMLAttributes<HTMLParagraphElement>) {
   const { job, failed } = w;
   const [sharing, setSharing] = useState<'idle' | 'busy' | string>('idle');
   // Posting on the PR is for everyone who can see it: said before it happens.
   const [confirmShare, setConfirmShare] = useState(false);
   const running = job?.status === 'running';
   useTick(running);
-  if (data.walkthrough !== 'reviewer') return null;
-  // Manual projects have no assistant to rewrite a walkthrough with.
+  const skeleton = data.walkthrough === 'skeleton';
+  // Manual projects have no assistant to write or rewrite a walkthrough with.
   const manual = !data.assistant;
 
   if (running) {
     return (
-      <section role="status" aria-label="About this walkthrough" className={PLAIN}>
-        <span className="min-w-0 flex-[1_1_320px]">
-          <Loader2 size={13} className="mr-1.5 inline-block animate-spin align-[-2px] text-accent-ink" aria-hidden />
-          <strong className="font-semibold text-text">Rewriting the walkthrough.</strong> {job.attempt > 1 ? 'Covering the changes the first pass missed. ' : ''}The current one stays until the new one is ready.
-          <span className="block text-meta">
-            {job.activity ?? 'Working…'} · {since(job.startedAt)}
-          </span>
-        </span>
-        <Button size="sm" onClick={w.cancel}>
-          Stop
-        </Button>
-      </section>
+      <StatusLine dot="busy" label="Walkthrough" role="status" {...rest}>
+        {skeleton ? 'being written. Big changes take a few minutes. You can start now with one step per file.' : 'being rewritten. The current one stays until the new one is ready.'}{' '}
+        {job.attempt > 1 ? 'Covering the changes the first pass missed. ' : ''}
+        <span className="text-faint">
+          {job.activity ?? 'Working…'} · {since(job.startedAt)}.
+        </span>{' '}
+        <TextButton onClick={w.cancel}>Stop</TextButton>
+      </StatusLine>
     );
   }
 
-  const from = [data.pr ? 'the pull request' : data.prompt ? 'your prompt' : null, 'the commits', 'the code', data.walkthroughFromSession ? 'the agent’s session' : null].filter(Boolean).join(', ');
+  if (skeleton) {
+    if (w.asking) {
+      return (
+        <StatusLine dot="empty" label="Walkthrough" {...rest}>
+          none yet, so the steps are one per file, without reasons. {data.assistant!.name} can write one from the diff, the commits and the agent session. {whereCodeGoes(data.assistant!)} {usageNote(data.assistant!)} Do that for every branch in {data.projectName} that opens without one? <TextButton onClick={() => w.answer(true)}>Yes, for this project</TextButton> · <TextButton onClick={() => w.answer(false)}>Only when I ask</TextButton>
+        </StatusLine>
+      );
+    }
+    const why = manual
+      ? 'This project is set to Manual, so Hunkdory won’t write one.'
+      : failed
+        ? `Hunkdory couldn’t write one: ${failed}`
+        : job?.status === 'cancelled'
+          ? 'You stopped Hunkdory writing one.'
+          : data.writeWalkthroughs && tooBig({ minutes: data.minutes, steps: data.steps.length })
+            ? 'The branch is big, so Hunkdory didn’t start one on its own.'
+            : data.writeWalkthroughs && openedByLink(data.projectId, data.branch)
+              ? 'A link opened this branch, so Hunkdory didn’t start one on its own.'
+              : '';
+    return (
+      <StatusLine dot={failed ? 'error' : 'empty'} label="Walkthrough" {...rest}>
+        none yet, so the steps are one per file, without reasons. {why}
+      </StatusLine>
+    );
+  }
+
+  const reviewer = data.walkthrough === 'reviewer';
+  const uncovered = data.steps.filter((s) => s.source === 'unnarrated');
   const shared = data.sharedWalkthrough;
   const share = async () => {
     setConfirmShare(false);
@@ -300,52 +283,49 @@ export function WalkthroughNotice({ data, w }: { data: ReviewData; w: ReturnType
     }
   };
   const sharedUrl = sharing.startsWith('https://') ? sharing : shared?.url;
-  const uncovered = data.steps.filter((s) => s.source === 'unnarrated');
+  if (confirmShare) {
+    return (
+      <StatusLine dot="neutral" label={`Post the walkthrough on PR #${data.pr!.number}?`} role="alert" {...rest}>
+        Everyone who can see the PR can read it{data.walkthroughFromSession ? ', including what it took from the agent’s session' : ''}. It replaces your earlier one, if you shared before. <TextButton onClick={share}>Post it</TextButton> · <TextButton onClick={() => setConfirmShare(false)}>Cancel</TextButton>
+      </StatusLine>
+    );
+  }
+  const from = [data.pr ? 'the pull request' : data.prompt ? 'your prompt' : null, 'the commits', 'the code', data.walkthroughFromSession ? 'the agent’s session' : null].filter(Boolean).join(', ');
+  const actions = [
+    reviewer && !manual && uncovered.length > 0 && (
+      <TextButton key="update" onClick={w.update}>
+        Update
+      </TextButton>
+    ),
+    reviewer && sharedUrl && (
+      <TextButton key="see" onClick={() => window.api.openExternal(sharedUrl)}>
+        See it on the PR ↗
+      </TextButton>
+    ),
+    reviewer && data.pr && (
+      <TextButton key="share" disabled={sharing === 'busy'} onClick={() => setConfirmShare(true)}>
+        {sharing === 'busy' ? 'Sharing…' : shared || sharing.startsWith('https://') ? 'Share again' : `Share on PR #${data.pr.number}`}
+      </TextButton>
+    ),
+    reviewer && !manual && (
+      <TextButton key="rewrite" data-tooltip={usageNote(data.assistant!)} onClick={w.write}>
+        Rewrite
+      </TextButton>
+    ),
+  ].filter(Boolean);
   return (
-    <section aria-label="About this walkthrough" className={PLAIN}>
-      <span className="min-w-0 flex-[1_1_320px]">
-        <strong className="font-semibold text-text">Hunkdory wrote this walkthrough</strong> from {from}
-        {shared && !sharing.startsWith('https://') ? <>, and {shared.by} shared it on the PR</> : null}. The reasons are its reading of the change, not the author’s own.
-        {sharedUrl && (
-          <>
-            {' '}
-            <TextButton onClick={() => window.api.openExternal(sharedUrl)}>See it on the PR ↗</TextButton>
-          </>
-        )}
-        {!manual && uncovered.length > 0 && <> {plural(uncovered.length, 'file')} changed since it was written. Updating fits them into its steps.</>}
-        {sharing.startsWith('error:') && <span className="text-error"> Sharing failed: {sharing.slice(6)}</span>}
-        {failed && <span className="text-error"> Rewriting failed: {failed}</span>}
-      </span>
-      <span className="flex flex-wrap items-center gap-2">
-        {!manual && uncovered.length > 0 && (
-          <Button size="sm" variant="primary" onClick={w.update}>
-            Update the walkthrough
-          </Button>
-        )}
-        {data.pr && (
-          <Button size="sm" disabled={sharing === 'busy'} aria-busy={sharing === 'busy'} onClick={() => setConfirmShare(true)}>
-            {sharing === 'busy' ? 'Sharing…' : shared || sharing.startsWith('https://') ? 'Share again' : `Share on PR #${data.pr.number}`}
-          </Button>
-        )}
-        {!manual && (
-          <Button size="sm" data-tooltip={usageNote(data.assistant!)} onClick={w.write}>
-            Rewrite
-          </Button>
-        )}
-      </span>
-      {confirmShare && (
-        <span role="alert" className="flex w-full flex-wrap items-center gap-2 text-text">
-          <span className="min-w-0 flex-[1_1_320px]">
-            <strong className="font-semibold">Post this on PR #{data.pr!.number}?</strong> Everyone who can see the PR can read it{data.walkthroughFromSession ? ', including what it took from the agent’s session' : ''}. It replaces your earlier one, if you shared before.
-          </span>
-          <Button size="sm" variant="primary" onClick={share}>
-            Post it
-          </Button>
-          <Button size="sm" onClick={() => setConfirmShare(false)}>
-            Cancel
-          </Button>
+    <StatusLine dot={uncovered.length ? 'caution' : 'ok'} label="Walkthrough" {...rest}>
+      {reviewer ? <>written by Hunkdory from {from}{shared && !sharing.startsWith('https://') ? <>, and {shared.by} shared it on the PR</> : null}.</> : 'written by the agent.'}
+      {uncovered.length > 0 && ` ${plural(uncovered.length, 'file')} changed since.`}
+      {reviewer && ' The reasons are its reading of the change, not the author’s.'}
+      {actions.map((a, i) => (
+        <span key={i}>
+          {i ? ' · ' : ' '}
+          {a}
         </span>
-      )}
-    </section>
+      ))}
+      {sharing.startsWith('error:') && <span className="text-error"> Sharing failed: {sharing.slice(6)}</span>}
+      {failed && <span className="text-error"> Rewriting failed: {failed}</span>}
+    </StatusLine>
   );
 }

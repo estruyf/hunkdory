@@ -679,6 +679,8 @@ export interface ReviewState {
   updatedAt: string;
   /** Step key → the hunk ids you marked reviewed, as a whole or one by one. A step counts as reviewed only while they are exactly its hunks. */
   reviewed: Record<string, string[]>;
+  /** The "Understand" pages you opened this round, by id. Once you saw one, Start goes on where you left off instead. */
+  understood?: string[];
   comments: Comment[];
   decision: DecisionRecord | null;
   /** `reviewed`: your review is on GitHub and the PR hasn't changed since. */
@@ -996,6 +998,8 @@ export type ReviewPatch =
   | { type: 'reviewed'; stepKey: string; hunkIds: string[]; on: boolean }
   /** Ticks one hunk of a step off, or back on. `hunkIds` are the step's hunks now. Ticking the last one makes the step reviewed. */
   | { type: 'reviewed-hunk'; stepKey: string; hunkIds: string[]; hunkId: string; on: boolean }
+  /** You opened one of the "Understand" pages. */
+  | { type: 'understood'; page: string }
   | { type: 'comment'; stepKey: string; body: string }
   /** Keeps a part of a comment out of what your review sends, or puts it back. */
   | { type: 'leave-out'; id: string; part: string; on: boolean }

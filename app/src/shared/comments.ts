@@ -67,6 +67,10 @@ export const changeRequest = (question: string, note: string) => (note.trim() ? 
 export const changeAfterQuestion = (question: string, typed: string, answered: boolean) =>
   changeRequest(question, typed.trim() || (answered ? 'Go ahead and make the change you described in your answer to this.' : ''));
 
+/** What you wrote on a line of the diff, to ask the assistant about or have it change: where it is, then your words. */
+export const lineAsk = (path: string, a: { side: 'LEFT' | 'RIGHT'; line: number }, body: string) =>
+  `On ${path}, line ${a.line}${a.side === 'LEFT' ? ' before this change' : ''}:\n\n${body.trim()}`;
+
 /** You already asked for this note, and that run didn't fail or get stopped: it stays on your review, but there's nothing left to send. */
 export const noteWasSent = (question: string, note: string, exchanges: Pick<Exchange, 'kind' | 'status' | 'text'>[]) =>
   !!note.trim() && exchanges.some((e) => e.kind === 'change' && e.status !== 'failed' && e.status !== 'cancelled' && e.text === changeRequest(question, note));

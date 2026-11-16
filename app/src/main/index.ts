@@ -183,6 +183,8 @@ function applyPatch(r: ReviewState, patch: ReviewPatch) {
     const seen = markHunk(r.reviewed[patch.stepKey], patch.hunkIds, patch.hunkId, patch.on);
     if (seen.length) r.reviewed[patch.stepKey] = seen;
     else delete r.reviewed[patch.stepKey];
+  } else if (patch.type === 'understood') {
+    if (!r.understood?.includes(patch.page)) r.understood = [...(r.understood ?? []), patch.page];
   } else if (patch.type === 'line-comment') {
     const body = patch.body.trim();
     const existing = patch.id ? r.comments.find((c) => c.id === patch.id) : null;

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addToStepComment, answerLine, changeAfterQuestion, changeRequest, commentParts, noteWasSent, sendableComments, setAnswerLine } from '../src/shared/comments.ts';
+import { addToStepComment, answerLine, changeAfterQuestion, changeRequest, commentParts, lineAsk, noteWasSent, sendableComments, setAnswerLine } from '../src/shared/comments.ts';
 import type { ReviewState } from '../src/shared/types.ts';
 
 const Q = '`validateLanguage` is copied from the page summary. Should it be shared instead?';
@@ -33,6 +33,11 @@ test('the rest of the step comment stays when an answer changes', () => {
 test('a change request is the question and what should change, or just the question', () => {
   assert.equal(changeRequest('Is this fine?', '  Use better wording  '), 'Is this fine?\n\nUse better wording');
   assert.equal(changeRequest('Is this fine?', '   '), 'Is this fine?');
+});
+
+test('asking from a line says which line, and which side of the change it was on', () => {
+  assert.equal(lineAsk('src/pay.ts', { side: 'RIGHT', line: 48 }, '  Why retry here?  '), 'On src/pay.ts, line 48:\n\nWhy retry here?');
+  assert.match(lineAsk('src/pay.ts', { side: 'LEFT', line: 12 }, 'Keep this check.'), /^On src\/pay\.ts, line 12 before this change:/);
 });
 
 test('a note counts as sent while its run is going or done, not after it failed or was stopped', () => {

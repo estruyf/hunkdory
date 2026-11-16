@@ -126,6 +126,11 @@ test('tabs come back between runs, at their place and without the data', () => {
   assert.equal(activeRoute(back)?.name, 'plan');
 });
 
+test('a tab on a page about the change comes back on that page', () => {
+  const saved = JSON.parse(JSON.stringify(savedTabs(navigate(home, { name: 'review', projectId: 'p', branch: 'a', understand: 'asked', story: true }))));
+  assert.deepEqual(saved.tabs, [{ name: 'review', projectId: 'p', branch: 'a', understand: 'asked', story: true }]);
+});
+
 test('a finished tab is not saved, and the active one falls back to the inbox', () => {
   const saved = savedTabs(navigate(navigate(home, plan('a')), done('a')));
   assert.deepEqual(saved.tabs, []);

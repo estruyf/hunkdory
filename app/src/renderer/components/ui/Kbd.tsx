@@ -21,12 +21,14 @@ interface KbdProps extends Omit<HTMLAttributes<HTMLElement>, 'children'> {
   tone?: KbdTone;
   /** Hidden in a narrow pane (two sessions side by side), where the button keeps only its label. */
   hideNarrow?: boolean;
+  /** Shown even with shortcut hints turned off in Settings, where the keys are the point, like the shortcuts sheet. */
+  always?: boolean;
 }
 
 /** A keyboard shortcut, as macOS writes it. Buttons show theirs with `Button`'s `kbd` or `shortcut` prop. */
-export function Kbd({ keys, shortcut, tone = 'default', hideNarrow = false, className = '', ...rest }: KbdProps) {
+export function Kbd({ keys, shortcut, tone = 'default', hideNarrow = false, always = false, className = '', ...rest }: KbdProps) {
   return (
-    <kbd className={`shrink-0 font-sans text-meta font-normal ${TONE[tone]} ${hideNarrow ? '@max-[860px]:hidden' : ''} ${className}`} {...rest}>
+    <kbd className={`shrink-0 font-sans text-meta font-normal ${TONE[tone]} ${hideNarrow ? '@max-[860px]:hidden' : ''} ${always ? '' : 'shortcut-hint'} ${className}`} {...rest}>
       {shortcutGlyphs(shortcut ? keysFor(shortcut) : (keys ?? ''))}
     </kbd>
   );

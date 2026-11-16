@@ -94,7 +94,7 @@ export function ShortcutsSheet({ ctx, onClose }: { ctx: ShortcutContext; onClose
       footerStart={<span className="text-meta text-muted">Faded rows don't work where you are right now.</span>}
       footer={
         <span className="flex items-center gap-1.5 text-meta text-muted">
-          <Kbd keys="Esc" /> close
+          <Kbd keys="Esc" always /> close
         </span>
       }
     >
