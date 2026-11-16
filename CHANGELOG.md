@@ -4,6 +4,10 @@ All notable changes to Hunkdory are listed here. Each release is also on the [re
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-16
+
+Open a review from a link, and get to know a change before its first step.
+
 ### Added
 
 - **Open a review from a link.** `hunkdory://review?repo=<folder>&branch=<branch>` opens that branch's review, from a script, a runbook or another app, whether Hunkdory is running or not. A folder that isn't a project yet offers to add it. A link only opens the review: nothing runs until you say so. See [How it works](docs/how-it-works.md#links).
@@ -40,6 +44,7 @@ The first release: a Mac app that tells a branch or pull request as a story, so 
 - **Updates from inside the app.** When there's a new version, a toast offers it, downloads it when you say so, and restarts when you're ready. **Settings › About** shows the status and can check by hand.
 - **Homebrew.** `brew install --cask estruyf/tap/hunkdory`.
 
-[Unreleased]: https://github.com/estruyf/hunkdory/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/estruyf/hunkdory/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/estruyf/hunkdory/releases/tag/v0.3.0
 [0.2.0]: https://github.com/estruyf/hunkdory/releases/tag/v0.2.0
 [0.1.0]: https://github.com/estruyf/hunkdory/releases/tag/v0.1.0
